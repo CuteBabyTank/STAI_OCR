@@ -674,6 +674,8 @@ def main() -> None:
         return
 
     if st.button("Process receipts", type="primary"):
+        from core import extract_receipt_validated, save_receipt, GuardrailError
+
         summaries: list[dict] = []
         item_frames: list[pd.DataFrame] = []
         progress = st.progress(0.0)
@@ -682,9 +684,18 @@ def main() -> None:
             with st.spinner(f"Reading {upload.name} ({i}/{len(uploads)})…"):
                 image_bytes = upload.getvalue()
                 left, right = st.columns([1, 1.4])
-                left.image(image_bytes, caption=upload.name, use_container_width=True)
+                left.image(image_bytes, caption=upload.name)
                 try:
-                    data = extract_receipt(image_bytes, model)
+                    # Guardrails (input/output validation) + LLMOps (MLflow) +
+                    # Structured Outputs (Pydantic) all happen inside this call.
+                    validated, review_reasons = extract_receipt_validated(
+                        image_bytes, model, content_type=upload.type
+                    )
+                    data = validated.model_dump()
+                except GuardrailError as exc:
+                    right.error(f"Rejected {upload.name}: {exc}")
+                    progress.progress(i / len(uploads))
+                    continue
                 except Exception as exc:  # noqa: BLE001 - report any failure in the UI
                     right.error(f"Couldn't read {upload.name}: {exc}")
                     progress.progress(i / len(uploads))
@@ -693,6 +704,19 @@ def main() -> None:
                 right.markdown(receipt_card_html(data, upload.name), unsafe_allow_html=True)
                 with right.expander("Raw extracted JSON"):
                     st.json(data)
+
+                # Disambiguation: surface anything that needs a human decision
+                # instead of silently filing it.
+                if review_reasons:
+                    right.warning(
+                        "Needs your review before this is treated as final:\n\n"
+                        + "\n".join(f"- {r}" for r in review_reasons)
+                    )
+
+                # Memory: persist every processed receipt to the SQLite ledger
+                # so it can be queried later (including across sessions).
+                save_receipt(validated, upload.name, flagged=bool(review_reasons))
+
                 summaries.append(header_row(data, upload.name))
                 item_frames.append(items_frame(data, upload.name))
             progress.progress(i / len(uploads))
@@ -737,6 +761,38 @@ def main() -> None:
             file_name=f"receipts_{stamp}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
+
+    # ----------------------------------------------------------------- #
+    # SQL Agent: ask the persistent ledger (across all past sessions)
+    # natural-language questions, e.g. "How much VAT did I pay this month?"
+    # ----------------------------------------------------------------- #
+    st.markdown('<div class="eyebrow">Ask your ledger</div>', unsafe_allow_html=True)
+    question = st.text_input(
+        "Ask a question about everything you've ever processed",
+        placeholder="e.g. What's my total spend at Jollibee?",
+    )
+    if st.button("Ask") and question.strip():
+        from core import ask_ledger, GuardrailError
+
+        try:
+            with st.spinner("Querying the ledger…"):
+                result = ask_ledger(question)
+            
+            # Display the natural language answer first
+            st.markdown(f"**Answer:** {result['answer']}")
+            
+            # Show the SQL query used (collapsed for advanced users)
+            with st.expander("SQL Query"):
+                st.code(result["sql"], language="sql")
+            
+            # Show the raw data rows if there are any
+            if result["rows"]:
+                with st.expander("Raw Data"):
+                    st.dataframe(pd.DataFrame(result["rows"]), use_container_width=True)
+        except GuardrailError as exc:
+            st.error(f"Refused: {exc}")
+        except Exception as exc:  # noqa: BLE001
+            st.error(f"Couldn't answer that: {exc}")
 
 
 if __name__ == "__main__":
