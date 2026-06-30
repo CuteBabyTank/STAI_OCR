@@ -113,7 +113,7 @@ docker-compose.yml       app + api + ollama + mlflow, wired together
 | API Endpoint | `api.py` — `POST /extract`, `GET /receipts`, `POST /ask` |
 | LLMOps Monitoring | every extraction and SQL-agent call wrapped in `mlflow.start_run()`, logging latency, params, token counts, and errors |
 | Dockerization | `Dockerfile` + `docker-compose.yml` |
-| Web UI | Streamlit drag-and-drop ledger (original) |
+
 
 ---
 
