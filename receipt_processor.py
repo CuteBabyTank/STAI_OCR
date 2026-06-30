@@ -61,6 +61,8 @@ HEADER_FIELDS = [
     "discount",
     "discount_type",
     "total_amount",
+    "cash",
+    "change",
     "currency",
 ]
 
@@ -93,8 +95,12 @@ STRICT RULES — follow exactly:
    null. If it does not print a VAT amount, vat_amount is null.
 9. "items" is ONLY for purchased products/services. Summary and tax lines —
    Subtotal, VATable Sales, VAT-Exempt Sales, Zero-Rated Sales, VAT, Discount,
-   Total — are NOT items. Put each of those in its own dedicated field and never
-   list it inside "items".
+   Total, Cash, Change — are NOT items. Put each in its own dedicated field and
+   never list it inside "items".
+10. Keep payment lines separate. total_amount is the "Total" / "Amount Due" line
+    ONLY. The cash the customer handed over ("CASH", "TENDERED", "AMOUNT PAID")
+    goes in "cash". The money returned ("CHANGE") goes in "change". Never put the
+    cash or the change into total_amount.
 
 Return ONLY a single valid JSON object — no prose, no markdown fences. Use these
 exact keys. Use null when a value is not present. Money values are plain numbers
@@ -121,7 +127,9 @@ exact keys. Use null when a value is not present. Money values are plain numbers
   "vat_amount": number,            // EXACT printed VAT figure; null if not printed. Never computed as 12%.
   "discount": number,              // total discount amount (e.g. Senior Citizen / PWD)
   "discount_type": string,         // e.g. "Senior Citizen", "PWD", "Promo", or null
-  "total_amount": number,          // total amount due / amount paid
+  "total_amount": number,          // the "Total" / "Amount Due" line. NOT cash, NOT change.
+  "cash": number,                  // cash tendered / amount paid by the customer ("CASH", "TENDERED")
+  "change": number,                // change given back to the customer ("CHANGE")
   "currency": string               // e.g. "PHP"
 }
 
@@ -174,6 +182,15 @@ _SUMMARY_LABELS = {
     "lessdiscount": "discount",
     "scdiscount": "discount",
     "pwddiscount": "discount",
+    "cash": "cash",
+    "cashtendered": "cash",
+    "amounttendered": "cash",
+    "tendered": "cash",
+    "amountpaid": "cash",
+    "cashpayment": "cash",
+    "change": "change",
+    "changedue": "change",
+    "amountchange": "change",
 }
 
 
@@ -191,6 +208,60 @@ def _remap_summary_lines(data: dict) -> dict:
             continue  # drop this line from items — it's not a product
         kept.append(item)
     data["items"] = kept
+    return data
+
+
+def _fix_payment_fields(data: dict) -> dict:
+    """Correct total_amount / cash / change when the model misassigned them.
+
+    Receipts without an explicit "Total" line (only Subtotal / Cash / Change)
+    often make the model rotate these three numbers. We re-derive the correct
+    label for each *already-OCR'd* number using two facts that are always true:
+      • amount due == subtotal − discount
+      • cash − change == amount due  (so cash ≥ change)
+    We only reassign numbers that were actually read off the receipt; nothing is
+    invented. If we can't resolve it cleanly, values are left as-is and the
+    reconciliation flag stays on for manual review.
+    """
+    total = _num(data.get("total_amount"))
+    cash = _num(data.get("cash"))
+    change = _num(data.get("change"))
+
+    # If the cash-payment identity already holds, the payments are consistent.
+    if (
+        total is not None and cash is not None and change is not None
+        and cash + 0.5 >= change and abs(cash - change - total) <= 0.5
+    ):
+        return data
+
+    # Anchor the amount due to the subtotal (minus any discount), else item sum.
+    subtotal = _num(data.get("subtotal"))
+    discount = _num(data.get("discount")) or 0.0
+    if subtotal is not None:
+        due = round(subtotal - discount, 2)
+    else:
+        amounts = [a for a in (_num(i.get("amount")) for i in data.get("items") or [])
+                   if a is not None]
+        due = round(sum(amounts), 2) if amounts else None
+    if due is None:
+        return data  # no reliable anchor — leave it for manual review
+
+    # Candidate numbers actually OCR'd across the three payment fields.
+    candidates = [v for v in (total, cash, change) if v is not None]
+
+    # cash is a candidate >= due whose (cash - due) also matches an OCR'd number
+    # (that matching number is the printed change).
+    for c in sorted(candidates, reverse=True):
+        if c + 0.5 < due:
+            continue
+        ch = round(c - due, 2)
+        if any(abs(ch - v) <= 0.5 for v in candidates):
+            data["total_amount"], data["cash"], data["change"] = due, c, ch
+            return data
+
+    # Couldn't reassign cleanly; at least trust the subtotal for the amount due.
+    if total is None or abs(total - due) > max(1.0, due * 0.02):
+        data["total_amount"] = due
     return data
 
 
@@ -331,6 +402,23 @@ def receipt_card_html(data: dict, source: str) -> str:
         for label, value in rows
     )
 
+    # Payment lines (cash tendered / change) shown under the total, when present.
+    pay = []
+    if _num(data.get("cash")) is not None:
+        pay.append(("Cash", _peso(data.get("cash"))))
+    if _num(data.get("change")) is not None:
+        pay.append(("Change", _peso(data.get("change"))))
+    pay_html = (
+        '<div class="rcpt-pay">'
+        + "".join(
+            f'<div class="rcpt-line"><span>{label}</span><span class="fig">{value}</span></div>'
+            for label, value in pay
+        )
+        + "</div>"
+        if pay
+        else ""
+    )
+
     warnings = reconcile(data)
     if warnings:
         items = "".join(f"<li>{html.escape(w)}</li>" for w in warnings)
@@ -353,6 +441,7 @@ def receipt_card_html(data: dict, source: str) -> str:
       <div class="rcpt-total">
         <span>Total due</span><span class="fig">{_peso(data.get('total_amount'))}</span>
       </div>
+      {pay_html}
       {flag}
       <div class="rcpt-src">{_txt(source)}</div>
     </div>
@@ -439,6 +528,8 @@ html, body, [class*="css"]{ font-family:'Inter',sans-serif; color:var(--ink); }
 .rcpt-items{ padding-bottom:8px; margin-bottom:8px; border-bottom:1px dashed var(--line); }
 .rcpt-items .rcpt-line span:first-child{ color:var(--ink); }
 .rcpt-qty{ color:var(--slate); font-family:'IBM Plex Mono',monospace; font-size:.78rem; }
+.rcpt-pay{ margin-top:8px; padding-top:8px; border-top:1px dashed var(--line); }
+.rcpt-pay .rcpt-line span:first-child{ color:var(--slate); }
 .rcpt-total{
   display:flex; justify-content:space-between; align-items:baseline;
   margin-top:12px; padding-top:12px; border-top:2px solid var(--ink);
