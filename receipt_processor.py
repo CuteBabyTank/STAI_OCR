@@ -109,6 +109,12 @@ STRICT RULES — follow exactly:
 12. vendor_tin is the seller's "VAT REG TIN" / "TIN" printed in the header block
     at the top. Ignore blank "TIN: ____" form fields and any TIN printed in the
     footer of a different company.
+13. For a line like "Peri-Peri Chicken  2 @ 270.00": description is just the item
+    name ("Peri-Peri Chicken"). Do NOT repeat the name and do NOT put the "2 @ 270.00"
+    text in the description. Put the line's total amount in "amount", and the
+    quantity ("2") in "quantity".
+14. List each printed line item exactly once. Do NOT output the same item as two
+    separate rows.
 
 Return ONLY a single valid JSON object — no prose, no markdown fences. Use these
 exact keys. Use null when a value is not present. Money values are plain numbers
@@ -159,6 +165,68 @@ def _coerce_json(text: str) -> dict:
         if start != -1 and end != -1 and end > start:
             text = text[start : end + 1]
     return json.loads(text)
+
+
+def _clean_item_description(desc) -> str | None:
+    """Tidy a line-item description: drop the "qty @ price" notation and any
+    doubled name. e.g. "Peri-Peri Chicken Peri-Peri Chicken 2 @ ₱270.00" -> "Peri-Peri Chicken".
+    """
+    if desc is None:
+        return None
+    s = str(desc).strip()
+    # Strip a trailing "qty @ price" / "@ price" / "qty @" / "@" / "x2" notation.
+    s = re.sub(r"\s*\d+\s*@\s*[₱P]?\s*[\d.,]+\s*$", "", s)   # "2 @ 270.00"
+    s = re.sub(r"\s*@\s*[₱P]?\s*[\d.,]+\s*$", "", s)          # "@ 270.00"
+    s = re.sub(r"\s*\d+\s*@\s*$", "", s)                       # "2 @"
+    s = re.sub(r"\s*@\s*$", "", s)                             # "@"
+    s = re.sub(r"\s*[xX]\s*\d+\s*$", "", s)                    # "x2"
+    s = s.strip(" -·•\t")
+    # Collapse an exactly doubled phrase ("A B A B" -> "A B").
+    words = s.split()
+    n = len(words)
+    if n >= 2 and n % 2 == 0 and words[: n // 2] == words[n // 2 :]:
+        s = " ".join(words[: n // 2])
+    s = s.strip()
+    return s or (str(desc).strip() or None)
+
+
+def _clean_items(data: dict) -> dict:
+    """Clean every line item's description in place (qty @ price + de-dup)."""
+    for item in data.get("items") or []:
+        if "description" in item:
+            item["description"] = _clean_item_description(item.get("description"))
+    return data
+
+
+def _dedupe_items(data: dict) -> dict:
+    """Drop duplicate line items the model emitted for the same product, e.g. one
+    "Peri-Peri Chicken ₱540" row plus an empty "Peri-Peri Chicken" row. Items with
+    the same description are merged: the row carrying an amount wins, exact repeats
+    collapse to one. Two same-name rows with *different* amounts are kept (could be
+    genuinely separate lines). Blank descriptions are always kept (e.g. modifiers).
+    """
+    result: list[dict] = []
+    seen: dict[str, int] = {}
+    for item in data.get("items") or []:
+        key = re.sub(r"[^a-z0-9]", "", str(item.get("description") or "").lower())
+        amt = _num(item.get("amount"))
+        if not key:
+            result.append(item)
+            continue
+        if key in seen:
+            existing = result[seen[key]]
+            ex_amt = _num(existing.get("amount"))
+            if ex_amt is None and amt is not None:
+                result[seen[key]] = item  # replace the empty row with the real one
+            elif amt is None or (ex_amt is not None and abs(ex_amt - amt) <= 0.01):
+                continue  # amount-less or exact duplicate -> drop
+            else:
+                result.append(item)  # different amount -> keep as a distinct line
+        else:
+            seen[key] = len(result)
+            result.append(item)
+    data["items"] = result
+    return data
 
 
 # Summary/tax lines the model sometimes mis-files as "items". Maps a normalized
@@ -299,7 +367,9 @@ def extract_receipt(image_bytes: bytes, model: str) -> dict:
         raise ValueError(
             f"Could not parse model output as JSON.\n\nRaw output:\n{content}"
         ) from exc
-    return _fix_payment_fields(_remap_summary_lines(data))
+    return _fix_payment_fields(
+        _dedupe_items(_remap_summary_lines(_clean_items(data)))
+    )
 
 
 # --------------------------------------------------------------------------- #
