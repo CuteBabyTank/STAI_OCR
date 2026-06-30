@@ -53,6 +53,7 @@ HEADER_FIELDS = [
     "vendor_address",
     "receipt_number",
     "receipt_date",
+    "subtotal",
     "vatable_sales",
     "vat_exempt_sales",
     "zero_rated_sales",
@@ -63,39 +64,69 @@ HEADER_FIELDS = [
     "currency",
 ]
 
-EXTRACTION_PROMPT = """You are an expert Philippine bookkeeping assistant reading a sales
-receipt or official receipt (OR) / sales invoice (SI).
+EXTRACTION_PROMPT = """You are a careful transcription tool reading a Philippine sales
+receipt or official receipt (OR) / sales invoice (SI). Your only job is to copy
+down values that are actually printed on the receipt — you are transcribing, not
+interpreting.
 
-Extract the data and return ONLY a single valid JSON object — no prose, no
-markdown fences. Use these exact keys. Use null when a value is not present.
-All money values must be plain numbers (no currency symbols, no commas).
+STRICT RULES — follow exactly:
+1. ONLY record a value if it is clearly printed on the receipt. If a field is not
+   printed, missing, or unreadable, return null. Never guess.
+2. NEVER calculate, infer, derive, estimate, round, or "fix" a value. Do not add
+   numbers up. Do not compute VAT or totals yourself. Copy only what is shown.
+3. Copy every digit EXACTLY as printed, including the decimal point. "120" stays
+   120, "120.00" stays 120.00, "1,250.50" becomes 1250.50. Do not move the decimal
+   point or drop/add zeros.
+4. If you are unsure whether a number is, say, 120 or 720, return null rather than
+   guessing.
+5. Match each amount to the correct field by its printed label on the receipt.
+6. vendor_tin must be null unless a number is explicitly labeled "TIN" or
+   "VAT REG TIN". Never put the OR / receipt number in vendor_tin.
+7. For a line item, only fill quantity or unit_price if that line actually prints
+   them. If a line shows just a description and one amount, set quantity and
+   unit_price to null and put the figure in amount. Never copy a value from one
+   line item onto another.
+8. vatable_sales and vat_amount must be the exact numbers printed next to those
+   labels on the receipt ("VATable Sales", "VAT", "VAT Amount", "12% VAT", etc.).
+   Do NOT compute VAT as 12% of anything. Do NOT derive vatable_sales from the
+   total. If the receipt does not print a VATable Sales figure, vatable_sales is
+   null. If it does not print a VAT amount, vat_amount is null.
+9. "items" is ONLY for purchased products/services. Summary and tax lines —
+   Subtotal, VATable Sales, VAT-Exempt Sales, Zero-Rated Sales, VAT, Discount,
+   Total — are NOT items. Put each of those in its own dedicated field and never
+   list it inside "items".
+
+Return ONLY a single valid JSON object — no prose, no markdown fences. Use these
+exact keys. Use null when a value is not present. Money values are plain numbers
+(no currency symbols, no commas).
 
 {
   "vendor_name": string,
-  "vendor_tin": string,            // Taxpayer Identification Number, format like 000-000-000-000
+  "vendor_tin": string,            // only if a value is labeled "TIN"/"VAT REG TIN"; else null. NOT the OR/receipt no.
   "vendor_address": string,
   "receipt_number": string,        // OR / SI / receipt no.
   "receipt_date": string,          // YYYY-MM-DD if possible
   "items": [
     {
-      "description": string,
-      "quantity": number,
-      "unit_price": number,
-      "amount": number
+      "description": string,       // the item name/description as printed
+      "quantity": number,          // only if a quantity is printed for this line; else null
+      "unit_price": number,        // only if a unit/per-item price is printed for this line; else null
+      "amount": number             // the line total/amount printed for this item
     }
   ],
-  "vatable_sales": number,         // VATable sales (net of VAT)
+  "subtotal": number,              // the subtotal / gross amount line, before VAT and discounts
+  "vatable_sales": number,         // EXACT printed "VATable Sales" figure; null if not printed. Never derived.
   "vat_exempt_sales": number,      // VAT-exempt sales
   "zero_rated_sales": number,      // Zero-rated sales
-  "vat_amount": number,            // output VAT shown on the receipt
+  "vat_amount": number,            // EXACT printed VAT figure; null if not printed. Never computed as 12%.
   "discount": number,              // total discount amount (e.g. Senior Citizen / PWD)
   "discount_type": string,         // e.g. "Senior Citizen", "PWD", "Promo", or null
   "total_amount": number,          // total amount due / amount paid
   "currency": string               // e.g. "PHP"
 }
 
-Read carefully. If the receipt shows a VAT amount, copy it exactly. Do not
-invent values. Return the JSON object only."""
+Remember: transcribe only what is printed. A missing value must be null, never a
+guess or a calculation. Return the JSON object only."""
 
 
 # --------------------------------------------------------------------------- #
@@ -112,6 +143,55 @@ def _coerce_json(text: str) -> dict:
         if start != -1 and end != -1 and end > start:
             text = text[start : end + 1]
     return json.loads(text)
+
+
+# Summary/tax lines the model sometimes mis-files as "items". Maps a normalized
+# label (lowercased, alphanumerics only) to the field it really belongs in.
+_SUMMARY_LABELS = {
+    "vatablesales": "vatable_sales",
+    "vatable": "vatable_sales",
+    "vatsales": "vatable_sales",
+    "salesvatable": "vatable_sales",
+    "vatexemptsales": "vat_exempt_sales",
+    "vatexempt": "vat_exempt_sales",
+    "exemptsales": "vat_exempt_sales",
+    "zeroratedsales": "zero_rated_sales",
+    "zerorated": "zero_rated_sales",
+    "vat": "vat_amount",
+    "outputvat": "vat_amount",
+    "vatamount": "vat_amount",
+    "12vat": "vat_amount",
+    "vat12": "vat_amount",
+    "vatpayable": "vat_amount",
+    "subtotal": "subtotal",
+    "amountnetofvat": "subtotal",
+    "total": "total_amount",
+    "totaldue": "total_amount",
+    "amountdue": "total_amount",
+    "totalamountdue": "total_amount",
+    "grandtotal": "total_amount",
+    "discount": "discount",
+    "lessdiscount": "discount",
+    "scdiscount": "discount",
+    "pwddiscount": "discount",
+}
+
+
+def _remap_summary_lines(data: dict) -> dict:
+    """Move OCR'd summary/tax lines the model mis-filed under "items" into their
+    proper fields. This relocates already-transcribed numbers — it never computes
+    or invents a value."""
+    kept = []
+    for item in data.get("items") or []:
+        key = re.sub(r"[^a-z0-9]", "", str(item.get("description", "")).lower())
+        field = _SUMMARY_LABELS.get(key)
+        if field and _num(item.get("amount")) is not None:
+            if _num(data.get(field)) is None:  # don't overwrite a real value
+                data[field] = item.get("amount")
+            continue  # drop this line from items — it's not a product
+        kept.append(item)
+    data["items"] = kept
+    return data
 
 
 def extract_receipt(image_bytes: bytes, model: str) -> dict:
@@ -135,11 +215,12 @@ def extract_receipt(image_bytes: bytes, model: str) -> dict:
     )
     content = response["message"]["content"]
     try:
-        return _coerce_json(content)
+        data = _coerce_json(content)
     except json.JSONDecodeError as exc:
         raise ValueError(
             f"Could not parse model output as JSON.\n\nRaw output:\n{content}"
         ) from exc
+    return _remap_summary_lines(data)
 
 
 # --------------------------------------------------------------------------- #
@@ -222,7 +303,21 @@ def _txt(value) -> str:
 
 def receipt_card_html(data: dict, source: str) -> str:
     """Render one extracted receipt as a perforated thermal-receipt card."""
+    # Line items, as printed (description + qty/price hint + amount).
+    item_lines = []
+    for it in data.get("items") or []:
+        qty, unit = _num(it.get("quantity")), _num(it.get("unit_price"))
+        hint = f' <span class="rcpt-qty">{qty:g} × {_peso(unit)}</span>' if qty and unit else ""
+        item_lines.append(
+            f'<div class="rcpt-line"><span>{_txt(it.get("description"))}{hint}</span>'
+            f'<span class="fig">{_peso(it.get("amount"))}</span></div>'
+        )
+    items_html = (
+        f'<div class="rcpt-items">{"".join(item_lines)}</div>' if item_lines else ""
+    )
+
     rows = [
+        ("Subtotal", _peso(data.get("subtotal"))),
         ("VATable sales", _peso(data.get("vatable_sales"))),
         ("VAT-exempt sales", _peso(data.get("vat_exempt_sales"))),
         ("Zero-rated sales", _peso(data.get("zero_rated_sales"))),
@@ -231,7 +326,7 @@ def receipt_card_html(data: dict, source: str) -> str:
     discount_label = _txt(data.get("discount_type")) if data.get("discount_type") else "Discount"
     rows.append((discount_label, _peso(data.get("discount"))))
 
-    body = "".join(
+    body = items_html + "".join(
         f'<div class="rcpt-line"><span>{label}</span><span class="fig">{value}</span></div>'
         for label, value in rows
     )
@@ -339,8 +434,11 @@ html, body, [class*="css"]{ font-family:'Inter',sans-serif; color:var(--ink); }
   border-top:1px dashed var(--line); border-bottom:1px dashed var(--line);
   padding:9px 0; margin:12px 0;
 }
-.rcpt-line{ display:flex; justify-content:space-between; padding:4px 0; font-size:.92rem; }
+.rcpt-line{ display:flex; justify-content:space-between; gap:12px; padding:4px 0; font-size:.92rem; }
 .rcpt-line span:first-child{ color:var(--slate); }
+.rcpt-items{ padding-bottom:8px; margin-bottom:8px; border-bottom:1px dashed var(--line); }
+.rcpt-items .rcpt-line span:first-child{ color:var(--ink); }
+.rcpt-qty{ color:var(--slate); font-family:'IBM Plex Mono',monospace; font-size:.78rem; }
 .rcpt-total{
   display:flex; justify-content:space-between; align-items:baseline;
   margin-top:12px; padding-top:12px; border-top:2px solid var(--ink);
