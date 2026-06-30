@@ -2,19 +2,21 @@
 STAI_OCR — Philippine Receipt Processor
 =======================================
 
-Drag-and-drop a receipt image; a local vision LLM (Ollama `llama3.2-vision`)
+Drag-and-drop a receipt image; a local vision LLM (Ollama `minicpm-v`)
 reads it and extracts the fields needed for Philippine accounting/BIR
 bookkeeping (TIN, line items, price, discount, VAT, totals). Each receipt is
-reconciled (12% VAT vs VATable sales, line items vs total), shown on an
-editable ledger, and exportable to CSV / Excel.
+reconciled (line items vs total), shown on an editable ledger, and
+exportable to CSV / Excel.
 
 Setup (run once, in a terminal or notebook cell):
 -------------------------------------------------
     %pip install streamlit ollama pandas openpyxl pillow --quiet
-    !ollama pull llama3.2-vision        # vision model (reads the image)
+    !ollama pull minicpm-v              # vision/OCR model (reads the image)
 
-    # NOTE: llama3.2:3b is TEXT-ONLY and cannot read images. This app uses
-    # the vision variant `llama3.2-vision` to read the receipt directly.
+    # NOTE: llama3.2:3b is TEXT-ONLY and cannot read images. `minicpm-v` is a
+    # vision model tuned for OCR; in testing it read receipt digits far more
+    # accurately than llava. (llama3.2-vision needs a newer Ollama engine than
+    # the Homebrew build provides — it fails with "unknown architecture mllama".)
 
 Run the app:
 ------------
@@ -43,8 +45,7 @@ except ImportError:  # pragma: no cover - surfaced in the UI instead
 # --------------------------------------------------------------------------- #
 # Configuration
 # --------------------------------------------------------------------------- #
-DEFAULT_MODEL = "llama3.2-vision"
-PH_VAT_RATE = 0.12  # 12% standard VAT in the Philippines
+DEFAULT_MODEL = "minicpm-v"
 
 HEADER_FIELDS = [
     "vendor_name",
@@ -86,7 +87,7 @@ All money values must be plain numbers (no currency symbols, no commas).
   "vatable_sales": number,         // VATable sales (net of VAT)
   "vat_exempt_sales": number,      // VAT-exempt sales
   "zero_rated_sales": number,      // Zero-rated sales
-  "vat_amount": number,            // 12% output VAT
+  "vat_amount": number,            // output VAT shown on the receipt
   "discount": number,              // total discount amount (e.g. Senior Citizen / PWD)
   "discount_type": string,         // e.g. "Senior Citizen", "PWD", "Promo", or null
   "total_amount": number,          // total amount due / amount paid
@@ -129,7 +130,8 @@ def extract_receipt(image_bytes: bytes, model: str) -> dict:
                 "images": [image_bytes],
             }
         ],
-        options={"temperature": 0},
+        format="json",  # constrain output to valid JSON (avoids rambling/truncation)
+        options={"temperature": 0, "num_predict": 1024},
     )
     content = response["message"]["content"]
     try:
@@ -159,16 +161,6 @@ def _num(value) -> float | None:
 def reconcile(data: dict) -> list[str]:
     """Return human-readable warnings when the receipt's math doesn't add up."""
     warnings: list[str] = []
-
-    vat = _num(data.get("vat_amount"))
-    vatable = _num(data.get("vatable_sales"))
-    if vat is not None and vatable and vatable > 0:
-        expected = round(vatable * PH_VAT_RATE, 2)
-        if abs(expected - vat) > 0.5:
-            warnings.append(
-                f"VAT check: 12% of VATable sales is ₱{expected:,.2f}, "
-                f"but the receipt states ₱{vat:,.2f}."
-            )
 
     items = data.get("items") or []
     amounts = [a for a in (_num(i.get("amount")) for i in items) if a is not None]
@@ -234,7 +226,7 @@ def receipt_card_html(data: dict, source: str) -> str:
         ("VATable sales", _peso(data.get("vatable_sales"))),
         ("VAT-exempt sales", _peso(data.get("vat_exempt_sales"))),
         ("Zero-rated sales", _peso(data.get("zero_rated_sales"))),
-        (f"Output VAT ({PH_VAT_RATE:.0%})", _peso(data.get("vat_amount"))),
+        ("Output VAT", _peso(data.get("vat_amount"))),
     ]
     discount_label = _txt(data.get("discount_type")) if data.get("discount_type") else "Discount"
     rows.append((discount_label, _peso(data.get("discount"))))
@@ -376,7 +368,7 @@ def render_hero() -> None:
           <div class="hero-eyebrow">BIR-ready bookkeeping · Philippines</div>
           <h1 class="hero-title">Receipt&nbsp;Ledger</h1>
           <p class="hero-sub">Drop a receipt. A local vision model reads the TIN,
-          line items, discounts and 12% VAT, reconciles the math, and hands you a
+          line items, discounts and VAT, reconciles the totals, and hands you a
           clean ledger to export.</p>
         </div>
         """,
@@ -401,7 +393,7 @@ def main() -> None:
             f"- `ollama pull {DEFAULT_MODEL}` done\n"
             "- Receipts as PNG / JPG / WEBP"
         )
-        st.caption(f"Reconciliation uses the {PH_VAT_RATE:.0%} standard VAT rate.")
+        st.caption("Reconciliation checks that line items add up to the total.")
 
     st.markdown('<div class="eyebrow">Feed a receipt</div>', unsafe_allow_html=True)
     uploads = st.file_uploader(
