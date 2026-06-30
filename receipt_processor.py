@@ -291,7 +291,7 @@ def extract_receipt(image_bytes: bytes, model: str) -> dict:
         raise ValueError(
             f"Could not parse model output as JSON.\n\nRaw output:\n{content}"
         ) from exc
-    return _remap_summary_lines(data)
+    return _fix_payment_fields(_remap_summary_lines(data))
 
 
 # --------------------------------------------------------------------------- #
