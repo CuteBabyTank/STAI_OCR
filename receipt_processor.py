@@ -101,6 +101,14 @@ STRICT RULES — follow exactly:
     ONLY. The cash the customer handed over ("CASH", "TENDERED", "AMOUNT PAID")
     goes in "cash". The money returned ("CHANGE") goes in "change". Never put the
     cash or the change into total_amount.
+11. The tax breakdown is often a small table: a row of headers
+    (VATable | 12% VAT | VAT Exempt | Zero-Rated) with a row of numbers directly
+    beneath. Read the number UNDER each header into its field: the value under
+    "VATable" -> vatable_sales, under "12% VAT"/"VAT" -> vat_amount, under
+    "VAT Exempt" -> vat_exempt_sales, under "Zero-Rated"/"Z-Rated" -> zero_rated_sales.
+12. vendor_tin is the seller's "VAT REG TIN" / "TIN" printed in the header block
+    at the top. Ignore blank "TIN: ____" form fields and any TIN printed in the
+    footer of a different company.
 
 Return ONLY a single valid JSON object — no prose, no markdown fences. Use these
 exact keys. Use null when a value is not present. Money values are plain numbers
