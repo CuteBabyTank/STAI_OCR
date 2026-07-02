@@ -12,18 +12,26 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    # Pulls are best-effort: a failed download (e.g. no internet in the container)
+    # must NOT kill the server, or dependent containers lose the `ollama` hostname.
+    # `ollama serve` stays in the foreground via `wait`; each pull is isolated with
+    # `|| true` so the container keeps serving whatever models are already cached.
     entrypoint: >
       sh -c "
       ollama serve &
-      sleep 5 &&
-      (ollama list | grep -q minicpm-v || ollama pull minicpm-v) &&
-      (ollama list | grep -q llama3.2:3b || ollama pull llama3.2:3b) &&
+      sleep 5;
+      (ollama list | grep -q minicpm-v || ollama pull minicpm-v) || true;
+      (ollama list | grep -q llama3.2:3b || ollama pull llama3.2:3b) || true;
+      (ollama list | grep -q nomic-embed-text || ollama pull nomic-embed-text) || true;
       wait
       "
 
   web:
     build: .
-    command: streamlit run receipt_processor.py --server.port=8501 --server.address=0.0.0.0 --server.enableXsrfProtection=false
+    # fileWatcherType=poll: Windows bind mounts don't deliver inotify events, so
+    # the default watcher never sees edits. Polling picks them up; runOnSave then
+    # auto-reruns. Without this, code changes require a container restart.
+    command: streamlit run receipt_processor.py --server.port=8501 --server.address=0.0.0.0 --server.enableXsrfProtection=false --server.fileWatcherType=poll --server.runOnSave=true
     ports:
       - "8502:8501"
     depends_on:
@@ -54,7 +62,7 @@ services:
       - .:/app
 
   mlflow:
-    image: ghcr.io/mlflow/mlflow:v2.16.2
+    image: ghcr.io/mlflow/mlflow:v3.14.0
     command: >
       mlflow ui
       --host 0.0.0.0

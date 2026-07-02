@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# Generated data stores (memory + RAG vectors) — recreated on first run
+ledger.db
+ledger.db-journal
+
+# MLflow tracking
+mlflow.db
+mlruns/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

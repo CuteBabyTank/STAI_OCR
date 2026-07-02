@@ -1,17 +1,18 @@
 """
-STAI_OCR — Philippine Receipt Processor
-=======================================
+STAI_OCR — Receipt Processor & Ledger Agent
+===========================================
 
-Drag-and-drop a receipt image; a local vision LLM (Ollama `minicpm-v`)
-reads it and extracts the fields needed for Philippine accounting/BIR
-bookkeeping (TIN, line items, price, discount, VAT, totals). Each receipt is
-reconciled (line items vs total), shown on an editable ledger, and
-exportable to CSV / Excel.
+Drag-and-drop any receipt image (restaurant, cafe, grocery, retail, pharmacy);
+a local vision LLM (Ollama `minicpm-v`) reads it and extracts the useful fields
+(merchant, tax ID, line items, price, discount, tax/VAT, totals). Each receipt is
+reconciled (line items vs total), shown on an editable ledger, exportable to
+CSV / Excel, and indexed for a natural-language ReAct agent ("Ask your receipts").
 
 Setup (run once, in a terminal or notebook cell):
 -------------------------------------------------
-    %pip install streamlit ollama pandas openpyxl pillow --quiet
+    %pip install streamlit ollama pandas numpy openpyxl pillow --quiet
     !ollama pull minicpm-v              # vision/OCR model (reads the image)
+    !ollama pull nomic-embed-text       # embeddings for semantic search (RAG)
 
     # NOTE: llama3.2:3b is TEXT-ONLY and cannot read images. `minicpm-v` is a
     # vision model tuned for OCR; in testing it read receipt digits far more
@@ -66,55 +67,63 @@ HEADER_FIELDS = [
     "currency",
 ]
 
-EXTRACTION_PROMPT = """You are a careful transcription tool reading a Philippine sales
-receipt or official receipt (OR) / sales invoice (SI). Your only job is to copy
-down values that are actually printed on the receipt — you are transcribing, not
-interpreting.
+EXTRACTION_PROMPT = """You are a careful transcription tool reading a purchase
+receipt or invoice — the kind you get at a restaurant, cafe, grocery, retail
+store, pharmacy, or any other merchant. Receipts come in every layout and from
+any country; some print a tax breakdown or a merchant tax ID, many do not. Your
+only job is to copy down values that are actually printed on the receipt — you
+are transcribing, not interpreting.
 
 STRICT RULES — follow exactly:
 1. ONLY record a value if it is clearly printed on the receipt. If a field is not
    printed, missing, or unreadable, return null. Never guess.
 2. NEVER calculate, infer, derive, estimate, round, or "fix" a value. Do not add
-   numbers up. Do not compute VAT or totals yourself. Copy only what is shown.
+   numbers up. Do not compute tax or totals yourself. Copy only what is shown.
 3. Copy every digit EXACTLY as printed, including the decimal point. "120" stays
    120, "120.00" stays 120.00, "1,250.50" becomes 1250.50. Do not move the decimal
    point or drop/add zeros.
 4. If you are unsure whether a number is, say, 120 or 720, return null rather than
    guessing.
 5. Match each amount to the correct field by its printed label on the receipt.
-6. vendor_tin must be null unless a number is explicitly labeled "TIN" or
-   "VAT REG TIN". Never put the OR / receipt number in vendor_tin.
+6. vendor_tin is the merchant's tax registration number (labeled "TIN",
+   "VAT REG TIN", "GST No", "Tax ID", "ABN", "EIN", etc.). Leave it null unless a
+   number is explicitly labeled as a tax ID. Never put the receipt/invoice number
+   in vendor_tin.
 7. For a line item, only fill quantity or unit_price if that line actually prints
    them. If a line shows just a description and one amount, set quantity and
    unit_price to null and put the figure in amount. Never copy a value from one
    line item onto another.
-8. vatable_sales and vat_amount must be the exact numbers printed next to those
-   labels on the receipt ("VATable Sales", "VAT", "VAT Amount", "12% VAT", etc.).
-   Do NOT compute VAT as 12% of anything. Do NOT derive vatable_sales from the
-   total. If the receipt does not print a VATable Sales figure, vatable_sales is
-   null. If it does not print a VAT amount, vat_amount is null.
+8. vatable_sales and vat_amount capture any printed tax breakdown ("VAT", "GST",
+   "Sales Tax", "Tax", "VATable Sales", "12% VAT", etc.). Copy the EXACT numbers
+   printed next to those labels. Do NOT compute tax as a percentage of anything.
+   Do NOT derive vatable_sales from the total. If the receipt does not print a
+   taxable-sales figure, vatable_sales is null. If it prints no tax amount,
+   vat_amount is null.
 9. "items" is ONLY for purchased products/services. Summary and tax lines —
-   Subtotal, VATable Sales, VAT-Exempt Sales, Zero-Rated Sales, VAT, Discount,
-   Total, Cash, Change — are NOT items. Put each in its own dedicated field and
-   never list it inside "items".
+   Subtotal, Taxable/VATable Sales, Tax-Exempt Sales, Zero-Rated Sales, VAT/Tax,
+   Discount, Total, Cash, Change — are NOT items. Put each in its own dedicated
+   field and never list it inside "items".
 10. Keep payment lines separate. total_amount is the "Total" / "Amount Due" line
     ONLY. The cash the customer handed over ("CASH", "TENDERED", "AMOUNT PAID")
     goes in "cash". The money returned ("CHANGE") goes in "change". Never put the
     cash or the change into total_amount.
-11. The tax breakdown is often a small table: a row of headers
-    (VATable | 12% VAT | VAT Exempt | Zero-Rated) with a row of numbers directly
-    beneath. Read the number UNDER each header into its field: the value under
-    "VATable" -> vatable_sales, under "12% VAT"/"VAT" -> vat_amount, under
-    "VAT Exempt" -> vat_exempt_sales, under "Zero-Rated"/"Z-Rated" -> zero_rated_sales.
-12. vendor_tin is the seller's "VAT REG TIN" / "TIN" printed in the header block
-    at the top. Ignore blank "TIN: ____" form fields and any TIN printed in the
-    footer of a different company.
+11. A tax breakdown is often a small table: a row of headers
+    (VATable | Tax | Exempt | Zero-Rated) with a row of numbers directly beneath.
+    Read the number UNDER each header into its field: the value under
+    "VATable"/"Taxable" -> vatable_sales, under "VAT"/"Tax"/"GST" -> vat_amount,
+    under "Exempt" -> vat_exempt_sales, under "Zero-Rated"/"Z-Rated" -> zero_rated_sales.
+12. vendor_tin is the seller's tax ID printed in the header block at the top.
+    Ignore blank "TIN: ____" form fields and any tax ID printed in the footer of a
+    different company.
 13. For a line like "Peri-Peri Chicken  2 @ 270.00": description is just the item
     name ("Peri-Peri Chicken"). Do NOT repeat the name and do NOT put the "2 @ 270.00"
     text in the description. Put the line's total amount in "amount", and the
     quantity ("2") in "quantity".
 14. List each printed line item exactly once. Do NOT output the same item as two
     separate rows.
+15. currency is the currency actually shown on the receipt — read it from the
+    symbol or code printed next to the amounts (₱/PHP, $/USD, €/EUR, £/GBP, ¥/JPY,
+    ₹/INR, etc.). If no currency is indicated, return null.
 
 Return ONLY a single valid JSON object — no prose, no markdown fences. Use these
 exact keys. Use null when a value is not present. Money values are plain numbers
@@ -122,9 +131,9 @@ exact keys. Use null when a value is not present. Money values are plain numbers
 
 {
   "vendor_name": string,
-  "vendor_tin": string,            // only if a value is labeled "TIN"/"VAT REG TIN"; else null. NOT the OR/receipt no.
+  "vendor_tin": string,            // merchant tax ID if labeled (TIN/GST/Tax ID/etc.); else null. NOT the receipt no.
   "vendor_address": string,
-  "receipt_number": string,        // OR / SI / receipt no.
+  "receipt_number": string,        // receipt / invoice / OR / SI no.
   "receipt_date": string,          // YYYY-MM-DD if possible
   "items": [
     {
@@ -134,17 +143,17 @@ exact keys. Use null when a value is not present. Money values are plain numbers
       "amount": number             // the line total/amount printed for this item
     }
   ],
-  "subtotal": number,              // the subtotal / gross amount line, before VAT and discounts
-  "vatable_sales": number,         // EXACT printed "VATable Sales" figure; null if not printed. Never derived.
-  "vat_exempt_sales": number,      // VAT-exempt sales
-  "zero_rated_sales": number,      // Zero-rated sales
-  "vat_amount": number,            // EXACT printed VAT figure; null if not printed. Never computed as 12%.
-  "discount": number,              // total discount amount (e.g. Senior Citizen / PWD)
-  "discount_type": string,         // e.g. "Senior Citizen", "PWD", "Promo", or null
+  "subtotal": number,              // the subtotal / gross amount line, before tax and discounts
+  "vatable_sales": number,         // EXACT printed taxable-sales figure; null if not printed. Never derived.
+  "vat_exempt_sales": number,      // tax-exempt sales
+  "zero_rated_sales": number,      // zero-rated sales
+  "vat_amount": number,            // EXACT printed tax/VAT figure; null if not printed. Never computed.
+  "discount": number,              // total discount amount
+  "discount_type": string,         // e.g. "Promo", "Loyalty", "Senior Citizen", "PWD", "Coupon", or null
   "total_amount": number,          // the "Total" / "Amount Due" line. NOT cash, NOT change.
   "cash": number,                  // cash tendered / amount paid by the customer ("CASH", "TENDERED")
   "change": number,                // change given back to the customer ("CHANGE")
-  "currency": string               // e.g. "PHP"
+  "currency": string               // currency code/symbol shown, e.g. "PHP", "USD", "EUR"; null if none
 }
 
 Remember: transcribe only what is printed. A missing value must be null, never a
@@ -439,9 +448,27 @@ def to_excel_bytes(summary: pd.DataFrame, items: pd.DataFrame) -> bytes:
 # --------------------------------------------------------------------------- #
 # Presentation
 # --------------------------------------------------------------------------- #
-def _peso(value) -> str:
+# Map common currency codes/symbols to a display symbol. Defaults to ₱ (the
+# app's original locale) when a receipt doesn't state its currency.
+_CURRENCY_SYMBOLS = {
+    "PHP": "₱", "₱": "₱", "USD": "$", "$": "$", "EUR": "€", "€": "€",
+    "GBP": "£", "£": "£", "JPY": "¥", "¥": "¥", "INR": "₹", "₹": "₹",
+    "AUD": "A$", "CAD": "C$", "SGD": "S$", "HKD": "HK$", "CNY": "¥",
+    "MYR": "RM", "THB": "฿", "KRW": "₩", "IDR": "Rp", "VND": "₫",
+}
+
+
+def money_symbol(currency) -> str:
+    """Best-effort currency symbol for display; falls back to ₱."""
+    if not currency:
+        return "₱"
+    key = str(currency).strip().upper()
+    return _CURRENCY_SYMBOLS.get(key, _CURRENCY_SYMBOLS.get(str(currency).strip(), "₱"))
+
+
+def _peso(value, symbol: str = "₱") -> str:
     n = _num(value)
-    return f"₱{n:,.2f}" if n is not None else "—"
+    return f"{symbol}{n:,.2f}" if n is not None else "—"
 
 
 def _txt(value) -> str:
@@ -452,28 +479,29 @@ def _txt(value) -> str:
 
 def receipt_card_html(data: dict, source: str) -> str:
     """Render one extracted receipt as a perforated thermal-receipt card."""
+    sym = money_symbol(data.get("currency"))
     # Line items, as printed (description + qty/price hint + amount).
     item_lines = []
     for it in data.get("items") or []:
         qty, unit = _num(it.get("quantity")), _num(it.get("unit_price"))
-        hint = f' <span class="rcpt-qty">{qty:g} × {_peso(unit)}</span>' if qty and unit else ""
+        hint = f' <span class="rcpt-qty">{qty:g} × {_peso(unit, sym)}</span>' if qty and unit else ""
         item_lines.append(
             f'<div class="rcpt-line"><span>{_txt(it.get("description"))}{hint}</span>'
-            f'<span class="fig">{_peso(it.get("amount"))}</span></div>'
+            f'<span class="fig">{_peso(it.get("amount"), sym)}</span></div>'
         )
     items_html = (
         f'<div class="rcpt-items">{"".join(item_lines)}</div>' if item_lines else ""
     )
 
     rows = [
-        ("Subtotal", _peso(data.get("subtotal"))),
-        ("VATable sales", _peso(data.get("vatable_sales"))),
-        ("VAT-exempt sales", _peso(data.get("vat_exempt_sales"))),
-        ("Zero-rated sales", _peso(data.get("zero_rated_sales"))),
-        ("Output VAT", _peso(data.get("vat_amount"))),
+        ("Subtotal", _peso(data.get("subtotal"), sym)),
+        ("Taxable sales", _peso(data.get("vatable_sales"), sym)),
+        ("Tax-exempt sales", _peso(data.get("vat_exempt_sales"), sym)),
+        ("Zero-rated sales", _peso(data.get("zero_rated_sales"), sym)),
+        ("Tax / VAT", _peso(data.get("vat_amount"), sym)),
     ]
     discount_label = _txt(data.get("discount_type")) if data.get("discount_type") else "Discount"
-    rows.append((discount_label, _peso(data.get("discount"))))
+    rows.append((discount_label, _peso(data.get("discount"), sym)))
 
     body = items_html + "".join(
         f'<div class="rcpt-line"><span>{label}</span><span class="fig">{value}</span></div>'
@@ -483,9 +511,9 @@ def receipt_card_html(data: dict, source: str) -> str:
     # Payment lines (cash tendered / change) shown under the total, when present.
     pay = []
     if _num(data.get("cash")) is not None:
-        pay.append(("Cash", _peso(data.get("cash"))))
+        pay.append(("Cash", _peso(data.get("cash"), sym)))
     if _num(data.get("change")) is not None:
-        pay.append(("Change", _peso(data.get("change"))))
+        pay.append(("Change", _peso(data.get("change"), sym)))
     pay_html = (
         '<div class="rcpt-pay">'
         + "".join(
@@ -508,16 +536,16 @@ def receipt_card_html(data: dict, source: str) -> str:
     <div class="rcpt">
       <div class="rcpt-head">
         <div class="rcpt-vendor">{_txt(data.get('vendor_name'))}</div>
-        <div class="rcpt-sub">TIN <span class="fig">{_txt(data.get('vendor_tin'))}</span></div>
+        <div class="rcpt-sub">Tax ID <span class="fig">{_txt(data.get('vendor_tin'))}</span></div>
         <div class="rcpt-sub">{_txt(data.get('vendor_address'))}</div>
       </div>
       <div class="rcpt-meta">
-        <span>OR/SI <b class="fig">{_txt(data.get('receipt_number'))}</b></span>
+        <span>Receipt <b class="fig">{_txt(data.get('receipt_number'))}</b></span>
         <span class="fig">{_txt(data.get('receipt_date'))}</span>
       </div>
       <div class="rcpt-body">{body}</div>
       <div class="rcpt-total">
-        <span>Total due</span><span class="fig">{_peso(data.get('total_amount'))}</span>
+        <span>Total due</span><span class="fig">{_peso(data.get('total_amount'), sym)}</span>
       </div>
       {pay_html}
       {flag}
@@ -624,6 +652,17 @@ html, body, [class*="css"]{ font-family:'Inter',sans-serif; color:var(--ink); }
   margin-top:14px; font-family:'IBM Plex Mono',monospace; font-size:.7rem;
   color:var(--slate); text-align:center; letter-spacing:.05em;
 }
+
+/* the ledger agent's final answer */
+.agent-answer{
+  background:#fff; border:1px solid var(--line); border-left:4px solid var(--teal);
+  border-radius:10px; padding:14px 18px; margin-top:10px; font-size:1.02rem;
+  color:var(--ink); box-shadow:0 14px 30px -26px rgba(20,35,58,.5);
+}
+.agent-answer-label{
+  display:block; font-family:'IBM Plex Mono',monospace; font-size:.66rem;
+  letter-spacing:.22em; text-transform:uppercase; color:var(--teal); margin-bottom:6px;
+}
 </style>
 """
 
@@ -632,11 +671,12 @@ def render_hero() -> None:
     st.markdown(
         """
         <div class="hero">
-          <div class="hero-eyebrow">BIR-ready bookkeeping · Philippines</div>
+          <div class="hero-eyebrow">Receipts → structured ledger · runs locally</div>
           <h1 class="hero-title">Receipt&nbsp;Ledger</h1>
-          <p class="hero-sub">Drop a receipt. A local vision model reads the TIN,
-          line items, discounts and VAT, reconciles the totals, and hands you a
-          clean ledger to export.</p>
+          <p class="hero-sub">Drop any receipt — restaurant, cafe, grocery, retail.
+          A local vision model reads the merchant, line items, discounts, tax and
+          totals, reconciles the figures, and hands you a clean ledger you can
+          query in plain English.</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -658,9 +698,11 @@ def main() -> None:
             "**Before you start**\n"
             "- `ollama serve` is running\n"
             f"- `ollama pull {DEFAULT_MODEL}` done\n"
+            "- `ollama pull nomic-embed-text` (for the ledger agent)\n"
             "- Receipts as PNG / JPG / WEBP"
         )
-        st.caption("Reconciliation checks that line items add up to the total.")
+        st.caption("Works with any store, restaurant, or retail receipt. "
+                   "Reconciliation checks that line items add up to the total.")
 
     st.markdown('<div class="eyebrow">Feed a receipt</div>', unsafe_allow_html=True)
     uploads = st.file_uploader(
@@ -678,6 +720,7 @@ def main() -> None:
 
         summaries: list[dict] = []
         item_frames: list[pd.DataFrame] = []
+        session_ids: list[int] = []
         progress = st.progress(0.0)
 
         for i, upload in enumerate(uploads, start=1):
@@ -714,8 +757,10 @@ def main() -> None:
                     )
 
                 # Memory: persist every processed receipt to the SQLite ledger
-                # so it can be queried later (including across sessions).
-                save_receipt(validated, upload.name, flagged=bool(review_reasons))
+                # so it can be queried later (including across sessions). This also
+                # indexes the receipt for RAG semantic search.
+                rid = save_receipt(validated, upload.name, flagged=bool(review_reasons))
+                session_ids.append(rid)
 
                 summaries.append(header_row(data, upload.name))
                 item_frames.append(items_frame(data, upload.name))
@@ -729,6 +774,7 @@ def main() -> None:
         st.session_state["items_df"] = (
             pd.concat(item_frames, ignore_index=True) if item_frames else pd.DataFrame()
         )
+        st.session_state["session_receipt_ids"] = session_ids
 
     if "summary_df" in st.session_state:
         st.markdown('<div class="eyebrow">Receipt ledger · editable</div>', unsafe_allow_html=True)
@@ -762,37 +808,241 @@ def main() -> None:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
 
-    # ----------------------------------------------------------------- #
-    # SQL Agent: ask the persistent ledger (across all past sessions)
-    # natural-language questions, e.g. "How much VAT did I pay this month?"
-    # ----------------------------------------------------------------- #
-    st.markdown('<div class="eyebrow">Ask your ledger</div>', unsafe_allow_html=True)
-    question = st.text_input(
-        "Ask a question about everything you've ever processed",
-        placeholder="e.g. What's my total spend at Jollibee?",
-    )
-    if st.button("Ask") and question.strip():
-        from core import ask_ledger, GuardrailError
+    render_agent_section()
 
-        try:
-            with st.spinner("Querying the ledger…"):
-                result = ask_ledger(question)
-            
-            # Display the natural language answer first
-            st.markdown(f"**Answer:** {result['answer']}")
-            
-            # Show the SQL query used (collapsed for advanced users)
-            with st.expander("SQL Query"):
-                st.code(result["sql"], language="sql")
-            
-            # Show the raw data rows if there are any
-            if result["rows"]:
-                with st.expander("Raw Data"):
-                    st.dataframe(pd.DataFrame(result["rows"]), use_container_width=True)
-        except GuardrailError as exc:
-            st.error(f"Refused: {exc}")
-        except Exception as exc:  # noqa: BLE001
-            st.error(f"Couldn't answer that: {exc}")
+
+# --------------------------------------------------------------------------- #
+# Ledger agent — a ReAct loop that streams its reasoning to the UI
+# --------------------------------------------------------------------------- #
+def _thought_only(text: str) -> str:
+    """Keep just the Thought portion of a ReAct block for display, dropping the
+    Action/Action Input lines (they're shown as their own step)."""
+    cut = re.split(r"\n?\s*Action\s*:", text, maxsplit=1)[0]
+    cut = re.sub(r"^\s*Thought\s*:\s*", "", cut.strip(), flags=re.IGNORECASE)
+    return cut.strip()
+
+
+def _short(s, n: int = 200) -> str:
+    """Collapse whitespace and truncate — keeps each trace line to one short line."""
+    s = " ".join(str(s or "").split())
+    return s if len(s) <= n else s[: n - 1] + "…"
+
+
+def _obs_summary(ev: dict) -> str:
+    """One compact line describing a tool result, for the live reasoning trace."""
+    data = ev.get("data") or {}
+    kind = data.get("kind")
+    if kind == "sql":
+        rows = data.get("rows") or []
+        sql = _short((data.get("sql") or "").replace("\n", " "), 110)
+        n = len(rows)
+        return f"ran query · {n} row{'' if n == 1 else 's'} · `{sql}`"
+    if kind == "search":
+        hits = data.get("hits") or []
+        if not hits:
+            return "searched receipts · no matches"
+        names = ", ".join(f"#{h['receipt_id']} {h.get('vendor_name') or '—'}" for h in hits[:4])
+        return f"searched receipts · {len(hits)} found · {names}"
+    if kind == "note":
+        return "already had that result — answering"
+    return _short(ev.get("text", ""), 160)
+
+
+# --- Scope resolution: which receipt(s) is a question about? -----------------
+_SINGLE_NOUNS = ("receipt", "vendor", "store", "merchant", "invoice", "bill",
+                 "cashier", "purchase", "order", "transaction")
+_SINGLE_PHRASES = ("who is", "who's", "what did i buy", "what was ordered",
+                   "what i bought", "this ", "that ", "the total", "the date",
+                   "the amount", "the vendor", "the store")
+_MULTI_SIGNALS = ("all ", "receipts", "vendors", "how many", "across", "each ",
+                  "every", "average", "avg", " top ", "between", "this month",
+                  "this year", "per ", "total spend", "most ", "least ", "compare",
+                  "sum of", "in total", "how much have i")
+
+
+def _looks_singular(q: str) -> bool:
+    """Heuristic: does the question refer to ONE specific receipt (e.g. 'who is the
+    vendor?') rather than the whole ledger ('how many receipts?')."""
+    t = f" {q.lower().strip()} "
+    if any(sig in t for sig in _MULTI_SIGNALS):
+        return False
+    if any(p in t for p in _SINGLE_PHRASES):
+        return True
+    # a singular noun that isn't obviously pluralized
+    return any(f"{n} " in t or f"{n}?" in t or f"{n}'" in t for n in _SINGLE_NOUNS)
+
+
+_ORDINALS = {"first": 0, "1st": 0, "earliest": 0, "oldest": 0,
+             "second": 1, "2nd": 1, "third": 2, "3rd": 2, "fourth": 3, "4th": 3}
+
+
+def _resolve_reference(text: str, candidates: list[dict]) -> int | None:
+    """Map a phrase like 'the SM one', '#5', 'the second', 'the latest' to a receipt
+    id among the candidates. This is what lets follow-up questions re-pick which
+    receipt the conversation is about."""
+    if not candidates:
+        return None
+    t = text.lower()
+    ids_sorted = sorted(c["id"] for c in candidates)
+
+    m = (re.search(r"#\s*(\d+)", t) or re.search(r"receipt\s+(?:no\.?\s*|number\s*)?(\d+)", t)
+         or re.search(r"\bid\s*(\d+)", t))
+    if m and int(m.group(1)) in ids_sorted:
+        return int(m.group(1))
+    if re.search(r"\b(latest|last|recent|newest|most recent)\b", t):
+        return ids_sorted[-1]
+    for word, idx in _ORDINALS.items():
+        if re.search(rf"\b{word}\b", t) and idx < len(ids_sorted):
+            return ids_sorted[idx]
+    tokens = set(re.findall(r"[a-z0-9]{3,}", t))
+    for c in candidates:
+        vtokens = set(re.findall(r"[a-z0-9]{3,}", (c.get("vendor_name") or "").lower()))
+        if vtokens and (tokens & vtokens):
+            return c["id"]
+    return None
+
+
+def _resolve_scope(question: str, session_ids: list[int]):
+    """Decide which receipts a question is about → (receipt_ids | None, note).
+    None means the whole ledger."""
+    from core import get_latest_receipt_id, get_receipts_by_ids
+
+    candidates = get_receipts_by_ids(session_ids) if session_ids else []
+
+    # An explicit reference ('the Jollibee one', '#3', 'the latest') always wins —
+    # this is what makes follow-up disambiguation work.
+    ref = _resolve_reference(question, candidates)
+    if ref is not None:
+        return [ref], f"Scoped to receipt #{ref}."
+
+    if _looks_singular(question):
+        if len(session_ids) > 1:
+            latest = max(session_ids)
+            listing = ", ".join(f"#{c['id']} {c.get('vendor_name') or '—'}" for c in candidates)
+            note = (
+                f"You uploaded {len(session_ids)} receipts, so I answered about the most "
+                f"recent (#{latest}). Ask a follow-up naming another to switch — by vendor, "
+                f"“the first one”, or “#id”. Uploaded: {listing}."
+            )
+            return [latest], note
+        if len(session_ids) == 1:
+            return [session_ids[0]], None
+        latest = get_latest_receipt_id()
+        if latest is not None:
+            return [latest], f"Scoped to your most recent receipt (#{latest})."
+
+    return None, None
+
+
+def _stream_agent_into(box, question: str, receipt_ids):
+    """Run the ReAct loop, rendering its reasoning into a SINGLE placeholder that is
+    replaced (not appended) and capped to a short tail. Because it never grows, the
+    most recent activity is always visible — the user never has to scroll down.
+    Returns the final answer."""
+    from core import agent_stream
+
+    MAX_LINES = 6
+    trace: list[str] = []   # completed reasoning lines, oldest → newest
+    current = ""            # streaming thought buffer
+    step_no = 0
+    final_answer = None
+    live = box.empty()
+
+    def paint(active: str = "") -> None:
+        lines = list(trace)
+        if active:
+            lines.append(active)
+        # tight line breaks (not paragraph gaps) keep the tail inside the box
+        live.markdown("  \n".join(lines[-MAX_LINES:]) or "_thinking…_")
+
+    paint("🧠 _thinking…_")
+    try:
+        for ev in agent_stream(question, receipt_ids=receipt_ids):
+            kind = ev["type"]
+            if kind == "token":
+                current += ev["text"]
+                paint(f"🧠 _{_short(_thought_only(current), 160) or '…'}_")
+            elif kind == "action":
+                if current.strip():
+                    trace.append(f"🧠 _{_short(_thought_only(current), 160)}_")
+                step_no += 1
+                trace.append(f"**Step {step_no} · `{ev['tool']}`** → {_txt(ev['input'])}")
+                current = ""
+                paint()
+            elif kind == "observation":
+                trace.append(f"↳ {_obs_summary(ev)}")
+                paint()
+            elif kind == "final":
+                final_answer = ev["answer"]
+            elif kind == "error":
+                trace.append(f"⚠ {ev['message']}")
+                paint()
+                return None
+    except Exception as exc:  # noqa: BLE001
+        live.error(f"Couldn't answer that: {exc}")
+        return None
+    trace.append(f"**✓ Done · {step_no} tool call(s)**")
+    paint()
+    return final_answer
+
+
+def render_agent_section() -> None:
+    """A chat over every receipt you've processed. It routes each question to a
+    ledger query (numbers) or a semantic search (content), streams its reasoning
+    into a scrollable box, and auto-scopes singular questions to your latest upload
+    — with follow-ups to switch receipts."""
+    st.markdown('<div class="eyebrow">Ask your receipts</div>', unsafe_allow_html=True)
+    st.caption(
+        "Singular questions (“who’s the vendor?”) default to your latest upload — ask "
+        "a follow-up (by vendor, “the first one”, or “#id”) to switch. Aggregate "
+        "questions (“how much did I spend?”) search the whole ledger."
+    )
+
+    if "agent_chat" not in st.session_state:
+        st.session_state["agent_chat"] = []
+
+    session_ids = st.session_state.get("session_receipt_ids") or []
+    force_batch = False
+    if session_ids:
+        force_batch = st.toggle(
+            f"Hard-limit every question to the {len(session_ids)} receipt(s) I just uploaded",
+            value=False,
+            help="On: a sandbox containing ONLY those receipts — others are physically "
+                 "unreadable. Off: smart per-question scoping (latest for singular, "
+                 "whole ledger for aggregates).",
+        )
+
+    # Replay the conversation so far — answers only, so the page stays clean.
+    for msg in st.session_state["agent_chat"]:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"], unsafe_allow_html=True)
+
+    question = st.chat_input("Ask about your receipts…")
+    if not question or not question.strip():
+        return
+
+    st.session_state["agent_chat"].append({"role": "user", "content": html.escape(question)})
+    with st.chat_message("user"):
+        st.markdown(question)
+
+    if force_batch and session_ids:
+        receipt_ids, note = session_ids, None
+    else:
+        receipt_ids, note = _resolve_scope(question, session_ids)
+
+    with st.chat_message("assistant"):
+        if note:
+            st.caption(note)
+        # ChatGPT-style: the reasoning streams inside a fixed-height, scrollable box.
+        box = st.container(height=240, border=True)
+        final_answer = _stream_agent_into(box, question, receipt_ids)
+        if final_answer:
+            answer_html = (
+                f'<div class="agent-answer"><span class="agent-answer-label">Answer</span>'
+                f"{html.escape(final_answer)}</div>"
+            )
+            st.markdown(answer_html, unsafe_allow_html=True)
+            st.session_state["agent_chat"].append({"role": "assistant", "content": answer_html})
 
 
 if __name__ == "__main__":
