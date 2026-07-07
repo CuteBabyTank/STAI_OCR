@@ -570,112 +570,150 @@ def receipt_card_html(data: dict, source: str) -> str:
 
 THEME_CSS = """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;550;600;650;700&display=swap');
 
 :root{
-  --ink:#14233A; --teal:#0E7C7B; --gold:#E8B23A;
-  --paper:#FBF7EF; --slate:#6B7A8D; --line:#E4DBC8;
+  --canvas:#F7F8FA; --surface:#FFFFFF; --sunken:#FCFCFD;
+  --border:#EAECEF; --border-strong:#DFE2E7;
+  --ink:#0E1116; --ink-2:#5B616E; --ink-3:#9AA0AB;
+  --accent:#4F46E5; --accent-hover:#4338CA; --accent-wash:#EEF0FF;
+  --positive:#0E9F6E; --negative:#E5484D;
+  --shadow:0 1px 3px rgba(16,24,40,.04), 0 1px 2px rgba(16,24,40,.06);
+  --shadow-lg:0 12px 40px rgba(16,24,40,.12);
+  --radius:16px;
 }
 
 /* page canvas */
-[data-testid="stAppViewContainer"]{ background:var(--paper); }
+[data-testid="stAppViewContainer"]{ background:var(--canvas); }
 [data-testid="stHeader"]{ background:transparent; }
-.block-container{ padding-top:2.2rem; max-width:1180px; }
-html, body, [class*="css"]{ font-family:'Inter',sans-serif; color:var(--ink); }
-.fig{ font-family:'IBM Plex Mono',monospace; font-feature-settings:"tnum"; letter-spacing:-.2px; }
+.block-container{ padding-top:2rem; max-width:1180px; }
+html, body, [class*="css"], .stMarkdown, [data-testid="stMetric"]{
+  font-family:'Inter',-apple-system,system-ui,sans-serif; color:var(--ink);
+}
+.fig{ font-variant-numeric:tabular-nums; letter-spacing:-.01em; }
 
-/* hero */
-.hero{
-  background:linear-gradient(135deg,#14233A 0%,#0E7C7B 100%);
-  border-radius:18px; padding:30px 34px; color:#fff;
-  box-shadow:0 24px 50px -28px rgba(20,35,58,.6); position:relative; overflow:hidden;
+/* clean greeting header (replaces the gradient hero) */
+.ap-hero{ margin:2px 0 18px; }
+.ap-brand{
+  display:inline-flex; align-items:center; gap:9px; font-size:1.05rem; font-weight:650;
+  letter-spacing:-.02em; color:var(--ink); margin-bottom:14px;
 }
-.hero::after{ /* faux receipt edge stripe */
-  content:""; position:absolute; right:-40px; top:-40px; width:220px; height:220px;
-  background:repeating-linear-gradient(90deg,rgba(232,178,58,.16) 0 8px,transparent 8px 16px);
-  transform:rotate(18deg);
+.ap-mark{
+  width:30px; height:30px; border-radius:9px; display:inline-grid; place-items:center;
+  background:var(--accent); color:#fff; font-size:14px;
+  box-shadow:0 4px 12px color-mix(in srgb, var(--accent) 38%, transparent);
 }
-.hero-eyebrow{
-  font-family:'IBM Plex Mono',monospace; font-size:.72rem; letter-spacing:.28em;
-  text-transform:uppercase; color:var(--gold); margin-bottom:10px;
-}
-.hero-title{ font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:2.5rem; line-height:1.02; margin:0; }
-.hero-sub{ color:#D7E2E2; max-width:46ch; margin-top:12px; font-size:1.0rem; }
+.ap-greet{ font-size:1.9rem; font-weight:680; letter-spacing:-.03em; margin:0; line-height:1.05; }
+.ap-sub{ color:var(--ink-2); margin:5px 0 0; font-size:1rem; }
 
 /* section labels */
 .eyebrow{
-  font-family:'IBM Plex Mono',monospace; font-size:.72rem; letter-spacing:.24em;
-  text-transform:uppercase; color:var(--teal); margin:8px 0 2px;
+  font-size:.72rem; font-weight:600; letter-spacing:.12em; text-transform:uppercase;
+  color:var(--ink-3); margin:14px 0 6px;
 }
 
-/* file dropzone -> "feed a receipt" slot */
-[data-testid="stFileUploaderDropzone"]{
-  background:#fff; border:2px dashed var(--teal); border-radius:14px; padding:30px;
+/* KPI cards (st.metric) */
+[data-testid="stMetric"]{
+  background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
+  padding:18px 20px; box-shadow:var(--shadow);
 }
-[data-testid="stFileUploaderDropzone"]:hover{ border-color:var(--gold); }
+[data-testid="stMetricLabel"] p{ color:var(--ink-2); font-weight:500; font-size:.85rem; }
+[data-testid="stMetricValue"]{
+  font-variant-numeric:tabular-nums; letter-spacing:-.03em; font-weight:660; color:var(--ink);
+}
+
+/* file dropzone */
+[data-testid="stFileUploaderDropzone"]{
+  background:var(--surface); border:1.5px dashed var(--border-strong);
+  border-radius:14px; padding:28px;
+}
+[data-testid="stFileUploaderDropzone"]:hover{ border-color:var(--accent); background:var(--accent-wash); }
 
 /* buttons */
 .stButton>button, .stDownloadButton>button{
-  font-family:'Space Grotesk',sans-serif; font-weight:600; border-radius:10px;
-  border:1px solid transparent; padding:.55rem 1.1rem;
+  font-family:'Inter',sans-serif; font-weight:560; border-radius:11px;
+  border:1px solid var(--border-strong); padding:.5rem 1.05rem; color:var(--ink);
+  background:var(--surface); transition:all .15s;
 }
-.stButton>button[kind="primary"]{ background:var(--teal); color:#fff; }
-.stButton>button[kind="primary"]:hover{ background:#0a5f5e; }
-.stDownloadButton>button{ background:#fff; color:var(--ink); border:1px solid var(--line); }
-.stDownloadButton>button:hover{ border-color:var(--gold); color:var(--teal); }
+.stButton>button:hover, .stDownloadButton>button:hover{ border-color:var(--accent); color:var(--accent); }
+.stButton>button[kind="primary"]{
+  background:var(--accent); color:#fff; border-color:transparent;
+  box-shadow:0 4px 14px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+.stButton>button[kind="primary"]:hover{ background:var(--accent-hover); color:#fff; }
 
-/* the signature: perforated thermal-receipt card */
+/* extracted-receipt card — clean white, indigo total */
 .rcpt{
-  position:relative; background:#fff; border-radius:12px 12px 0 0;
-  padding:20px 22px 24px; margin-bottom:24px;
-  box-shadow:0 18px 38px -26px rgba(20,35,58,.55);
+  position:relative; background:var(--surface); border:1px solid var(--border);
+  border-radius:var(--radius); padding:20px 22px; margin-bottom:20px; box-shadow:var(--shadow);
 }
-.rcpt::after{
-  content:""; position:absolute; left:0; right:0; bottom:-11px; height:13px;
-  background-image:radial-gradient(circle at 7px -3px,transparent 6.5px,#fff 7px);
-  background-size:14px 14px; background-repeat:repeat-x;
-  filter:drop-shadow(0 10px 10px -10px rgba(20,35,58,.5));
-}
-.rcpt-vendor{ font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:1.12rem; }
-.rcpt-sub{ color:var(--slate); font-size:.84rem; }
+.rcpt-vendor{ font-weight:640; font-size:1.1rem; letter-spacing:-.01em; }
+.rcpt-sub{ color:var(--ink-3); font-size:.84rem; }
 .rcpt-meta{
-  display:flex; justify-content:space-between; font-size:.82rem; color:var(--ink);
-  border-top:1px dashed var(--line); border-bottom:1px dashed var(--line);
+  display:flex; justify-content:space-between; font-size:.82rem; color:var(--ink-2);
+  border-top:1px solid var(--border); border-bottom:1px solid var(--border);
   padding:9px 0; margin:12px 0;
 }
 .rcpt-line{ display:flex; justify-content:space-between; gap:12px; padding:4px 0; font-size:.92rem; }
-.rcpt-line span:first-child{ color:var(--slate); }
-.rcpt-items{ padding-bottom:8px; margin-bottom:8px; border-bottom:1px dashed var(--line); }
+.rcpt-line span:first-child{ color:var(--ink-2); }
+.rcpt-items{ padding-bottom:8px; margin-bottom:8px; border-bottom:1px solid var(--border); }
 .rcpt-items .rcpt-line span:first-child{ color:var(--ink); }
-.rcpt-qty{ color:var(--slate); font-family:'IBM Plex Mono',monospace; font-size:.78rem; }
-.rcpt-pay{ margin-top:8px; padding-top:8px; border-top:1px dashed var(--line); }
-.rcpt-pay .rcpt-line span:first-child{ color:var(--slate); }
+.rcpt-qty{ color:var(--ink-3); font-variant-numeric:tabular-nums; font-size:.78rem; }
+.rcpt-pay{ margin-top:8px; padding-top:8px; border-top:1px solid var(--border); }
+.rcpt-pay .rcpt-line span:first-child{ color:var(--ink-3); }
 .rcpt-total{
   display:flex; justify-content:space-between; align-items:baseline;
-  margin-top:12px; padding-top:12px; border-top:2px solid var(--ink);
-  font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:1.15rem;
+  margin-top:12px; padding-top:12px; border-top:1.5px solid var(--ink);
+  font-weight:680; font-size:1.1rem;
 }
-.rcpt-total .fig{ font-size:1.3rem; color:var(--teal); }
-.rcpt-ok{ margin-top:12px; color:var(--teal); font-weight:600; font-size:.85rem; }
+.rcpt-total .fig{ font-size:1.25rem; color:var(--accent); }
+.rcpt-ok{ margin-top:12px; color:var(--positive); font-weight:560; font-size:.85rem; }
 .rcpt-flag{
-  margin-top:12px; background:#FCF3E2; border-left:3px solid var(--gold);
-  border-radius:6px; padding:8px 10px; font-size:.8rem; color:#7a5a12;
+  margin-top:12px; background:#FDF3E7; border-left:3px solid #E0A106;
+  border-radius:8px; padding:8px 10px; font-size:.8rem; color:#7a5a12;
 }
 .rcpt-flag ul{ margin:6px 0 0; padding-left:18px; }
 .rcpt-src{
-  margin-top:14px; font-family:'IBM Plex Mono',monospace; font-size:.7rem;
-  color:var(--slate); text-align:center; letter-spacing:.05em;
+  margin-top:14px; font-size:.7rem; color:var(--ink-3); text-align:center; letter-spacing:.04em;
 }
+
+/* robot RAG assistant header */
+.assistant-head{
+  display:flex; align-items:center; gap:12px; background:var(--surface);
+  border:1px solid var(--border); border-radius:14px; padding:14px 16px;
+  box-shadow:var(--shadow); margin:2px 0 10px;
+}
+.assistant-ava{
+  width:42px; height:42px; border-radius:12px; background:var(--accent-wash);
+  display:grid; place-items:center; font-size:22px; flex-shrink:0;
+}
+.assistant-name{ font-weight:640; font-size:1rem; letter-spacing:-.01em; }
+.assistant-status{ font-size:.8rem; color:var(--ink-3); display:flex; align-items:center; gap:6px; margin-top:1px; }
+.assistant-status .live{ width:7px; height:7px; border-radius:50%; background:var(--positive); }
 
 /* the ledger agent's final answer */
 .agent-answer{
-  background:#fff; border:1px solid var(--line); border-left:4px solid var(--teal);
-  border-radius:10px; padding:14px 18px; margin-top:10px; font-size:1.02rem;
-  color:var(--ink); box-shadow:0 14px 30px -26px rgba(20,35,58,.5);
+  background:var(--surface); border:1px solid var(--border); border-left:4px solid var(--accent);
+  border-radius:12px; padding:14px 18px; margin-top:10px; font-size:1.02rem;
+  color:var(--ink); box-shadow:var(--shadow);
 }
 .agent-answer-label{
-  display:block; font-family:'IBM Plex Mono',monospace; font-size:.66rem;
-  letter-spacing:.22em; text-transform:uppercase; color:var(--teal); margin-bottom:6px;
+  display:block; font-size:.66rem; font-weight:600; letter-spacing:.16em;
+  text-transform:uppercase; color:var(--accent); margin-bottom:6px;
+}
+
+/* floating robot bubble -> jumps to the assistant */
+.robot-fab{
+  position:fixed; bottom:26px; right:26px; z-index:999; width:58px; height:58px;
+  border-radius:50%; background:var(--accent); display:grid !important; place-items:center;
+  font-size:28px; text-decoration:none; line-height:1;
+  box-shadow:0 8px 24px color-mix(in srgb, var(--accent) 42%, transparent);
+  transition:transform .18s;
+}
+.robot-fab:hover{ transform:translateY(-2px) scale(1.05); }
+.robot-fab::after{
+  content:""; position:absolute; top:3px; right:3px; width:12px; height:12px; border-radius:50%;
+  background:var(--positive); border:2.5px solid var(--accent);
 }
 </style>
 """
@@ -690,10 +728,10 @@ html, body, [class*="css"]{ font-family:'Inter',sans-serif; color:var(--ink); }
 # the secondary (non-color) encoding the validator requires.
 CATEGORY_ORDER = ["Food", "Shopping", "Health", "Other"]
 CATEGORY_COLORS = {
-    "Food": "#2a78d6",      # blue
-    "Shopping": "#1baf7a",  # aqua
-    "Health": "#eda100",    # yellow
-    "Other": "#9a978f",     # neutral warm gray
+    "Food": "#4F46E5",      # indigo (matches the accent)
+    "Shopping": "#0E9F6E",  # green
+    "Health": "#E0A106",    # amber
+    "Other": "#9AA0AB",     # neutral cool gray
 }
 _CURRENCY_SYMBOLS = {"PHP": "₱", "USD": "$", "EUR": "€", "GBP": "£", "JPY": "¥", "INR": "₹"}
 
@@ -721,7 +759,7 @@ def render_dashboard() -> None:
     st.markdown('<div class="eyebrow">Your spending</div>', unsafe_allow_html=True)
     # One flat row of tiles + donut, so each metric gets its own full-width
     # column (nesting metrics inside a half-width column truncates the total).
-    m1, m2, m3, right = st.columns([1.25, 1, 1.15, 1.6])
+    m1, m2, m3, right = st.columns([1.25, 1, 1.15, 1.6], gap="medium")
     m1.metric("Total spent", f"{sym}{summary['total']:,.2f}")
     m2.metric("Receipts", summary["count"])
     m3.metric("Top category", summary["top_category"] or "—")
@@ -735,7 +773,7 @@ def render_dashboard() -> None:
         df = pd.DataFrame({"Category": present, "Amount": [by_cat[c] for c in present]})
         donut = (
             alt.Chart(df)
-            .mark_arc(innerRadius=58, stroke="#FBF7EF", strokeWidth=2)  # 2px surface gap
+            .mark_arc(innerRadius=58, stroke="#F7F8FA", strokeWidth=2)  # 2px canvas gap
             .encode(
                 theta=alt.Theta("Amount:Q", stack=True),
                 color=alt.Color(
@@ -752,7 +790,8 @@ def render_dashboard() -> None:
                     alt.Tooltip("Amount:Q", title="Spent", format=",.2f"),
                 ],
             )
-            .properties(height=230)
+            .properties(height=230, background="transparent")
+            .configure_view(strokeWidth=0, fill="transparent")
         )
         st.altair_chart(donut, use_container_width=True)
 
@@ -878,15 +917,17 @@ def render_past_receipts() -> None:
 
 
 def render_hero() -> None:
+    from datetime import datetime
+
+    hour = datetime.now().hour
+    greet = "Good morning" if hour < 12 else "Good afternoon" if hour < 18 else "Good evening"
+    today = date.today().strftime("%B %d, %Y").replace(" 0", " ")
     st.markdown(
-        """
-        <div class="hero">
-          <div class="hero-eyebrow">Receipts → structured ledger · runs locally</div>
-          <h1 class="hero-title">Receipt&nbsp;Ledger</h1>
-          <p class="hero-sub">Drop any receipt — restaurant, cafe, grocery, retail.
-          A local vision model reads the merchant, line items, discounts, tax and
-          totals, reconciles the figures, and hands you a clean ledger you can
-          query in plain English.</p>
+        f"""
+        <div class="ap-hero">
+          <div class="ap-brand"><span class="ap-mark">◆</span> Receipt Ledger</div>
+          <h1 class="ap-greet">{greet}</h1>
+          <p class="ap-sub">Here's your spending today · {today}</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -1020,6 +1061,14 @@ def main() -> None:
 
     render_agent_section()
     render_past_receipts()
+
+    # Floating robot bubble (bottom-right) — jumps down to the RAG assistant.
+    # Streamlit can't host a true overlay chat that runs Python, so the bubble is
+    # an anchor link to the assistant section rather than a pop-out panel.
+    st.markdown(
+        '<a class="robot-fab" href="#assistant-anchor" title="Ask your receipts">🤖</a>',
+        unsafe_allow_html=True,
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -1202,7 +1251,19 @@ def render_agent_section() -> None:
     ledger query (numbers) or a semantic search (content), streams its reasoning
     into a scrollable box, and auto-scopes singular questions to your latest upload
     — with follow-ups to switch receipts."""
-    st.markdown('<div class="eyebrow">Ask your receipts</div>', unsafe_allow_html=True)
+    st.markdown('<div id="assistant-anchor"></div>', unsafe_allow_html=True)
+    st.markdown(
+        """
+        <div class="assistant-head">
+          <div class="assistant-ava">🤖</div>
+          <div>
+            <div class="assistant-name">Receipt Assistant</div>
+            <div class="assistant-status"><span class="live"></span> RAG agent · reads your receipts</div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
     st.caption(
         "Singular questions (“who’s the vendor?”) default to your latest upload — ask "
         "a follow-up (by vendor, “the first one”, or “#id”) to switch. Aggregate "
