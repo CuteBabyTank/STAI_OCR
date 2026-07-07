@@ -501,6 +501,327 @@ def expense_summary(limit: int = 1000) -> dict:
     }
 
 
+# --------------------------------------------------------------------------- #
+# Income & budgets (personal-finance layer on top of the receipt ledger)
+# --------------------------------------------------------------------------- #
+def init_finance_tables() -> None:
+    """Create the income + budget tables if absent. Idempotent, mirrors init_db()."""
+    with sqlite3.connect(DB_PATH) as con:
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS income (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source TEXT,
+                amount REAL,
+                currency TEXT,
+                income_date TEXT,
+                recurring INTEGER DEFAULT 0,
+                created_at TEXT
+            )
+            """
+        )
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS budgets (
+                category TEXT PRIMARY KEY,
+                monthly_limit REAL,
+                currency TEXT
+            )
+            """
+        )
+        con.commit()
+
+
+def _month_key(iso: str | None) -> str | None:
+    """'2026-06-22' -> '2026-06'. None/blank/malformed -> None."""
+    if iso and len(iso) >= 7 and re.match(r"^\d{4}-\d{2}", iso):
+        return iso[:7]
+    return None
+
+
+def _receipt_month(r: dict) -> str | None:
+    """The month a receipt belongs to. Prefer the printed receipt date; when it is
+    missing or unparseable, fall back to when the receipt was added (processed_at)
+    so an undated receipt still counts toward the timeline, totals, and budgets
+    rather than silently vanishing."""
+    return _month_key(r.get("receipt_date")) or _month_key(r.get("processed_at"))
+
+
+def _month_range(start: str, end: str) -> list[str]:
+    """Inclusive list of 'YYYY-MM' keys from start to end (both 'YYYY-MM')."""
+    sy, sm = int(start[:4]), int(start[5:7])
+    ey, em = int(end[:4]), int(end[5:7])
+    out: list[str] = []
+    y, m = sy, sm
+    while (y, m) <= (ey, em):
+        out.append(f"{y:04d}-{m:02d}")
+        m += 1
+        if m > 12:
+            m, y = 1, y + 1
+    return out
+
+
+def add_income(source: str, amount: float, currency: str | None,
+               income_date: str | None, recurring: bool) -> int:
+    """Record an income entry. A recurring=1 row is a monthly-salary template
+    anchored at income_date; it is expanded across months at aggregation time."""
+    init_finance_tables()
+    with sqlite3.connect(DB_PATH) as con:
+        cur = con.execute(
+            "INSERT INTO income (source, amount, currency, income_date, recurring, created_at) "
+            "VALUES (?,?,?,?,?,?)",
+            (source, amount, currency, income_date or date.today().isoformat(),
+             int(bool(recurring)), datetime.utcnow().isoformat()),
+        )
+        con.commit()
+        return cur.lastrowid
+
+
+def list_income() -> list[dict]:
+    init_finance_tables()
+    with sqlite3.connect(DB_PATH) as con:
+        con.row_factory = sqlite3.Row
+        rows = con.execute("SELECT * FROM income ORDER BY income_date DESC, id DESC").fetchall()
+        return [dict(r) for r in rows]
+
+
+def delete_income(income_id: int) -> bool:
+    init_finance_tables()
+    with sqlite3.connect(DB_PATH) as con:
+        cur = con.execute("DELETE FROM income WHERE id = ?", (income_id,))
+        con.commit()
+        return cur.rowcount > 0
+
+
+def set_budget(category: str, monthly_limit: float, currency: str | None) -> None:
+    """Upsert a monthly spending limit for a category."""
+    init_finance_tables()
+    with sqlite3.connect(DB_PATH) as con:
+        con.execute(
+            "INSERT INTO budgets (category, monthly_limit, currency) VALUES (?,?,?) "
+            "ON CONFLICT(category) DO UPDATE SET monthly_limit=excluded.monthly_limit, "
+            "currency=excluded.currency",
+            (category, monthly_limit, currency),
+        )
+        con.commit()
+
+
+def list_budgets() -> list[dict]:
+    init_finance_tables()
+    with sqlite3.connect(DB_PATH) as con:
+        con.row_factory = sqlite3.Row
+        rows = con.execute("SELECT * FROM budgets ORDER BY category").fetchall()
+        return [dict(r) for r in rows]
+
+
+def _income_by_month(latest_month: str | None) -> dict[str, float]:
+    """Total income per 'YYYY-MM'. Recurring entries are expanded from their
+    anchor month through latest_month (or their anchor month if that is later)."""
+    by_month: dict[str, float] = {}
+    for r in list_income():
+        amt = r.get("amount") or 0.0
+        mk = _month_key(r.get("income_date"))
+        if not mk:
+            continue
+        if r.get("recurring"):
+            end = latest_month if latest_month and latest_month >= mk else mk
+            for m in _month_range(mk, end):
+                by_month[m] = by_month.get(m, 0.0) + amt
+        else:
+            by_month[mk] = by_month.get(mk, 0.0) + amt
+    return by_month
+
+
+def _pct_change(current: float, prev: float) -> Optional[float]:
+    """Percent change prev->current, rounded. None when there is no prior base."""
+    if prev == 0:
+        return None
+    return round((current - prev) / abs(prev) * 100, 1)
+
+
+def _prev_month(key: str) -> str:
+    y, m = int(key[:4]), int(key[5:7])
+    m -= 1
+    if m < 1:
+        m, y = 12, y - 1
+    return f"{y:04d}-{m:02d}"
+
+
+def analytics_summary(granularity: str = "month", year: int | None = None,
+                      month: int | None = None, limit: int = 5000) -> dict:
+    """Period-aware dashboard payload. `granularity` is "month" or "year"; `year`
+    and `month` select the focused period (defaults to the latest with activity).
+
+    Returns a `bars` series for the cashflow chart (monthly bars for the focused
+    year, or yearly bars in year mode), plus period-scoped category totals, budget
+    usage, top vendors, totals and period-over-period deltas — so every panel on
+    the dashboard reflects the same selected period and stays consistent.
+    """
+    backfill_categories()
+    init_finance_tables()
+    receipts = list_receipts(limit=limit)
+    granularity = "year" if granularity == "year" else "month"
+
+    # Per-receipt effective month + dominant currency.
+    currency_counts: dict[str, int] = {}
+    expense_by_month: dict[str, float] = {}
+    for r in receipts:
+        cur = r.get("currency")
+        if cur:
+            currency_counts[cur] = currency_counts.get(cur, 0) + 1
+        mk = _receipt_month(r)
+        if mk:
+            expense_by_month[mk] = expense_by_month.get(mk, 0.0) + (r.get("total_amount") or 0.0)
+    currency = max(currency_counts, key=currency_counts.get) if currency_counts else None
+
+    # Expand income (incl. recurring) through the later of last activity / today.
+    anchors = set(expense_by_month) | set(_income_by_month(None))
+    today_key = date.today().strftime("%Y-%m")
+    range_end = max(anchors | {today_key}) if anchors else today_key
+    income_by_month = _income_by_month(range_end)
+
+    all_months = sorted(set(expense_by_month) | set(income_by_month))
+    data_years = sorted({int(m[:4]) for m in all_months})
+    latest_month = max(all_months) if all_months else today_key
+
+    # Resolve the focused period (defaults to latest activity).
+    if year is None:
+        year = int(latest_month[:4])
+    if month is None:
+        month = int(latest_month[5:7]) if int(latest_month[:4]) == year else 12
+    month = max(1, min(12, month))
+
+    def _month_income(m):
+        return income_by_month.get(m, 0.0)
+
+    def _month_expense(m):
+        return expense_by_month.get(m, 0.0)
+
+    # Cashflow bars: months of the focused year (month mode) or one bar per year.
+    if granularity == "year":
+        bars = [
+            {
+                "key": str(y),
+                "label": str(y),
+                "income": round(sum(_month_income(m) for m in all_months if m.startswith(str(y))), 2),
+                "expense": round(sum(_month_expense(m) for m in all_months if m.startswith(str(y))), 2),
+            }
+            for y in data_years
+        ]
+        focus_key = str(year)
+    else:
+        year_months = [m for m in all_months if m.startswith(f"{year:04d}")]
+        bars = [
+            {
+                "key": m,
+                "label": datetime(int(m[:4]), int(m[5:7]), 1).strftime("%b"),
+                "income": round(_month_income(m), 2),
+                "expense": round(_month_expense(m), 2),
+            }
+            for m in year_months
+        ]
+        focus_key = f"{year:04d}-{month:02d}"
+
+    # Predicate: does an effective-month string fall in the focused scope?
+    def _in_scope(mk: str | None) -> bool:
+        if not mk:
+            return False
+        return mk.startswith(f"{year:04d}") if granularity == "year" else mk == focus_key
+
+    # Scope-restricted receipts → category totals + vendors + count.
+    by_category: dict[str, float] = {}
+    vendor_totals: dict[str, dict] = {}
+    scope_count = 0
+    for r in receipts:
+        if not _in_scope(_receipt_month(r)):
+            continue
+        scope_count += 1
+        amt = r.get("total_amount") or 0.0
+        cat = r.get("category") or "Other"
+        by_category[cat] = by_category.get(cat, 0.0) + amt
+        v = (r.get("vendor_name") or "Unknown").strip() or "Unknown"
+        agg = vendor_totals.setdefault(v, {"vendor": v, "total": 0.0, "count": 0})
+        agg["total"] += amt
+        agg["count"] += 1
+
+    by_category = {k: round(v, 2) for k, v in sorted(by_category.items(), key=lambda kv: kv[1], reverse=True)}
+    top_category = next(iter(by_category), None)
+    top_vendors = sorted(
+        (dict(total=round(a["total"], 2), vendor=a["vendor"], count=a["count"])
+         for a in vendor_totals.values()),
+        key=lambda a: a["total"], reverse=True,
+    )[:8]
+
+    # Scope totals.
+    if granularity == "year":
+        scope_income = sum(_month_income(m) for m in all_months if m.startswith(f"{year:04d}"))
+        budget_factor = 12  # a monthly limit becomes an annual allowance
+    else:
+        scope_income = _month_income(focus_key)
+        budget_factor = 1
+    scope_expense = sum(by_category.values())
+
+    # Period-over-period deltas.
+    if granularity == "year":
+        prev_income = sum(_month_income(m) for m in all_months if m.startswith(f"{year - 1:04d}"))
+        prev_expense = sum(_month_expense(m) for m in all_months if m.startswith(f"{year - 1:04d}"))
+        prev_label = str(year - 1)
+        period_label = str(year)
+    else:
+        pk = _prev_month(focus_key)
+        prev_income = _month_income(pk)
+        prev_expense = _month_expense(pk)
+        prev_label = datetime(int(pk[:4]), int(pk[5:7]), 1).strftime("%b")
+        period_label = datetime(year, month, 1).strftime("%B %Y")
+
+    def _delta(cur_v, prev_v):
+        return {"current": round(cur_v, 2), "prev": round(prev_v, 2), "pct": _pct_change(cur_v, prev_v)}
+
+    mom = {
+        "income": _delta(scope_income, prev_income),
+        "expense": _delta(scope_expense, prev_expense),
+        "net": _delta(scope_income - scope_expense, prev_income - prev_expense),
+        "label": prev_label,
+    }
+
+    # Budgets scoped to the same period (limit scaled by the period length).
+    budgets = []
+    for b in list_budgets():
+        limit_v = (b.get("monthly_limit") or 0.0) * budget_factor
+        spent = by_category.get(b["category"], 0.0)
+        budgets.append({
+            "category": b["category"],
+            "limit": round(limit_v, 2),
+            "spent": round(spent, 2),
+            "pct": round(spent / limit_v * 100, 1) if limit_v else None,
+            "currency": b.get("currency") or currency,
+        })
+
+    return {
+        "bars": bars,
+        "focus_key": focus_key,
+        "by_category": by_category,
+        "top_category": top_category,
+        "top_vendors": top_vendors,
+        "budgets": budgets,
+        "mom": mom,
+        "income_total": round(scope_income, 2),
+        "expense_total": round(scope_expense, 2),
+        "net_total": round(scope_income - scope_expense, 2),
+        "receipt_count": scope_count,
+        "period": {
+            "granularity": granularity,
+            "year": year,
+            "month": month,
+            "label": period_label,
+            "min_year": data_years[0] if data_years else year,
+            "max_year": max(data_years[-1] if data_years else year, int(today_key[:4])),
+        },
+        "currency": currency,
+        "mixed_currency": len(currency_counts) > 1,
+    }
+
+
 def get_latest_receipt_id() -> int | None:
     """Id of the most recently saved receipt (highest id), or None if the ledger is
     empty. Used to auto-scope a singular question to the latest upload."""

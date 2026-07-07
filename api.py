@@ -26,17 +26,23 @@ from core import (
     DEFAULT_MODEL,
     AGENT_MODEL,
     GuardrailError,
+    add_income,
     agent_run,
     agent_stream,
+    analytics_summary,
     ask_ledger,
+    delete_income,
     delete_receipt,
     expense_summary,
     extract_receipt_validated,
     get_receipt_items,
+    list_budgets,
+    list_income,
     list_receipts,
     rag_answer,
     save_receipt,
     semantic_search,
+    set_budget,
 )
 
 app = FastAPI(title="STAI_OCR Receipt API", version="2.0")
@@ -53,6 +59,20 @@ class SearchRequest(BaseModel):
     query: str
     k: int = 4
     receipt_ids: list[int] | None = None
+
+
+class IncomeRequest(BaseModel):
+    source: str
+    amount: float
+    currency: str | None = None
+    date: str | None = None
+    recurring: bool = False
+
+
+class BudgetRequest(BaseModel):
+    category: str
+    monthly_limit: float
+    currency: str | None = None
 
 
 @app.get("/health")
@@ -106,6 +126,44 @@ def summary():
     """Aggregated spending for the dashboard: total, count, per-category totals,
     top category, and the dominant currency."""
     return expense_summary()
+
+
+@app.get("/analytics")
+def analytics(granularity: str = "month", year: int | None = None, month: int | None = None):
+    """Period-aware dashboard payload. `granularity` is "month" or "year"; `year`
+    and `month` pick the focused period (defaulting to the latest with activity).
+    Returns the cashflow bar series plus period-scoped category totals, budgets,
+    vendors, totals and period-over-period deltas — all consistent with each other."""
+    return analytics_summary(granularity=granularity, year=year, month=month)
+
+
+@app.get("/income")
+def get_income():
+    return {"income": list_income()}
+
+
+@app.post("/income")
+def post_income(req: IncomeRequest):
+    income_id = add_income(req.source, req.amount, req.currency, req.date, req.recurring)
+    return {"id": income_id}
+
+
+@app.delete("/income/{income_id}")
+def remove_income(income_id: int):
+    if not delete_income(income_id):
+        raise HTTPException(status_code=404, detail=f"Income {income_id} not found")
+    return {"deleted": income_id}
+
+
+@app.get("/budgets")
+def get_budgets():
+    return {"budgets": list_budgets()}
+
+
+@app.put("/budgets")
+def put_budget(req: BudgetRequest):
+    set_budget(req.category, req.monthly_limit, req.currency)
+    return {"category": req.category, "monthly_limit": req.monthly_limit}
 
 
 @app.post("/ask")

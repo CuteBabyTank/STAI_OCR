@@ -1,30 +1,19 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { Analytics, Granularity, Receipt } from "./lib/types";
+import {
+  CAT_ORDER, catMeta, money, monthKey, monthLabel,
+} from "./lib/format";
+import StatTiles from "./components/StatTiles";
+import CashflowChart from "./components/CashflowChart";
+import TopVendors from "./components/TopVendors";
+import BudgetsCard from "./components/BudgetsCard";
+import IncomePanel from "./components/IncomePanel";
+import PeriodControl from "./components/PeriodControl";
+import TxnRow from "./components/TxnRow";
 
-// --------------------------------------------------------------------------- //
-// Types & constants
-// --------------------------------------------------------------------------- //
-type Category = "Food" | "Shopping" | "Health" | "Other";
-
-interface Receipt {
-  id: number;
-  vendor_name: string | null;
-  category: string | null;
-  total_amount: number | null;
-  currency: string | null;
-  receipt_date: string | null;
-  source_file: string | null;
-}
-
-interface Summary {
-  total: number;
-  count: number;
-  by_category: Record<string, number>;
-  top_category: string | null;
-  currency: string | null;
-  mixed_currency: boolean;
-}
+interface PeriodSel { granularity: Granularity; year: number; month: number; }
 
 interface BatchItem {
   name: string;
@@ -45,36 +34,6 @@ interface ChatMsg {
   err?: boolean;
 }
 
-const CAT_ORDER: Category[] = ["Food", "Shopping", "Health", "Other"];
-const CAT_META: Record<string, { color: string; emoji: string }> = {
-  Food: { color: "var(--cat-food)", emoji: "🍜" },
-  Shopping: { color: "var(--cat-shopping)", emoji: "🛍️" },
-  Health: { color: "var(--cat-health)", emoji: "💊" },
-  Other: { color: "var(--cat-other)", emoji: "•" },
-};
-const catMeta = (c?: string | null) => CAT_META[c || "Other"] || CAT_META.Other;
-
-const SYMBOLS: Record<string, string> = {
-  PHP: "₱", USD: "$", EUR: "€", GBP: "£", JPY: "¥", INR: "₹",
-};
-const sym = (cur?: string | null) => (cur && SYMBOLS[cur]) || (cur ? cur + " " : "₱");
-const money = (n: number | null | undefined, cur?: string | null, dp = 2) =>
-  sym(cur) + Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: dp, maximumFractionDigits: dp });
-
-function fmtDate(iso?: string | null) {
-  if (!iso) return "Undated";
-  const d = new Date(iso + "T00:00:00");
-  if (isNaN(d.getTime())) return iso;
-  return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-}
-const monthKey = (iso?: string | null) =>
-  iso && iso.length >= 7 && /^\d{4}/.test(iso) ? iso.slice(0, 7) : "Unknown";
-function monthLabel(key: string) {
-  if (key === "Unknown") return "Undated";
-  const d = new Date(key + "-01T00:00:00");
-  return isNaN(d.getTime()) ? key : d.toLocaleDateString(undefined, { month: "long", year: "numeric" });
-}
-
 // --------------------------------------------------------------------------- //
 // Icons
 // --------------------------------------------------------------------------- //
@@ -93,13 +52,15 @@ const RobotSVG = ({ eye = "#fff", body = "var(--accent)" }: { eye?: string; body
 // Page
 // --------------------------------------------------------------------------- //
 export default function Dashboard() {
-  const [summary, setSummary] = useState<Summary | null>(null);
+  const [analytics, setAnalytics] = useState<Analytics | null>(null);
+  const [periodSel, setPeriodSel] = useState<PeriodSel | null>(null);
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [greeting, setGreeting] = useState("Welcome");
   const [today, setToday] = useState("");
   const [newIds, setNewIds] = useState<number[]>([]);
 
   const [panelOpen, setPanelOpen] = useState(false);
+  const [incomeOpen, setIncomeOpen] = useState(false);
   const [batch, setBatch] = useState<BatchItem[]>([]);
   const [dragging, setDragging] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -115,24 +76,35 @@ export default function Dashboard() {
   const [pastMonth, setPastMonth] = useState("All months");
   const [toast, setToast] = useState("");
 
-  // ---- data loading ----
+  // ---- data loading (scoped to the selected period) ----
   const refresh = useCallback(async () => {
     try {
-      const [s, r] = await Promise.all([
-        fetch("/api/summary").then((x) => x.json()),
+      const qs = periodSel
+        ? `?granularity=${periodSel.granularity}&year=${periodSel.year}&month=${periodSel.month}`
+        : "";
+      const [r, a] = await Promise.all([
         fetch("/api/receipts?limit=1000").then((x) => x.json()),
+        fetch("/api/analytics" + qs).then((x) => x.json()),
       ]);
-      setSummary(s);
       setReceipts(r.receipts || []);
+      setAnalytics(a);
+      // On first load the backend picks the latest active period — adopt it so the
+      // period control has a starting point.
+      if (!periodSel && a.period) {
+        setPeriodSel({ granularity: a.period.granularity, year: a.period.year, month: a.period.month });
+      }
     } catch {
       /* backend not ready yet — leave last-known state */
     }
-  }, []);
+  }, [periodSel]);
 
   useEffect(() => {
     const h = new Date().getHours();
     setGreeting(h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening");
     setToday(new Date().toLocaleDateString(undefined, { month: "long", day: "numeric" }));
+  }, []);
+
+  useEffect(() => {
     refresh();
   }, [refresh]);
 
@@ -202,6 +174,20 @@ export default function Dashboard() {
     }
   };
 
+  const saveBudget = async (category: string, limit: number) => {
+    try {
+      await fetch("/api/budgets", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ category, monthly_limit: limit, currency: analytics?.currency }),
+      });
+      await refresh();
+      flashToast(`${category} budget set`);
+    } catch {
+      flashToast("Couldn't save that budget");
+    }
+  };
+
   const openPanel = () => {
     setBatch([]);
     setPanelOpen(true);
@@ -211,7 +197,7 @@ export default function Dashboard() {
     setBatch([]);
   };
 
-  // ---- chat (real /agent) ----
+  // ---- chat (real /ask) ----
   const seedChat = () => {
     if (seeded) return;
     setSeeded(true);
@@ -229,9 +215,6 @@ export default function Dashboard() {
     setChatText("");
     setTyping(true);
     try {
-      // The SQL ledger agent reliably answers spending questions (totals, per
-      // category, counts, biggest purchase). It's steadier than the ReAct agent
-      // for this chat's aggregate-focused questions.
       const res = await fetch("/api/ask", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -259,11 +242,12 @@ export default function Dashboard() {
   };
 
   // ---- derived ----
-  const byCat = summary?.by_category || {};
+  const cur = analytics?.currency;
+  const byCat = analytics?.by_category || {};
   const catTotal = Object.values(byCat).reduce((s, v) => s + v, 0);
   const donutCats = [
     ...CAT_ORDER.filter((c) => byCat[c] > 0),
-    ...Object.keys(byCat).filter((c) => !CAT_ORDER.includes(c as Category) && byCat[c] > 0),
+    ...Object.keys(byCat).filter((c) => !CAT_ORDER.includes(c as any) && byCat[c] > 0),
   ];
   let acc = 0;
   const stops = donutCats
@@ -277,6 +261,7 @@ export default function Dashboard() {
   const donutBg = catTotal > 0 ? `conic-gradient(${stops})` : "var(--border)";
 
   const recent = receipts.slice(0, 6);
+  const periodLabel = analytics?.period.label || "this period";
 
   const pastMonths = Array.from(new Set(receipts.map((r) => monthKey(r.receipt_date)))).sort().reverse();
   const filtered = pastMonth === "All months"
@@ -300,6 +285,9 @@ export default function Dashboard() {
             <button className="nav-item active">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="7" height="9" rx="1.5" /><rect x="14" y="3" width="7" height="5" rx="1.5" /><rect x="14" y="12" width="7" height="9" rx="1.5" /><rect x="3" y="16" width="7" height="5" rx="1.5" /></svg>Overview
             </button>
+            <button className="nav-item" onClick={() => setIncomeOpen(true)}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></svg>Income
+            </button>
             <button className="nav-item" onClick={openChat}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>Ask receipts
             </button>
@@ -319,47 +307,58 @@ export default function Dashboard() {
         <header>
           <div>
             <h1>{greeting}</h1>
-            <p className="subhead">Here&apos;s your spending today · {today}</p>
+            <p className="subhead">Here&apos;s your cashflow · {today}</p>
           </div>
           <div className="header-actions">
             <button className="icon-btn" onClick={toggleTheme} title="Toggle theme" aria-label="Toggle theme">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" /></svg>
             </button>
+            <button className="btn-ghost" onClick={() => setIncomeOpen(true)}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 5v14M5 12h14" /></svg>Income
+            </button>
             <button className="btn-primary" onClick={openPanel}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 5v14M5 12h14" /></svg>Add
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 5v14M5 12h14" /></svg>Add receipt
             </button>
           </div>
         </header>
 
-        {/* Overview cards */}
-        <section className="stat-grid">
-          <div className="card accent">
-            <p className="stat-label">Total spent</p>
-            <p className="stat-value num">{money(summary?.total, summary?.currency)}</p>
-            <p className="stat-sub">{summary?.mixed_currency ? "⚠ multiple currencies" : "across all receipts"}</p>
+        {/* Period selector — scopes every panel below */}
+        {analytics && periodSel && (
+          <PeriodControl period={analytics.period} onChange={(next) => setPeriodSel(next)} />
+        )}
+
+        {/* Overview cards with period-over-period deltas */}
+        <StatTiles a={analytics} />
+
+        {/* Cashflow over time */}
+        <section className="card wide">
+          <div className="card-head">
+            <p className="card-title">Cashflow over time</p>
+            <div className="cf-legend">
+              <span><i className="sw" style={{ background: "var(--positive)" }} />Income</span>
+              <span><i className="sw inset" style={{ background: "var(--accent)" }} />Expense</span>
+            </div>
           </div>
-          <div className="card">
-            <p className="stat-label">Receipts</p>
-            <p className="stat-value num">{summary?.count ?? 0}</p>
-            <p className="stat-sub">in your ledger</p>
-          </div>
-          <div className="card">
-            <p className="stat-label">Top category</p>
-            <p className="stat-value">{summary?.top_category || "—"}</p>
-            <p className="stat-sub">most spending</p>
-          </div>
+          {analytics && analytics.bars.length > 0 ? (
+            <CashflowChart bars={analytics.bars} currency={analytics.currency} focusKey={analytics.focus_key} />
+          ) : (
+            <div className="empty">
+              <p className="h">No activity in {periodLabel}</p>
+              <p className="s">Add a receipt or some income, or pick another period above.</p>
+            </div>
+          )}
         </section>
 
-        {/* Insight band */}
+        {/* Category + budgets (both scoped to the selected period) */}
         <section className="band">
           <div className="card">
-            <div className="card-head"><p className="card-title">Spending by category</p></div>
+            <div className="card-head"><p className="card-title">Spending by category · {periodLabel}</p></div>
             <div className="donut-wrap">
               <div className="donut" style={{ background: donutBg }}>
                 <div className="donut-hole">
                   <div>
                     <p className="k">Spent</p>
-                    <p className="v num">{money(catTotal, summary?.currency, 0)}</p>
+                    <p className="v num">{money(catTotal, cur, 0)}</p>
                   </div>
                 </div>
               </div>
@@ -378,6 +377,21 @@ export default function Dashboard() {
             </div>
           </div>
 
+          <BudgetsCard
+            budgets={analytics?.budgets || []}
+            currency={analytics?.currency ?? null}
+            monthLabel={periodLabel}
+            onSave={saveBudget}
+          />
+        </section>
+
+        {/* Top vendors + recent transactions */}
+        <section className="band">
+          <div className="card">
+            <div className="card-head"><p className="card-title">Top vendors</p></div>
+            <TopVendors vendors={analytics?.top_vendors || []} currency={analytics?.currency ?? null} />
+          </div>
+
           <div className="card">
             <div className="card-head">
               <p className="card-title">Recent transactions</p>
@@ -391,24 +405,22 @@ export default function Dashboard() {
             ) : (
               <ul className="txn-list">
                 {recent.map((t) => (
-                  <li key={t.id} className={"txn" + (newIds.includes(t.id) ? " new" : "")}>
-                    <div className="txn-icon">{catMeta(t.category).emoji}</div>
-                    <div className="txn-body">
-                      <div className="txn-merchant">{t.vendor_name || "Unknown merchant"}</div>
-                      <div className="txn-meta">{t.category || "Other"} · {fmtDate(t.receipt_date)}</div>
-                    </div>
-                    <span className="txn-amt num">{money(t.total_amount, t.currency)}</span>
-                    <button className="txn-del" title="Delete" onClick={() => deleteReceipt(t.id)}>
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M6 6l12 12M18 6 6 18" /></svg>
-                    </button>
-                  </li>
+                  <TxnRow key={t.id} r={t} isNew={newIds.includes(t.id)} onDelete={deleteReceipt} />
                 ))}
               </ul>
             )}
           </div>
         </section>
-
       </main>
+
+      {/* Income slide-over */}
+      <IncomePanel
+        open={incomeOpen}
+        currency={analytics?.currency ?? null}
+        onClose={() => setIncomeOpen(false)}
+        onChanged={refresh}
+        flashToast={flashToast}
+      />
 
       {/* Past receipts modal */}
       <div className={"scrim" + (showPast ? " open" : "")} onClick={() => setShowPast(false)} />
