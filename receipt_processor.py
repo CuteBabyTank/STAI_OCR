@@ -757,6 +757,114 @@ def render_dashboard() -> None:
         st.altair_chart(donut, use_container_width=True)
 
 
+# --------------------------------------------------------------------------- #
+# Past receipts — text listing, grouped by month, with per-receipt delete
+# --------------------------------------------------------------------------- #
+def _month_key(d) -> str:
+    """'2026-06-22' -> '2026-06'; anything undated/malformed -> 'Unknown'."""
+    return d[:7] if d and len(d) >= 7 and str(d)[:4].isdigit() else "Unknown"
+
+
+def _month_label(key: str) -> str:
+    if key == "Unknown":
+        return "Undated"
+    try:
+        from datetime import datetime as _dt
+        return _dt.strptime(key, "%Y-%m").strftime("%B %Y")
+    except ValueError:
+        return key
+
+
+def _receipt_text(r: dict, items: list[dict]) -> str:
+    """Render one stored receipt as a plain-text block (the way it was read)."""
+    cur = r.get("currency") or ""
+    sym = _CURRENCY_SYMBOLS.get(cur, f"{cur} " if cur else "")
+
+    def money(v):
+        return f"{sym}{v:,.2f}" if isinstance(v, (int, float)) else "—"
+
+    out = [
+        f"Receipt #{r['id']}   ({r.get('source_file') or '—'})",
+        f"Vendor    : {r.get('vendor_name') or '—'}",
+    ]
+    if r.get("vendor_tin"):
+        out.append(f"TIN       : {r['vendor_tin']}")
+    if r.get("vendor_address"):
+        out.append(f"Address   : {r['vendor_address']}")
+    out += [
+        f"Date      : {r.get('receipt_date') or '—'}",
+        f"Category  : {r.get('category') or '—'}",
+        "-" * 44,
+    ]
+    for it in items:
+        qty = it.get("quantity")
+        qtxt = f"{qty:g} x " if isinstance(qty, (int, float)) else ""
+        out.append(f"  {qtxt}{it.get('description') or '—'}".ljust(32) + money(it.get("amount")))
+    if not items:
+        out.append("  (no line items)")
+    out.append("-" * 44)
+    if r.get("subtotal") is not None:
+        out.append("Subtotal  : " + money(r.get("subtotal")))
+    if r.get("vat_amount") is not None:
+        out.append("Tax / VAT : " + money(r.get("vat_amount")))
+    if r.get("discount") is not None:
+        out.append("Discount  : " + money(r.get("discount")))
+    out.append("TOTAL     : " + money(r.get("total_amount")))
+    if r.get("cash") is not None:
+        out.append("Cash      : " + money(r.get("cash")))
+    if r.get("change") is not None:
+        out.append("Change    : " + money(r.get("change")))
+    return "\n".join(out)
+
+
+def render_past_receipts() -> None:
+    """Every stored receipt as text lines, grouped by month with subtotals,
+    filterable by month; each row has a Delete button that also purges the RAG
+    embedding so the receipt vanishes from search too."""
+    from core import list_receipts, get_receipt_items, delete_receipt
+
+    rows = list_receipts(limit=1000)
+    st.markdown('<div class="eyebrow">Past receipts</div>', unsafe_allow_html=True)
+    if not rows:
+        st.caption("No receipts yet — process one above and it will appear here.")
+        return
+
+    months = sorted({_month_key(r.get("receipt_date")) for r in rows}, reverse=True)
+    labels = [_month_label(m) for m in months]
+    label_to_key = dict(zip(labels, months))
+    choice = st.selectbox("Filter by month", ["All months"] + labels, key="past_month")
+    view = rows if choice == "All months" else [
+        r for r in rows if _month_key(r.get("receipt_date")) == label_to_key.get(choice)
+    ]
+
+    for m in sorted({_month_key(r.get("receipt_date")) for r in view}, reverse=True):
+        group = sorted(
+            (r for r in view if _month_key(r.get("receipt_date")) == m),
+            key=lambda r: (r.get("receipt_date") or ""),
+            reverse=True,
+        )
+        subtotal = sum((r.get("total_amount") or 0) for r in group)
+        curs = [r.get("currency") for r in group if r.get("currency")]
+        cur = max(set(curs), key=curs.count) if curs else ""
+        sym = _CURRENCY_SYMBOLS.get(cur, f"{cur} " if cur else "")
+        st.markdown(f"**{_month_label(m)}** — {len(group)} receipt(s) · {sym}{subtotal:,.2f}")
+
+        for r in group:
+            rsym = _CURRENCY_SYMBOLS.get(r.get("currency") or "", "")
+            total = r.get("total_amount")
+            ttxt = f"{rsym}{total:,.2f}" if isinstance(total, (int, float)) else "—"
+            line = (f"#{r['id']} · {r.get('receipt_date') or '—'} · "
+                    f"{r.get('vendor_name') or '—'} · {r.get('category') or '—'} · {ttxt}")
+            c_exp, c_del = st.columns([8, 1])
+            with c_exp.expander(line):
+                st.text(_receipt_text(r, get_receipt_items(r["id"])))
+            if c_del.button("🗑", key=f"del_{r['id']}",
+                            help="Delete this receipt (also removes it from search memory)"):
+                delete_receipt(r["id"])
+                st.toast(f"Deleted receipt #{r['id']}")
+                st.rerun()
+
+
 def render_hero() -> None:
     st.markdown(
         """
@@ -804,9 +912,8 @@ def main() -> None:
 
     if not uploads:
         st.info("Drag one or more receipt images into the box above to begin.")
-        return
 
-    if st.button("Process receipts", type="primary"):
+    if uploads and st.button("Process receipts", type="primary"):
         from core import extract_receipt_validated, save_receipt, GuardrailError
 
         summaries: list[dict] = []
@@ -900,6 +1007,7 @@ def main() -> None:
         )
 
     render_agent_section()
+    render_past_receipts()
 
 
 # --------------------------------------------------------------------------- #

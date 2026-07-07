@@ -417,6 +417,36 @@ def list_receipts(limit: int = 100) -> list[dict]:
         return [dict(r) for r in rows]
 
 
+def get_receipt_items(receipt_id: int) -> list[dict]:
+    """The line items for one receipt, ordered as stored."""
+    init_db()
+    with sqlite3.connect(DB_PATH) as con:
+        con.row_factory = sqlite3.Row
+        rows = con.execute(
+            "SELECT description, quantity, unit_price, amount "
+            "FROM line_items WHERE receipt_id = ? ORDER BY id",
+            (receipt_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def delete_receipt(receipt_id: int) -> bool:
+    """Delete a receipt and everything derived from it — its line items AND its
+    RAG embedding in receipt_docs — so it disappears from the ledger, the SQL
+    agent, and semantic search alike. Returns True if a row was removed."""
+    init_db()
+    with sqlite3.connect(DB_PATH) as con:
+        cur = con.execute("DELETE FROM receipts WHERE id = ?", (receipt_id,))
+        con.execute("DELETE FROM line_items WHERE receipt_id = ?", (receipt_id,))
+        # RAG memory: receipt_docs may not exist if semantic search was never used.
+        try:
+            con.execute("DELETE FROM receipt_docs WHERE receipt_id = ?", (receipt_id,))
+        except sqlite3.OperationalError:
+            pass
+        con.commit()
+        return cur.rowcount > 0
+
+
 def backfill_categories() -> None:
     """Assign a category to any receipt saved before categorization existed,
     inferring from vendor name + its line items. Idempotent; only touches rows
