@@ -698,9 +698,14 @@ CATEGORY_COLORS = {
 _CURRENCY_SYMBOLS = {"PHP": "₱", "USD": "$", "EUR": "€", "GBP": "£", "JPY": "¥", "INR": "₹"}
 
 
+@st.fragment(run_every="2s")
 def render_dashboard() -> None:
     """Summary band at the top: Total / Receipts / Top category tiles beside a
-    donut of spend-by-category. Renders only when the ledger has receipts."""
+    donut of spend-by-category. Renders only when the ledger has receipts.
+
+    Wrapped as a fragment with run_every="2s" so the totals/donut refresh on
+    their own every 2 seconds (picking up newly saved receipts) WITHOUT rerunning
+    the whole app — the uploader and agent panel stay untouched."""
     try:
         from core import expense_summary
 
