@@ -29,7 +29,10 @@ from core import (
     agent_run,
     agent_stream,
     ask_ledger,
+    delete_receipt,
+    expense_summary,
     extract_receipt_validated,
+    get_receipt_items,
     list_receipts,
     rag_answer,
     save_receipt,
@@ -81,6 +84,28 @@ async def extract(file: UploadFile = File(...), model: str = DEFAULT_MODEL):
 @app.get("/receipts")
 def receipts(limit: int = 100):
     return {"receipts": list_receipts(limit=limit)}
+
+
+@app.get("/receipts/{receipt_id}/items")
+def receipt_items(receipt_id: int):
+    return {"items": get_receipt_items(receipt_id)}
+
+
+@app.delete("/receipts/{receipt_id}")
+def remove_receipt(receipt_id: int):
+    """Delete a receipt and everything derived from it (line items + RAG embedding),
+    so it vanishes from the ledger, the SQL agent, and semantic search."""
+    removed = delete_receipt(receipt_id)
+    if not removed:
+        raise HTTPException(status_code=404, detail=f"Receipt {receipt_id} not found")
+    return {"deleted": receipt_id}
+
+
+@app.get("/summary")
+def summary():
+    """Aggregated spending for the dashboard: total, count, per-category totals,
+    top category, and the dominant currency."""
+    return expense_summary()
 
 
 @app.post("/ask")
