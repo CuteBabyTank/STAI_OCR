@@ -3,7 +3,7 @@ STAI_OCR — Receipt Processor & Ledger Agent
 ===========================================
 
 Drag-and-drop any receipt image (restaurant, cafe, grocery, retail, pharmacy);
-a local vision LLM (Ollama `minicpm-v`) reads it and extracts the useful fields
+a local vision LLM (Ollama `qwen3-vl:8b`) reads it and extracts the useful fields
 (merchant, tax ID, line items, price, discount, tax/VAT, totals). Each receipt is
 reconciled (line items vs total), shown on an editable ledger, exportable to
 CSV / Excel, and indexed for a natural-language ReAct agent ("Ask your receipts").
@@ -11,13 +11,14 @@ CSV / Excel, and indexed for a natural-language ReAct agent ("Ask your receipts"
 Setup (run once, in a terminal or notebook cell):
 -------------------------------------------------
     %pip install streamlit ollama pandas numpy openpyxl pillow --quiet
-    !ollama pull minicpm-v              # vision/OCR model (reads the image)
+    !ollama pull qwen3-vl:8b            # vision/OCR model (reads the image)
     !ollama pull nomic-embed-text       # embeddings for semantic search (RAG)
 
-    # NOTE: llama3.2:3b is TEXT-ONLY and cannot read images. `minicpm-v` is a
-    # vision model tuned for OCR; in testing it read receipt digits far more
-    # accurately than llava. (llama3.2-vision needs a newer Ollama engine than
-    # the Homebrew build provides — it fails with "unknown architecture mllama".)
+    # NOTE: llama3.2:3b is TEXT-ONLY and cannot read images. `qwen3-vl:8b` is a
+    # vision model tuned for document/invoice extraction with structured output;
+    # it reads receipt digits and layouts more accurately than minicpm-v/llava
+    # and emits clean JSON. (llama3.2-vision needs a newer Ollama engine than
+    # some builds provide — it fails with "unknown architecture mllama".)
 
 Run the app:
 ------------
@@ -46,7 +47,7 @@ except ImportError:  # pragma: no cover - surfaced in the UI instead
 # --------------------------------------------------------------------------- #
 # Configuration
 # --------------------------------------------------------------------------- #
-DEFAULT_MODEL = "minicpm-v"
+DEFAULT_MODEL = "qwen3-vl:8b"
 
 HEADER_FIELDS = [
     "vendor_name",

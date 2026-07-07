@@ -20,7 +20,7 @@ services:
       sh -c "
       ollama serve &
       sleep 5;
-      (ollama list | grep -q minicpm-v || ollama pull minicpm-v) || true;
+      (ollama list | grep -q qwen3-vl || ollama pull qwen3-vl:8b) || true;
       (ollama list | grep -q llama3.2:3b || ollama pull llama3.2:3b) || true;
       (ollama list | grep -q nomic-embed-text || ollama pull nomic-embed-text) || true;
       wait

@@ -33,7 +33,7 @@ docker-compose.yml       app + api + ollama + mlflow, wired together
 
 | Model | Role |
 |---|---|
-| `minicpm-v` | vision/OCR — reads the receipt image |
+| `qwen3-vl:8b` | vision/OCR — reads the receipt image |
 | `llama3.2:3b` | text — SQL agent, RAG answerer, ReAct planner |
 | `nomic-embed-text` | embeddings — powers semantic search (RAG) |
 
@@ -51,7 +51,7 @@ docker-compose.yml       app + api + ollama + mlflow, wired together
                     └──────────┬──────────┘
                                │ passes
                     ┌──────────▼──────────┐
-                    │  ollama minicpm-v    │  local vision model
+                    │  ollama qwen3-vl:8b  │  local vision model
                     │  (OCR extraction)   │  temperature=0, format="json"
                     └──────────┬──────────┘
                                │ raw JSON
@@ -139,7 +139,7 @@ docker-compose.yml       app + api + ollama + mlflow, wired together
 | RAG | `core.semantic_search` / `rag_answer` — embeds each receipt (`nomic-embed-text`) into `receipt_docs`, retrieves by cosine similarity, answers grounded in retrieved docs (keyword fallback if the embed model is absent) |
 | SQL Agent | `core.ask_ledger` — NL question → generated SQL → executed against `ledger.db` |
 | ReAct Agent | `core.agent_stream` — Thought→Action→Observation loop that routes between the SQL tool and the RAG tool, streams reasoning, and cites its sources |
-| Tool Use | the agent's two tools — `sql_ledger` (SQL over the ledger) and `search_receipts` (vector search) — plus the `minicpm-v` vision tool |
+| Tool Use | the agent's two tools — `sql_ledger` (SQL over the ledger) and `search_receipts` (vector search) — plus the `qwen3-vl:8b` vision tool |
 | Chat UI | "Ask your receipts" streaming agent panel in the Streamlit app |
 | API Endpoint | `api.py` — `POST /extract`, `GET /receipts`, `POST /ask`, `POST /search`, `POST /agent`, `POST /agent/stream` |
 | LLMOps Monitoring | every extraction, SQL-agent, RAG, and ReAct-agent call wrapped in `mlflow.start_run()`, logging latency, params, token counts, tools used, and errors |
@@ -162,7 +162,7 @@ Fill in owners before the presentation — each member owns and can walk through
 ## Features
 
 - Drag-and-drop one or many receipt images (PNG / JPG / WEBP / BMP)
-- Local OCR via the `minicpm-v` vision model (no API key, no per-receipt cost)
+- Local OCR via the `qwen3-vl:8b` vision model (no API key, no per-receipt cost)
 - Faithful extraction — values are transcribed, never calculated or assumed;
   missing fields are left blank rather than guessed
 - Automatic clean-up: removes `2 @ price` notation from item names, de-duplicates
@@ -210,10 +210,10 @@ pip install streamlit ollama pandas numpy openpyxl pillow \
 brew install ollama
 
 # 3. Pull the models
-#    minicpm-v        — vision/OCR model that reads receipt images   (~5.5 GB, one-time)
+#    qwen3-vl:8b      — vision/OCR model that reads receipt images   (~6.1 GB, one-time)
 #    llama3.2:3b      — text model: SQL agent, RAG answerer, ReAct    (~2 GB,   one-time)
 #    nomic-embed-text — embedding model for semantic search (RAG)     (~275 MB, one-time)
-ollama pull minicpm-v
+ollama pull qwen3-vl:8b
 ollama pull llama3.2:3b
 ollama pull nomic-embed-text
 ```
@@ -223,8 +223,8 @@ ollama pull nomic-embed-text
 
 > **Note:** `llama3.2:3b` is text-only and cannot read images, and
 > `llama3.2-vision` needs a newer Ollama engine than some builds ship. This app
-> uses `minicpm-v` for OCR, which is tuned for receipts, and `llama3.2:3b` only
-> for the text-only SQL agent.
+> uses `qwen3-vl:8b` for OCR, which is tuned for document/invoice extraction with
+> structured JSON output, and `llama3.2:3b` only for the text-only SQL agent.
 
 ---
 
@@ -260,7 +260,7 @@ docker compose up --build
 
 This brings up four containers:
 
-- `ollama` — pulls `minicpm-v`, `llama3.2:3b`, and `nomic-embed-text` automatically on first start
+- `ollama` — pulls `qwen3-vl:8b`, `llama3.2:3b`, and `nomic-embed-text` automatically on first start
 - `web` — the Streamlit UI at <http://localhost:8501>
 - `api` — the REST API at <http://localhost:8000> (docs at `/docs`)
 - `mlflow` — the MLflow tracking UI at <http://localhost:5000>
@@ -324,7 +324,7 @@ Routed to **`search_receipts`** (content/semantic):
 
 ```python
 %pip install streamlit ollama pandas numpy openpyxl pillow fastapi uvicorn pydantic mlflow --quiet
-!ollama pull minicpm-v
+!ollama pull qwen3-vl:8b
 !ollama pull llama3.2:3b
 !ollama pull nomic-embed-text
 ```
@@ -335,7 +335,7 @@ Then run `streamlit run receipt_processor.py` from a terminal as above.
 
 ## Tips for best accuracy
 
-`minicpm-v` is an 8B local model — accurate, but not flawless on hard photos. For
+`qwen3-vl:8b` is an 8B local vision model — accurate, but not flawless on hard photos. For
 the best results:
 
 - Use a **flat, well-lit, straight-on** photo with no shadow over the figures
@@ -354,7 +354,7 @@ Ollama vision model you've pulled.
 
 1. The image passes **input guardrails** (file type/size) before anything is sent
    to the model.
-2. The image is sent to the local `minicpm-v` model with a strict
+2. The image is sent to the local `qwen3-vl:8b` model with a strict
    transcription prompt (`format="json"`, `temperature=0`).
 3. The JSON response is **post-processed deterministically**: item descriptions are
    cleaned, duplicate items merged, mis-filed summary/tax lines moved to their
