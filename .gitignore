@@ -13,6 +13,12 @@ ledger.db-journal
 mlflow.db
 mlruns/
 
+# Node / Next.js
+node_modules/
+.next/
+web-next/next-env.d.ts
+*.tsbuildinfo
+
 # OS / editor
 .DS_Store
 .idea/

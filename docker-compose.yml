@@ -26,24 +26,18 @@ services:
       wait
       "
 
+  # Aperture — the Next.js frontend (replaces the old Streamlit UI). It calls the
+  # FastAPI `api` service for OCR extraction, the ledger, and the RAG agent. The
+  # browser hits same-origin /api/* which Next rewrites to http://api:8000 (see
+  # web-next/next.config.js), so there's no CORS to configure.
   web:
-    build: .
-    # fileWatcherType=poll: Windows bind mounts don't deliver inotify events, so
-    # the default watcher never sees edits. Polling picks them up; runOnSave then
-    # auto-reruns. Without this, code changes require a container restart.
-    command: streamlit run receipt_processor.py --server.port=8501 --server.address=0.0.0.0 --server.enableXsrfProtection=false --server.fileWatcherType=poll --server.runOnSave=true
+    build: ./web-next
     ports:
-      - "8502:8501"
+      - "8502:3000"
     depends_on:
-      ollama:
-        condition: service_healthy
-      mlflow:
-        condition: service_started
+      - api
     environment:
-      - OLLAMA_HOST=http://host.docker.internal:11434
-      - MLFLOW_TRACKING_URI=sqlite:////app/mlflow.db
-    volumes:
-      - .:/app
+      - API_BASE=http://api:8000
 
   api:
     build: .

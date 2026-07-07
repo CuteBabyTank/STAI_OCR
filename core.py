@@ -1310,6 +1310,10 @@ Rules:
 - As soon as an Observation answers the question, immediately reply with
   "Final Answer:" — do not think further or call another tool.
 - Choose sql_ledger for math/counts; choose search_receipts for item/content lookups.
+- "How much did I spend", "what's my total", "spending by category", "how many
+  receipts" are ALWAYS sql_ledger — never search_receipts. Keep the Action Input a
+  simple aggregate question ("total spend", "spend per category"); do NOT drill into
+  a single item or vendor unless the user explicitly named one.
 - Base the Final Answer ONLY on the Observations you received.
 {scope}
 Example:
@@ -1352,7 +1356,17 @@ def _run_agent_tool(tool: str, tool_input: str, model: str,
                     receipt_ids: list[int] | None) -> tuple[str, dict]:
     """Execute a tool and return (observation_text_for_the_model, ui_payload)."""
     if tool == "sql_ledger":
-        res = _sql_agent_core(tool_input, model, receipt_ids)
+        # The SQL agent already retries once on a bad query, but a small model can
+        # still emit invalid SQL twice. Surface that as an observation the agent can
+        # recover from (e.g. switch to search_receipts) rather than crashing the run.
+        try:
+            res = _sql_agent_core(tool_input, model, receipt_ids)
+        except (GuardrailError, sqlite3.Error) as exc:
+            return (
+                f"The ledger query failed ({exc}). Try rephrasing, or use "
+                f"search_receipts instead.",
+                {"kind": "error", "error": str(exc)},
+            )
         obs = res["answer"]
         if res["rows"]:
             obs += " | data: " + json.dumps(res["rows"], default=str)[:600]

@@ -261,9 +261,17 @@ docker compose up --build
 This brings up four containers:
 
 - `ollama` — pulls `qwen2.5vl:7b`, `llama3.2:3b`, and `nomic-embed-text` automatically on first start
-- `web` — the Streamlit UI at <http://localhost:8501>
-- `api` — the REST API at <http://localhost:8000> (docs at `/docs`)
-- `mlflow` — the MLflow tracking UI at <http://localhost:5000>
+- `web` — the **Aperture** UI (Next.js) at <http://localhost:8502> — a clean white
+  dashboard with KPI cards, a spend-by-category donut, a slide-over "Scan receipts"
+  panel (drag-and-drop multi-upload → OCR), a monthly past-receipts view, and a
+  floating robot chat assistant. It calls the `api` service; the browser hits
+  same-origin `/api/*`, which Next rewrites to the API (no CORS)
+- `api` — the REST API at <http://localhost:8001> (docs at `/docs`)
+- `mlflow` — the MLflow tracking UI at <http://localhost:5001>
+
+The frontend source lives in `web-next/`. The original Streamlit app
+(`receipt_processor.py`) is kept in the repo but no longer wired into the stack;
+run it standalone with `streamlit run receipt_processor.py` if you want it.
 
 First start will take a while while the models download (~7.8 GB total).
 

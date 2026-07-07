@@ -229,17 +229,20 @@ export default function Dashboard() {
     setChatText("");
     setTyping(true);
     try {
-      const res = await fetch("/api/agent", {
+      // The SQL ledger agent reliably answers spending questions (totals, per
+      // category, counts, biggest purchase). It's steadier than the ReAct agent
+      // for this chat's aggregate-focused questions.
+      const res = await fetch("/api/ask", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ question: q }),
       });
       const j = await res.json();
       if (!res.ok) throw new Error(j.detail || res.statusText);
-      const steps = Array.isArray(j.steps) ? j.steps.length : 0;
+      const cite = j.sql ? `ledger query · ${j.rows?.length ?? 0} row${j.rows?.length === 1 ? "" : "s"}` : undefined;
       setMsgs((m) => [
         ...m,
-        { who: "bot", text: j.answer || "I couldn't find an answer for that.", cite: `${steps} tool call${steps === 1 ? "" : "s"} · SQL + RAG agent` },
+        { who: "bot", text: j.answer || "I couldn't find an answer for that.", cite },
       ]);
     } catch (e: any) {
       setMsgs((m) => [...m, { who: "bot", err: true, text: `Something went wrong: ${e?.message || "the agent didn't respond"}.` }]);
@@ -296,9 +299,6 @@ export default function Dashboard() {
           <nav>
             <button className="nav-item active">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="7" height="9" rx="1.5" /><rect x="14" y="3" width="7" height="5" rx="1.5" /><rect x="14" y="12" width="7" height="9" rx="1.5" /><rect x="3" y="16" width="7" height="5" rx="1.5" /></svg>Overview
-            </button>
-            <button className="nav-item" onClick={() => setShowPast((v) => !v)}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 7h16M4 12h16M4 17h10" /></svg>Transactions
             </button>
             <button className="nav-item" onClick={openChat}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>Ask receipts
@@ -381,7 +381,7 @@ export default function Dashboard() {
           <div className="card">
             <div className="card-head">
               <p className="card-title">Recent transactions</p>
-              <button className="link" onClick={() => setShowPast((v) => !v)}>{showPast ? "Hide all" : "View all"}</button>
+              <button className="link" onClick={() => setShowPast(true)}>View all</button>
             </div>
             {recent.length === 0 ? (
               <div className="empty">
@@ -408,52 +408,57 @@ export default function Dashboard() {
           </div>
         </section>
 
-        {/* Past receipts (grouped by month) */}
-        {showPast && (
-          <section className="card">
-            <div className="card-head">
-              <p className="section-eyebrow">Past receipts</p>
-            </div>
-            {receipts.length === 0 ? (
-              <p className="s" style={{ color: "var(--ink-3)", fontSize: 14 }}>No receipts yet.</p>
-            ) : (
-              <>
-                <select className="month-filter" value={pastMonth} onChange={(e) => setPastMonth(e.target.value)}>
-                  <option>All months</option>
-                  {pastMonths.map((m) => (
-                    <option key={m}>{monthLabel(m)}</option>
-                  ))}
-                </select>
-                {groupMonths.map((m) => {
-                  const group = filtered
-                    .filter((r) => monthKey(r.receipt_date) === m)
-                    .sort((a, b) => (b.receipt_date || "").localeCompare(a.receipt_date || ""));
-                  const subtotal = group.reduce((s, r) => s + (r.total_amount || 0), 0);
-                  const cur = group.find((r) => r.currency)?.currency;
-                  return (
-                    <div key={m} className="month-group">
-                      <p className="month-head">{monthLabel(m)} — {group.length} receipt{group.length > 1 ? "s" : ""} · {money(subtotal, cur)}</p>
-                      {group.map((r) => (
-                        <div key={r.id} className="past-row">
-                          <div className="txn-icon">{catMeta(r.category).emoji}</div>
-                          <div className="p-body">
-                            <div className="p-merch">#{r.id} · {r.vendor_name || "Unknown merchant"}</div>
-                            <div className="p-meta">{r.category || "Other"} · {r.receipt_date || "Undated"}</div>
-                          </div>
-                          <span className="p-amt num">{money(r.total_amount, r.currency)}</span>
-                          <button className="p-del" title="Delete (also removes from search memory)" onClick={() => deleteReceipt(r.id)}>
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M6 6l12 12M18 6 6 18" /></svg>
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  );
-                })}
-              </>
-            )}
-          </section>
-        )}
       </main>
+
+      {/* Past receipts modal */}
+      <div className={"scrim" + (showPast ? " open" : "")} onClick={() => setShowPast(false)} />
+      <div className={"modal" + (showPast ? " open" : "")} role="dialog" aria-modal="true" aria-label="Past receipts">
+        <div className="modal-head">
+          <p className="section-eyebrow">Past receipts</p>
+          <button className="close-x" onClick={() => setShowPast(false)} aria-label="Close">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M6 6l12 12M18 6 6 18" /></svg>
+          </button>
+        </div>
+        <div className="modal-body">
+          {receipts.length === 0 ? (
+            <p className="s" style={{ color: "var(--ink-3)", fontSize: 14 }}>No receipts yet.</p>
+          ) : (
+            <>
+              <select className="month-filter" value={pastMonth} onChange={(e) => setPastMonth(e.target.value)}>
+                <option>All months</option>
+                {pastMonths.map((m) => (
+                  <option key={m}>{monthLabel(m)}</option>
+                ))}
+              </select>
+              {groupMonths.map((m) => {
+                const group = filtered
+                  .filter((r) => monthKey(r.receipt_date) === m)
+                  .sort((a, b) => (b.receipt_date || "").localeCompare(a.receipt_date || ""));
+                const subtotal = group.reduce((s, r) => s + (r.total_amount || 0), 0);
+                const cur = group.find((r) => r.currency)?.currency;
+                return (
+                  <div key={m} className="month-group">
+                    <p className="month-head">{monthLabel(m)} — {group.length} receipt{group.length > 1 ? "s" : ""} · {money(subtotal, cur)}</p>
+                    {group.map((r) => (
+                      <div key={r.id} className="past-row">
+                        <div className="txn-icon">{catMeta(r.category).emoji}</div>
+                        <div className="p-body">
+                          <div className="p-merch">#{r.id} · {r.vendor_name || "Unknown merchant"}</div>
+                          <div className="p-meta">{r.category || "Other"} · {r.receipt_date || "Undated"}</div>
+                        </div>
+                        <span className="p-amt num">{money(r.total_amount, r.currency)}</span>
+                        <button className="p-del" title="Delete (also removes from search memory)" onClick={() => deleteReceipt(r.id)}>
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M6 6l12 12M18 6 6 18" /></svg>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })}
+            </>
+          )}
+        </div>
+      </div>
 
       {/* Add / scan slide-over */}
       <div className={"scrim" + (panelOpen ? " open" : "")} onClick={closePanel} />

@@ -280,6 +280,25 @@ select.month-filter {
 .btn-save:active { transform:scale(.98); }
 .btn-save:disabled { opacity:.5; cursor:not-allowed; }
 
+/* Centered modal (past receipts) */
+.modal {
+  position:fixed; top:50%; left:50%; z-index:50;
+  width:520px; max-width:calc(100vw - 32px); max-height:min(80vh, 720px);
+  background:var(--surface); border:1px solid var(--border); border-radius:20px;
+  box-shadow:var(--shadow-lg); display:flex; flex-direction:column; padding:24px;
+  transform:translate(-50%, -50%) scale(.97); opacity:0; pointer-events:none;
+  transition:opacity .2s, transform .2s;
+}
+.modal.open { transform:translate(-50%, -50%) scale(1); opacity:1; pointer-events:auto; }
+.modal-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:6px; }
+.modal-head .close-x {
+  width:30px; height:30px; border-radius:9px; border:none; background:none;
+  color:var(--ink-3); display:grid; place-items:center;
+}
+.modal-head .close-x:hover { background:var(--sunken); color:var(--ink); }
+.modal-head .close-x svg { width:17px; height:17px; stroke-width:2; }
+.modal-body { flex:1; overflow-y:auto; margin:0 -4px; padding:4px; }
+
 /* Toast */
 .toast {
   position:fixed; bottom:24px; left:50%; transform:translate(-50%, 20px); z-index:60;
