@@ -123,6 +123,72 @@ class ReceiptData(BaseModel):
     cash: Optional[float] = None
     change: Optional[float] = None
     currency: Optional[str] = None
+    category: Optional[str] = None  # one of VALID_CATEGORIES; see categorize()
+
+
+# --------------------------------------------------------------------------- #
+# 1b. Expense categorization — a fixed, small taxonomy for the dashboard
+# --------------------------------------------------------------------------- #
+# The vision model is asked to pick one of these at extraction time. We never
+# trust that blindly: categorize() validates the model's answer and, when it is
+# missing or off-list, falls back to a keyword heuristic on the vendor name and
+# item descriptions, then finally to "Other". Keeping this list tiny keeps the
+# pie chart readable and the model's choices consistent.
+VALID_CATEGORIES = ("Food", "Shopping", "Health", "Other")
+
+# Checked in this order; first hit wins. Health before Food/Shopping so a
+# "pharmacy" never gets mislabeled by a stray generic word.
+_CATEGORY_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
+    ("Health", ("pharmacy", "drug", "drugstore", "mercury", "watson", "clinic",
+                "hospital", "medical", "medicine", "dental", "optical", "health",
+                "wellness", "apothecary", "rx")),
+    ("Food", ("restaurant", "cafe", "coffee", "grill", "kitchen", "food", "dining",
+              "diner", "bakery", "pizza", "burger", "chicken", "bbq", "eatery",
+              "bistro", "resto", "lunch", "meal", "tea", "juice", "snack",
+              "catering", "canteen", "grocery", "groceries", "supermarket",
+              "market", "deli", "pepper", "jollibee", "mcdo", "starbucks")),
+    ("Shopping", ("mart", "store", "shop", "mall", "retail", "department",
+                  "boutique", "hardware", "apparel", "clothing", "clothes",
+                  "electronics", "fashion", "shoes", "lazada", "shopee",
+                  "robinson", "watsons")),
+]
+
+
+def _match_category(text: str) -> str:
+    """Keyword-match free text (vendor + items) to a category; 'Other' if none."""
+    low = (text or "").lower()
+    for cat, keywords in _CATEGORY_KEYWORDS:
+        if any(kw in low for kw in keywords):
+            return cat
+    return "Other"
+
+
+def _normalize_model_category(value) -> Optional[str]:
+    """Return a canonical VALID_CATEGORIES value if the model's answer maps to
+    one, else None (so the caller falls back to the keyword heuristic)."""
+    if not value:
+        return None
+    v = str(value).strip().lower()
+    synonyms = {
+        "food": "Food", "food & dining": "Food", "dining": "Food",
+        "restaurant": "Food", "groceries": "Food", "grocery": "Food",
+        "shopping": "Shopping", "retail": "Shopping", "retail/shopping": "Shopping",
+        "merchandise": "Shopping",
+        "health": "Health", "health/pharmacy": "Health", "pharmacy": "Health",
+        "medical": "Health",
+        "other": "Other",
+    }
+    return synonyms.get(v)
+
+
+def categorize(data: "ReceiptData") -> str:
+    """Resolve a receipt's spending category. Trusts the model's `category` when
+    it maps to the fixed taxonomy; otherwise infers from vendor + items."""
+    from_model = _normalize_model_category(getattr(data, "category", None))
+    if from_model:
+        return from_model
+    items = " ".join(i.description or "" for i in getattr(data, "items", []) or [])
+    return _match_category(f"{data.vendor_name or ''} {items}")
 
 
 # --------------------------------------------------------------------------- #
@@ -201,6 +267,7 @@ def extract_receipt_validated(
             raw = _fix_payment_fields(_dedupe_items(_remap_summary_lines(_clean_items(raw))))
             raw = _coerce_numeric_fields(raw)
             data = validate_output(raw)
+            data.category = categorize(data)  # normalize to the fixed taxonomy
             reasons = needs_disambiguation(data)
 
             latency = time.time() - t0
@@ -246,6 +313,7 @@ def init_db() -> None:
                 cash REAL,
                 change REAL,
                 currency TEXT,
+                category TEXT,
                 flagged INTEGER
             )
             """
@@ -275,6 +343,7 @@ def init_db() -> None:
             ("vat_exempt_sales", "REAL"),
             ("zero_rated_sales", "REAL"),
             ("discount_type", "TEXT"),
+            ("category", "TEXT"),
         ]
         
         for col_name, col_type in columns_to_add:
@@ -295,8 +364,8 @@ def save_receipt(data: ReceiptData, source_file: str, flagged: bool) -> int:
             INSERT INTO receipts (source_file, processed_at, vendor_name, vendor_tin,
                 vendor_address, receipt_number, receipt_date, subtotal, vatable_sales,
                 vat_exempt_sales, zero_rated_sales, vat_amount, discount, discount_type,
-                total_amount, cash, change, currency, flagged)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                total_amount, cash, change, currency, category, flagged)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 source_file,
@@ -317,6 +386,7 @@ def save_receipt(data: ReceiptData, source_file: str, flagged: bool) -> int:
                 data.cash,
                 data.change,
                 data.currency,
+                categorize(data),
                 int(flagged),
             ),
         )
@@ -345,6 +415,60 @@ def list_receipts(limit: int = 100) -> list[dict]:
             "SELECT * FROM receipts ORDER BY id DESC LIMIT ?", (limit,)
         ).fetchall()
         return [dict(r) for r in rows]
+
+
+def backfill_categories() -> None:
+    """Assign a category to any receipt saved before categorization existed,
+    inferring from vendor name + its line items. Idempotent; only touches rows
+    whose category is NULL/empty, so it is cheap to call on every dashboard load."""
+    init_db()
+    with sqlite3.connect(DB_PATH) as con:
+        con.row_factory = sqlite3.Row
+        rows = con.execute(
+            "SELECT id, vendor_name FROM receipts WHERE category IS NULL OR category = ''"
+        ).fetchall()
+        for r in rows:
+            items = con.execute(
+                "SELECT description FROM line_items WHERE receipt_id = ?", (r["id"],)
+            ).fetchall()
+            text = (r["vendor_name"] or "") + " " + " ".join(
+                (i["description"] or "") for i in items
+            )
+            con.execute(
+                "UPDATE receipts SET category = ? WHERE id = ?",
+                (_match_category(text), r["id"]),
+            )
+        con.commit()
+
+
+def expense_summary(limit: int = 1000) -> dict:
+    """Aggregate spending for the dashboard: grand total, receipt count,
+    per-category totals (sorted high→low), the top category, and the dominant
+    currency. Categorizes any legacy uncategorized receipts first."""
+    backfill_categories()
+    rows = list_receipts(limit=limit)
+    by_category: dict[str, float] = {}
+    currency_counts: dict[str, int] = {}
+    total = 0.0
+    for r in rows:
+        amount = r.get("total_amount") or 0.0
+        total += amount
+        cat = r.get("category") or "Other"
+        by_category[cat] = by_category.get(cat, 0.0) + amount
+        cur = r.get("currency")
+        if cur:
+            currency_counts[cur] = currency_counts.get(cur, 0) + 1
+    ordered = dict(sorted(by_category.items(), key=lambda kv: kv[1], reverse=True))
+    top_category = next(iter(ordered), None)
+    currency = max(currency_counts, key=currency_counts.get) if currency_counts else None
+    return {
+        "total": round(total, 2),
+        "count": len(rows),
+        "by_category": ordered,
+        "top_category": top_category,
+        "currency": currency,
+        "mixed_currency": len(currency_counts) > 1,
+    }
 
 
 def get_latest_receipt_id() -> int | None:
@@ -386,7 +510,7 @@ SCHEMA_DESCRIPTION = """
 Table receipts(id, source_file, processed_at, vendor_name, vendor_tin,
   vendor_address, receipt_number, receipt_date, subtotal, vatable_sales,
   vat_exempt_sales, zero_rated_sales, vat_amount, discount, discount_type,
-  total_amount, cash, change, currency, flagged)
+  total_amount, cash, change, currency, category, flagged)
   - id: unique identifier for each receipt
   - source_file: original filename of the uploaded receipt image
   - processed_at: timestamp when the receipt was processed (ISO format)
@@ -406,6 +530,7 @@ Table receipts(id, source_file, processed_at, vendor_name, vendor_tin,
   - cash: amount of cash tendered by customer
   - change: change given back to customer
   - currency: currency code shown on the receipt (e.g. "PHP", "USD", "EUR"); may be NULL
+  - category: spending category, one of 'Food', 'Shopping', 'Health', 'Other'
   - flagged: 1 if receipt needs manual review, 0 otherwise
 
 Table line_items(id, receipt_id, description, quantity, unit_price, amount)

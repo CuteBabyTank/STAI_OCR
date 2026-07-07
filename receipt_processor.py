@@ -127,6 +127,14 @@ STRICT RULES — follow exactly:
 15. currency is the currency actually shown on the receipt — read it from the
     symbol or code printed next to the amounts (₱/PHP, $/USD, €/EUR, £/GBP, ¥/JPY,
     ₹/INR, etc.). If no currency is indicated, return null.
+16. category is the ONE spending category this purchase best fits. This is the
+    only field where you may judge rather than transcribe. Choose EXACTLY one of:
+      - "Food"     — restaurants, cafes, fast food, bakeries, groceries, supermarkets
+      - "Shopping" — retail, clothing, electronics, department stores, general goods
+      - "Health"   — pharmacies, drugstores, clinics, hospitals, medical/dental
+      - "Other"    — anything that clearly fits none of the above
+    Base the choice on the merchant and the items. Output one of those four exact
+    words. If genuinely unclear, use "Other". Never invent a different category.
 
 Return ONLY a single valid JSON object — no prose, no markdown fences. Use these
 exact keys. Use null when a value is not present. Money values are plain numbers
@@ -156,7 +164,8 @@ exact keys. Use null when a value is not present. Money values are plain numbers
   "total_amount": number,          // the "Total" / "Amount Due" line. NOT cash, NOT change.
   "cash": number,                  // cash tendered / amount paid by the customer ("CASH", "TENDERED")
   "change": number,                // change given back to the customer ("CHANGE")
-  "currency": string               // currency code/symbol shown, e.g. "PHP", "USD", "EUR"; null if none
+  "currency": string,              // currency code/symbol shown, e.g. "PHP", "USD", "EUR"; null if none
+  "category": string               // EXACTLY one of: "Food", "Shopping", "Health", "Other"
 }
 
 Remember: transcribe only what is printed. A missing value must be null, never a
