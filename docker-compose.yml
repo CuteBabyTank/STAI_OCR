@@ -40,7 +40,7 @@ services:
       mlflow:
         condition: service_started
     environment:
-      - OLLAMA_HOST=http://ollama:11434
+      - OLLAMA_HOST=http://host.docker.internal:11434
       - MLFLOW_TRACKING_URI=sqlite:////app/mlflow.db
     volumes:
       - .:/app
@@ -56,7 +56,7 @@ services:
       mlflow:
         condition: service_started
     environment:
-      - OLLAMA_HOST=http://ollama:11434
+      - OLLAMA_HOST=http://host.docker.internal:11434
       - MLFLOW_TRACKING_URI=sqlite:////app/mlflow.db
     volumes:
       - .:/app
