@@ -3,7 +3,7 @@ STAI_OCR — Receipt Processor & Ledger Agent
 ===========================================
 
 Drag-and-drop any receipt image (restaurant, cafe, grocery, retail, pharmacy);
-a local vision LLM (Ollama `qwen3-vl:8b`) reads it and extracts the useful fields
+a local vision LLM (Ollama `qwen2.5vl:7b`) reads it and extracts the useful fields
 (merchant, tax ID, line items, price, discount, tax/VAT, totals). Each receipt is
 reconciled (line items vs total), shown on an editable ledger, exportable to
 CSV / Excel, and indexed for a natural-language ReAct agent ("Ask your receipts").
@@ -11,13 +11,15 @@ CSV / Excel, and indexed for a natural-language ReAct agent ("Ask your receipts"
 Setup (run once, in a terminal or notebook cell):
 -------------------------------------------------
     %pip install streamlit ollama pandas numpy openpyxl pillow --quiet
-    !ollama pull qwen3-vl:8b            # vision/OCR model (reads the image)
+    !ollama pull qwen2.5vl:7b           # vision/OCR model (reads the image)
     !ollama pull nomic-embed-text       # embeddings for semantic search (RAG)
 
-    # NOTE: llama3.2:3b is TEXT-ONLY and cannot read images. `qwen3-vl:8b` is a
+    # NOTE: llama3.2:3b is TEXT-ONLY and cannot read images. `qwen2.5vl:7b` is a
     # vision model tuned for document/invoice extraction with structured output;
     # it reads receipt digits and layouts more accurately than minicpm-v/llava
-    # and emits clean JSON. (llama3.2-vision needs a newer Ollama engine than
+    # and emits clean JSON. (Avoid the newer qwen3-vl: it is a *thinking* model
+    # that burns its token budget reasoning and returns empty output under the
+    # format="json" grammar. llama3.2-vision needs a newer Ollama engine than
     # some builds provide — it fails with "unknown architecture mllama".)
 
 Run the app:
@@ -47,7 +49,7 @@ except ImportError:  # pragma: no cover - surfaced in the UI instead
 # --------------------------------------------------------------------------- #
 # Configuration
 # --------------------------------------------------------------------------- #
-DEFAULT_MODEL = "qwen3-vl:8b"
+DEFAULT_MODEL = "qwen2.5vl:7b"
 
 HEADER_FIELDS = [
     "vendor_name",
@@ -368,7 +370,8 @@ def extract_receipt(image_bytes: bytes, model: str) -> dict:
             }
         ],
         format="json",  # constrain output to valid JSON (avoids rambling/truncation)
-        options={"temperature": 0, "num_predict": 1024},
+        # num_ctx: prompt + tokenized image can exceed Ollama's 4096-token default.
+        options={"temperature": 0, "num_predict": 1024, "num_ctx": 8192},
     )
     content = response["message"]["content"]
     try:

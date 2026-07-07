@@ -20,7 +20,7 @@ services:
       sh -c "
       ollama serve &
       sleep 5;
-      (ollama list | grep -q qwen3-vl || ollama pull qwen3-vl:8b) || true;
+      (ollama list | grep -q qwen2.5vl || ollama pull qwen2.5vl:7b) || true;
       (ollama list | grep -q llama3.2:3b || ollama pull llama3.2:3b) || true;
       (ollama list | grep -q nomic-embed-text || ollama pull nomic-embed-text) || true;
       wait
@@ -69,8 +69,10 @@ services:
       --port 5000
       --backend-store-uri sqlite:////app/mlflow.db
       --default-artifact-root /app/mlruns
+    # Host port 5001 (not 5000): macOS Control Center / AirPlay Receiver binds
+    # 5000 by default, which collides with the container's published port.
     ports:
-      - "5000:5000"
+      - "5001:5000"
     volumes:
       - .:/app
 

@@ -192,7 +192,9 @@ def extract_receipt_validated(
                 model=model,
                 messages=[{"role": "user", "content": EXTRACTION_PROMPT, "images": [image_bytes]}],
                 format="json",
-                options={"temperature": 0, "num_predict": 1024},
+                # num_ctx: the extraction prompt + a tokenized receipt image can
+                # exceed Ollama's 4096-token default context; 8192 gives headroom.
+                options={"temperature": 0, "num_predict": 1024, "num_ctx": 8192},
             )
             content = response["message"]["content"]
             raw = _coerce_json(content)
