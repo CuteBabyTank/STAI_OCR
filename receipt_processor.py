@@ -37,6 +37,7 @@ import json
 import re
 from datetime import date
 
+import altair as alt
 import pandas as pd
 import streamlit as st
 
@@ -680,6 +681,77 @@ html, body, [class*="css"]{ font-family:'Inter',sans-serif; color:var(--ink); }
 """
 
 
+# --------------------------------------------------------------------------- #
+# Expense dashboard (KPI row + spend-by-category donut)
+# --------------------------------------------------------------------------- #
+# Categorical palette validated with the dataviz skill's validator (colorblind-
+# safe on the app's light cream surface #FBF7EF). Fixed order, never cycled;
+# "Other" is a neutral warm gray as the catch-all bucket. Legend + tooltip give
+# the secondary (non-color) encoding the validator requires.
+CATEGORY_ORDER = ["Food", "Shopping", "Health", "Other"]
+CATEGORY_COLORS = {
+    "Food": "#2a78d6",      # blue
+    "Shopping": "#1baf7a",  # aqua
+    "Health": "#eda100",    # yellow
+    "Other": "#9a978f",     # neutral warm gray
+}
+_CURRENCY_SYMBOLS = {"PHP": "₱", "USD": "$", "EUR": "€", "GBP": "£", "JPY": "¥", "INR": "₹"}
+
+
+def render_dashboard() -> None:
+    """Summary band at the top: Total / Receipts / Top category tiles beside a
+    donut of spend-by-category. Renders only when the ledger has receipts."""
+    try:
+        from core import expense_summary
+
+        summary = expense_summary()
+    except Exception:  # noqa: BLE001 - a dashboard hiccup must never break the app
+        return
+    if not summary.get("count"):
+        return  # empty ledger: nothing to chart yet
+
+    cur = summary.get("currency") or ""
+    sym = _CURRENCY_SYMBOLS.get(cur, f"{cur} " if cur else "")
+
+    st.markdown('<div class="eyebrow">Your spending</div>', unsafe_allow_html=True)
+    # One flat row of tiles + donut, so each metric gets its own full-width
+    # column (nesting metrics inside a half-width column truncates the total).
+    m1, m2, m3, right = st.columns([1.25, 1, 1.15, 1.6])
+    m1.metric("Total spent", f"{sym}{summary['total']:,.2f}")
+    m2.metric("Receipts", summary["count"])
+    m3.metric("Top category", summary["top_category"] or "—")
+    if summary.get("mixed_currency"):
+        m1.caption("⚠ Multiple currencies; summed as-is.")
+
+    with right:
+        by_cat = summary["by_category"]
+        present = [c for c in CATEGORY_ORDER if c in by_cat]
+        present += [c for c in by_cat if c not in present]  # any unexpected label, last
+        df = pd.DataFrame({"Category": present, "Amount": [by_cat[c] for c in present]})
+        donut = (
+            alt.Chart(df)
+            .mark_arc(innerRadius=58, stroke="#FBF7EF", strokeWidth=2)  # 2px surface gap
+            .encode(
+                theta=alt.Theta("Amount:Q", stack=True),
+                color=alt.Color(
+                    "Category:N",
+                    scale=alt.Scale(
+                        domain=present,
+                        range=[CATEGORY_COLORS.get(c, "#9a978f") for c in present],
+                    ),
+                    legend=alt.Legend(title=None, orient="right", labelFontSize=13),
+                ),
+                order=alt.Order("Amount:Q", sort="descending"),
+                tooltip=[
+                    alt.Tooltip("Category:N", title="Category"),
+                    alt.Tooltip("Amount:Q", title="Spent", format=",.2f"),
+                ],
+            )
+            .properties(height=230)
+        )
+        st.altair_chart(donut, use_container_width=True)
+
+
 def render_hero() -> None:
     st.markdown(
         """
@@ -703,6 +775,7 @@ def main() -> None:
     st.set_page_config(page_title="Receipt Ledger — STAI_OCR", page_icon="🧾", layout="wide")
     st.markdown(THEME_CSS, unsafe_allow_html=True)
     render_hero()
+    render_dashboard()
 
     with st.sidebar:
         st.markdown('<div class="eyebrow">Settings</div>', unsafe_allow_html=True)

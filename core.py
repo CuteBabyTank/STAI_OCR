@@ -556,6 +556,10 @@ Rules:
 - Use SQLite date functions (date(), strftime()) for date math.
 - Use LIKE with '%' for partial matches on text fields (vendor names, etc.).
 - For monetary values, use total_amount from receipts unless line-item detail is requested.
+- For questions about spending categories (food, shopping, health), filter on the
+  receipts.category column with an exact match — e.g. category = 'Food'. It is always
+  one of 'Food', 'Shopping', 'Health', 'Other'. Do NOT match category words against
+  item descriptions.
 - Use ROUND(SUM(...), 2) for monetary totals to avoid floating point issues.
 - Always include an alias for aggregate results (AS total_spend, AS count, etc.).
 - When counting, use COUNT(*) not COUNT(column) unless you need non-null counts.
@@ -575,6 +579,12 @@ SQL: SELECT ROUND(SUM(total_amount), 2) AS total_spend FROM receipts WHERE vendo
 
 Question: Which receipts were flagged for review?
 SQL: SELECT id, vendor_name, receipt_date, total_amount FROM receipts WHERE flagged = 1
+
+Question: How much did I spend on Food?
+SQL: SELECT ROUND(SUM(total_amount), 2) AS total_spend FROM receipts WHERE category = 'Food' AND total_amount IS NOT NULL
+
+Question: What is my spending by category?
+SQL: SELECT category, ROUND(SUM(total_amount), 2) AS total_spend FROM receipts WHERE total_amount IS NOT NULL GROUP BY category ORDER BY total_spend DESC
 
 Question: How much VAT did I pay this month?
 SQL: SELECT ROUND(SUM(vat_amount), 2) AS total_vat FROM receipts WHERE vat_amount IS NOT NULL AND receipt_date >= date('now', 'start of month')
