@@ -824,6 +824,18 @@ def render_past_receipts() -> None:
     from core import list_receipts, get_receipt_items, delete_receipt
 
     rows = list_receipts(limit=1000)
+
+    # Keep the (potentially long) list tucked behind a toggle button so the main
+    # page stays tidy; only render it when the user opens it.
+    st.session_state.setdefault("show_past", False)
+    open_now = st.session_state["show_past"]
+    label = "📁 Hide past receipts" if open_now else f"📁 View past receipts ({len(rows)})"
+    if st.button(label, key="toggle_past"):
+        st.session_state["show_past"] = not open_now
+        st.rerun()
+    if not st.session_state["show_past"]:
+        return
+
     st.markdown('<div class="eyebrow">Past receipts</div>', unsafe_allow_html=True)
     if not rows:
         st.caption("No receipts yet — process one above and it will appear here.")
