@@ -152,10 +152,10 @@ Fill in owners before the presentation — each member owns and can walk through
  
 | Owner | Modules |
 |---|---|
-| _Nathaniel Adiong_ | Prompt Engineering · Structured Outputs |
-| _Clarence Ang_ | RAG · Guardrails |
-| _Fraser Sim_ | ReAct Agent · SQL Agent |
-| _Aaron Go_ | LLMOps Monitoring · Tool Use · Dockerization |
+| _Nathaniel Adiong_ | Chat UI · API Endpoints · Dockerization |
+| _Clarence Ang_ | Prompt Engineering · Structured Outputs · Guardrails · Disambiguation |
+| _Fraser Sim_ | RAG · Memory · Tool Use |
+| _Aaron Go_ | SQL Agent · ReAct Agent · LLMOps Monitoring |
  
  
 ---
