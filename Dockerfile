@@ -10,8 +10,8 @@ COPY . .
 ENV OLLAMA_HOST=http://ollama:11434
 ENV MLFLOW_TRACKING_URI=file:/app/mlruns
 
-EXPOSE 8501 8000
+EXPOSE 8000
 
-# Default: run the Streamlit UI. Override CMD to run the API instead, e.g.:
-#   docker run ... uvicorn api:app --host 0.0.0.0 --port 8000
-CMD ["streamlit", "run", "receipt_processor.py", "--server.port=8501", "--server.address=0.0.0.0"]
+# This image is the backend: the FastAPI REST API that the Next.js frontend
+# (web-next) calls. The UI is a separate service — see docker-compose.yml.
+CMD ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000"]

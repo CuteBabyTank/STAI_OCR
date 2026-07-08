@@ -1,6 +1,6 @@
 """
-core.py — shared logic for STAI_OCR, used by both the Streamlit UI
-(receipt_processor.py) and the REST API (api.py).
+core.py — shared logic for STAI_OCR, exposed to the Next.js frontend through
+the REST API (api.py). Pure extraction primitives live in extraction.py.
 
 Adds, on top of the original extraction pipeline:
   - Structured Outputs : Pydantic schema validation of the model's JSON
@@ -18,6 +18,7 @@ Adds, on top of the original extraction pipeline:
 from __future__ import annotations
 
 import json
+import math
 import re
 import sqlite3
 import time
@@ -33,13 +34,24 @@ try:
 except ImportError:  # pragma: no cover
     ollama = None
 
+# Per-token logprobs (the basis for measured confidence) need a recent ollama
+# client. Feature-detect so an older client degrades gracefully — extraction
+# still works, confidence is simply omitted — instead of raising on the kwarg.
+_OLLAMA_SUPPORTS_LOGPROBS = False
+if ollama is not None:
+    try:
+        import inspect as _inspect
+        _OLLAMA_SUPPORTS_LOGPROBS = "logprobs" in _inspect.signature(ollama.chat).parameters
+    except (ValueError, TypeError):  # pragma: no cover
+        _OLLAMA_SUPPORTS_LOGPROBS = False
+
 try:
     import numpy as np
 except ImportError:  # pragma: no cover - numpy ships with pandas, but stay safe
     np = None
 
-# Re-use the original prompt/cleanup pipeline so behavior doesn't change.
-from receipt_processor import (
+# Re-use the shared prompt/cleanup pipeline so behavior doesn't change.
+from extraction import (
     DEFAULT_MODEL,
     EXTRACTION_PROMPT,
     _clean_items,
@@ -80,6 +92,210 @@ def _coerce_numeric_fields(data: dict) -> dict:
                 item[field] = _num(item[field])
     return data
 
+
+# --------------------------------------------------------------------------- #
+# Confidence — a *measured* score from the model's token probability
+# distribution, NOT a number the model reports about itself.
+# --------------------------------------------------------------------------- #
+# When we ask Ollama for `logprobs`, every generated token comes back with the
+# log-probability the model assigned to it while decoding. A field's value is
+# some contiguous run of those tokens (e.g. the digits of "540.00"). We score a
+# field as the GEOMETRIC MEAN of its value-tokens' probabilities:
+#
+#       confidence(field) = exp( mean_i  log p_i )   over the value's tokens
+#
+# That is a real property of the output distribution: if the model was torn
+# between "540" and "340" for a digit, that token's probability is ~0.5 and it
+# drags the field's confidence down; a digit it was certain about sits near 1.0.
+# Structural/key tokens ({ , " , "vendor_name": ) are near-certain and are
+# excluded — we only score the tokens that form the *value* the user sees.
+_HEADER_STR_FIELDS = (
+    "vendor_name", "vendor_tin", "vendor_address", "receipt_number",
+    "receipt_date", "discount_type", "currency", "category",
+)
+_HEADER_CONF_FIELDS = _HEADER_STR_FIELDS + _TOP_LEVEL_NUMERIC_FIELDS
+_ITEM_CONF_FIELDS = ("description", "quantity", "unit_price", "amount")
+
+# A JSON value literal: null, a quoted string, a number (with optional commas),
+# or a boolean. Used to grab exactly the value that follows a `"key":`.
+_JSON_VALUE_RE = r'(null|"(?:[^"\\]|\\.)*"|-?\d[\d,]*(?:\.\d+)?|true|false)'
+
+
+def _logprob_token_spans(logprobs) -> tuple[list[tuple[int, int, float]], str]:
+    """Turn Ollama's per-token logprobs into [(start, end, logprob)] character
+    spans over the reconstructed output text. The reconstruction is exact
+    (verified: "".join(tokens) == message.content), so these offsets line up
+    with the JSON we parse the fields out of."""
+    spans: list[tuple[int, int, float]] = []
+    parts: list[str] = []
+    pos = 0
+    for entry in logprobs or []:
+        # Support both the ollama object (.token/.logprob) and a plain dict.
+        tok = getattr(entry, "token", None)
+        lp = getattr(entry, "logprob", None)
+        if tok is None and isinstance(entry, dict):
+            tok, lp = entry.get("token"), entry.get("logprob")
+        if tok is None or lp is None:
+            continue
+        spans.append((pos, pos + len(tok), float(lp)))
+        parts.append(tok)
+        pos += len(tok)
+    return spans, "".join(parts)
+
+
+def _span_confidence(spans, a: int, b: int) -> float | None:
+    """Geometric-mean probability of the tokens overlapping char range [a, b)."""
+    lps = [lp for (s, e, lp) in spans if s < b and e > a]
+    if not lps:
+        return None
+    return math.exp(sum(lps) / len(lps))
+
+
+def _geomean(probs) -> float | None:
+    vals = [p for p in probs if p is not None and p > 0]
+    if not vals:
+        return None
+    return math.exp(sum(math.log(p) for p in vals) / len(vals))
+
+
+def _value_span_after_key(text: str, key: str, start: int = 0):
+    """Char span (a, b) of the value literal following `"key":`, searching from
+    `start`. Returns None if the key isn't found."""
+    m = re.search(r'"%s"\s*:\s*%s' % (re.escape(key), _JSON_VALUE_RE), text[start:])
+    if not m:
+        return None
+    return start + m.start(1), start + m.end(1)
+
+
+def _match_bracket(text: str, open_idx: int, opener: str, closer: str) -> int:
+    """Index just past the bracket that matches the one at `open_idx`, string-aware."""
+    depth = 0
+    in_str = esc = False
+    for i in range(open_idx, len(text)):
+        c = text[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif c == "\\":
+                esc = True
+            elif c == '"':
+                in_str = False
+        elif c == '"':
+            in_str = True
+        elif c == opener:
+            depth += 1
+        elif c == closer:
+            depth -= 1
+            if depth == 0:
+                return i + 1
+    return len(text)
+
+
+def _score_raw_items(text: str, spans) -> list[dict]:
+    """Per-item field confidences, in the order items appear in the raw output."""
+    out: list[dict] = []
+    im = re.search(r'"items"\s*:\s*\[', text)
+    if not im:
+        return out
+    arr_end = _match_bracket(text, im.end() - 1, "[", "]")
+    cursor = im.end()
+    while True:
+        ob = text.find("{", cursor, arr_end)
+        if ob == -1:
+            break
+        oe = _match_bracket(text, ob, "{", "}")
+        conf: dict[str, float] = {}
+        for key in _ITEM_CONF_FIELDS:
+            span = _value_span_after_key(text, key, ob)
+            if not span or span[0] >= oe:
+                continue
+            if text[span[0]:span[1]] == "null":
+                continue
+            p = _span_confidence(spans, *span)
+            if p is not None:
+                conf[key] = p
+        out.append(conf)
+        cursor = oe
+    return out
+
+
+def compute_extraction_confidence(logprobs, orig_json: dict, data: "ReceiptData") -> dict:
+    """Build the confidence report for one extraction, straight from the model's
+    token logprobs. Returns:
+
+        {"overall": float|None,                  # geo-mean over all scored values
+         "fields": {field: prob, ...},           # header/summary fields, 0..1
+         "items":  [{field: prob, ...}, ...]}    # aligned to data.items
+
+    Only values the model actually printed are scored. Numeric header fields are
+    gated on matching the final value, so a figure the reconciler *re-derived*
+    (rather than read) is honestly left unscored instead of borrowing a token
+    probability that no longer applies."""
+    spans, text = _logprob_token_spans(logprobs)
+    empty = {"overall": None, "fields": {}, "items": []}
+    if not spans or not text:
+        return empty
+
+    fields: dict[str, float] = {}
+    for key in _HEADER_CONF_FIELDS:
+        fv = getattr(data, key, None)
+        if fv is None:
+            continue
+        span = _value_span_after_key(text, key)
+        if not span:
+            continue
+        literal = text[span[0]:span[1]]
+        if literal == "null":
+            continue
+        # Gate numeric fields on value-equality: if post-processing changed the
+        # number that lands in this field, its read-confidence no longer applies.
+        if key in _TOP_LEVEL_NUMERIC_FIELDS and not _num_close(_num(literal), _num(fv)):
+            continue
+        p = _span_confidence(spans, *span)
+        if p is not None:
+            fields[key] = p
+
+    # Map raw-item confidences onto the final (cleaned/de-duped) items by amount,
+    # then description — cleaning never changes an item's amount, so it's a stable key.
+    raw_items = orig_json.get("items") or []
+    raw_conf = _score_raw_items(text, spans)
+    items: list[dict] = []
+    used: set[int] = set()
+    for it in data.items:
+        idx = _best_raw_item(it, raw_items, used)
+        if idx is not None and idx < len(raw_conf):
+            used.add(idx)
+            items.append(raw_conf[idx])
+        else:
+            items.append({})
+
+    probs = list(fields.values()) + [c.get("amount") for c in items]
+    return {"overall": _geomean(probs), "fields": fields, "items": items}
+
+
+def _num_close(a, b, tol: float = 0.01) -> bool:
+    if a is None or b is None:
+        return False
+    return abs(a - b) <= tol
+
+
+def _best_raw_item(final_item, raw_items, used: set[int]) -> int | None:
+    """Index of the unused raw item that best matches a final line item."""
+    amt = _num(getattr(final_item, "amount", None))
+    if amt is not None:
+        for j, ri in enumerate(raw_items):
+            if j not in used and _num_close(_num(ri.get("amount")), amt):
+                return j
+    desc = re.sub(r"[^a-z0-9]", "", (getattr(final_item, "description", "") or "").lower())
+    if desc:
+        for j, ri in enumerate(raw_items):
+            if j in used:
+                continue
+            rd = re.sub(r"[^a-z0-9]", "", (ri.get("description") or "").lower())
+            if rd and (rd in desc or desc in rd):
+                return j
+    return None
+
 # --------------------------------------------------------------------------- #
 # Config
 # --------------------------------------------------------------------------- #
@@ -88,11 +304,36 @@ MAX_IMAGE_BYTES = 8 * 1024 * 1024  # 8 MB
 ALLOWED_CONTENT_TYPES = {"image/png", "image/jpeg", "image/webp", "image/bmp"}
 
 # Text-only model used by the SQL agent, the RAG answerer, and the ReAct planner.
-AGENT_MODEL = "llama3.2:3b"
+# qwen2.5:7b reasons/routes and summarizes numbers far more reliably than a 3B model
+# (which mis-routed tools, looped, and garbled amounts). It runs partly on CPU on a
+# 4GB GPU so it's a bit slower per turn — worth it for correct answers. Swap back to
+# "llama3.2:3b" if you want faster-but-weaker responses.
+AGENT_MODEL = "qwen2.5:latest"
 # Embedding model used by the RAG retriever. Small (~275 MB), fast, local.
 EMBED_MODEL = "nomic-embed-text"
 
 mlflow.set_experiment("stai_ocr_receipts")
+
+
+def _fresh_run(run_name: str):
+    """Start an MLflow run, first clearing any run left dangling by a previously
+    abandoned request. MLflow's active-run state is process-global, so if a
+    streaming generator (agent_stream) is abandoned when a client disconnects, its
+    run can stay 'active' and make every later start_run() raise 'Run is already
+    active'. Ending any lingering run first makes each call self-healing."""
+    try:
+        if mlflow.active_run() is not None:
+            mlflow.end_run()
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        return mlflow.start_run(run_name=run_name)
+    except Exception:  # noqa: BLE001 - a cross-thread leak: force-end and retry once
+        try:
+            mlflow.end_run()
+        except Exception:  # noqa: BLE001
+            pass
+        return mlflow.start_run(run_name=run_name)
 
 
 # --------------------------------------------------------------------------- #
@@ -240,11 +481,16 @@ def needs_disambiguation(data: ReceiptData) -> list[str]:
 # --------------------------------------------------------------------------- #
 def extract_receipt_validated(
     image_bytes: bytes, model: str = DEFAULT_MODEL, content_type: str | None = None
-) -> tuple[ReceiptData, list[str]]:
+) -> tuple[ReceiptData, list[str], dict]:
     """Full guarded pipeline: validate input -> call the vision model -> clean
     up -> validate output schema -> check for disambiguation needs. Every call
-    is traced to MLflow (latency, success/failure, output size)."""
-    with mlflow.start_run(run_name=f"extract_{int(time.time())}"):
+    is traced to MLflow (latency, success/failure, output size).
+
+    Returns (data, disambiguation_reasons, confidence). `confidence` is a
+    measured report derived from the model's token-level logprobs
+    (see compute_extraction_confidence) — an honest read of the output
+    distribution, never a self-reported number."""
+    with _fresh_run(f"extract_{int(time.time())}"):
         mlflow.log_param("model", model)
         mlflow.log_param("image_bytes", len(image_bytes))
         t0 = time.time()
@@ -254,6 +500,9 @@ def extract_receipt_validated(
             if ollama is None:
                 raise RuntimeError("The `ollama` package is not installed.")
 
+            # Ask the runtime to return the per-token probability distribution so we
+            # can *measure* field confidence instead of guessing it (when supported).
+            logprob_kwargs = {"logprobs": True, "top_logprobs": 1} if _OLLAMA_SUPPORTS_LOGPROBS else {}
             response = ollama.chat(
                 model=model,
                 messages=[{"role": "user", "content": EXTRACTION_PROMPT, "images": [image_bytes]}],
@@ -261,14 +510,27 @@ def extract_receipt_validated(
                 # num_ctx: the extraction prompt + a tokenized receipt image can
                 # exceed Ollama's 4096-token default context; 8192 gives headroom.
                 options={"temperature": 0, "num_predict": 1024, "num_ctx": 8192},
+                **logprob_kwargs,
             )
             content = response["message"]["content"]
             raw = _coerce_json(content)
+            # Keep a pristine copy of the model's own items (pre-cleanup) so
+            # confidence can be aligned back to the values it actually printed.
+            orig_json = json.loads(json.dumps(raw))
             raw = _fix_payment_fields(_dedupe_items(_remap_summary_lines(_clean_items(raw))))
             raw = _coerce_numeric_fields(raw)
             data = validate_output(raw)
             data.category = categorize(data)  # normalize to the fixed taxonomy
             reasons = needs_disambiguation(data)
+
+            # Confidence from the token logprobs (falls back to empty if the
+            # runtime didn't return any — the rest of the pipeline is unaffected).
+            try:
+                confidence = compute_extraction_confidence(
+                    response.get("logprobs"), orig_json, data
+                )
+            except Exception:  # noqa: BLE001 - confidence must never break extraction
+                confidence = {"overall": None, "fields": {}, "items": []}
 
             latency = time.time() - t0
             mlflow.log_metric("latency_seconds", latency)
@@ -277,8 +539,10 @@ def extract_receipt_validated(
             mlflow.log_metric("eval_count", response.get("eval_count", 0))
             mlflow.log_metric("items_extracted", len(data.items))
             mlflow.log_metric("needs_disambiguation", int(bool(reasons)))
+            if confidence.get("overall") is not None:
+                mlflow.log_metric("extraction_confidence", confidence["overall"])
             mlflow.log_metric("error", 0)
-            return data, reasons
+            return data, reasons, confidence
         except Exception as exc:
             mlflow.log_metric("error", 1)
             mlflow.log_param("error_message", str(exc)[:250])
@@ -344,6 +608,9 @@ def init_db() -> None:
             ("zero_rated_sales", "REAL"),
             ("discount_type", "TEXT"),
             ("category", "TEXT"),
+            # Measured OCR confidence: overall score (0..1) + per-field JSON.
+            ("confidence", "REAL"),
+            ("field_confidence", "TEXT"),
         ]
         
         for col_name, col_type in columns_to_add:
@@ -356,16 +623,20 @@ def init_db() -> None:
         con.commit()
 
 
-def save_receipt(data: ReceiptData, source_file: str, flagged: bool) -> int:
+def save_receipt(data: ReceiptData, source_file: str, flagged: bool,
+                 confidence: dict | None = None) -> int:
     init_db()
+    overall_conf = (confidence or {}).get("overall")
+    field_conf_json = json.dumps(confidence) if confidence else None
     with sqlite3.connect(DB_PATH) as con:
         cur = con.execute(
             """
             INSERT INTO receipts (source_file, processed_at, vendor_name, vendor_tin,
                 vendor_address, receipt_number, receipt_date, subtotal, vatable_sales,
                 vat_exempt_sales, zero_rated_sales, vat_amount, discount, discount_type,
-                total_amount, cash, change, currency, category, flagged)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                total_amount, cash, change, currency, category, flagged,
+                confidence, field_confidence)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 source_file,
@@ -388,6 +659,8 @@ def save_receipt(data: ReceiptData, source_file: str, flagged: bool) -> int:
                 data.currency,
                 categorize(data),
                 int(flagged),
+                overall_conf,
+                field_conf_json,
             ),
         )
         receipt_id = cur.lastrowid
@@ -660,7 +933,7 @@ def analytics_summary(granularity: str = "month", year: int | None = None,
     backfill_categories()
     init_finance_tables()
     receipts = list_receipts(limit=limit)
-    granularity = "year" if granularity == "year" else "month"
+    granularity = granularity if granularity in ("year", "month", "all") else "month"
 
     # Per-receipt effective month + dominant currency.
     currency_counts: dict[str, int] = {}
@@ -697,8 +970,9 @@ def analytics_summary(granularity: str = "month", year: int | None = None,
     def _month_expense(m):
         return expense_by_month.get(m, 0.0)
 
-    # Cashflow bars: months of the focused year (month mode) or one bar per year.
-    if granularity == "year":
+    # Cashflow bars: months of the focused year (month mode) or one bar per year
+    # (year mode and all-time both show every year).
+    if granularity in ("year", "all"):
         bars = [
             {
                 "key": str(y),
@@ -708,7 +982,7 @@ def analytics_summary(granularity: str = "month", year: int | None = None,
             }
             for y in data_years
         ]
-        focus_key = str(year)
+        focus_key = "all" if granularity == "all" else str(year)
     else:
         year_months = [m for m in all_months if m.startswith(f"{year:04d}")]
         bars = [
@@ -724,6 +998,8 @@ def analytics_summary(granularity: str = "month", year: int | None = None,
 
     # Predicate: does an effective-month string fall in the focused scope?
     def _in_scope(mk: str | None) -> bool:
+        if granularity == "all":
+            return True  # all-time: every receipt counts
         if not mk:
             return False
         return mk.startswith(f"{year:04d}") if granularity == "year" else mk == focus_key
@@ -753,7 +1029,10 @@ def analytics_summary(granularity: str = "month", year: int | None = None,
     )[:8]
 
     # Scope totals.
-    if granularity == "year":
+    if granularity == "all":
+        scope_income = sum(income_by_month.values())
+        budget_factor = max(1, len(all_months))  # monthly limit × months of data
+    elif granularity == "year":
         scope_income = sum(_month_income(m) for m in all_months if m.startswith(f"{year:04d}"))
         budget_factor = 12  # a monthly limit becomes an annual allowance
     else:
@@ -761,8 +1040,12 @@ def analytics_summary(granularity: str = "month", year: int | None = None,
         budget_factor = 1
     scope_expense = sum(by_category.values())
 
-    # Period-over-period deltas.
-    if granularity == "year":
+    # Period-over-period deltas (none for all-time — there is no prior period).
+    if granularity == "all":
+        prev_income = prev_expense = 0.0
+        prev_label = ""
+        period_label = "All time"
+    elif granularity == "year":
         prev_income = sum(_month_income(m) for m in all_months if m.startswith(f"{year - 1:04d}"))
         prev_expense = sum(_month_expense(m) for m in all_months if m.startswith(f"{year - 1:04d}"))
         prev_label = str(year - 1)
@@ -832,6 +1115,42 @@ def get_latest_receipt_id() -> int | None:
     finally:
         con.close()
     return int(row["m"]) if row and row["m"] is not None else None
+
+
+def recent_receipts(max_gap_seconds: int = 180, limit: int = 12) -> list[dict]:
+    """The most recent *upload batch*: the newest receipt plus any added back-to-back
+    with it (each within `max_gap_seconds` of the previous by processed_at). Used to
+    tell whether "my recent receipt" points to one receipt or several — so the agent
+    can ask which one instead of guessing."""
+    init_db()
+    con = _readonly_connection()
+    try:
+        rows = [
+            dict(r) for r in con.execute(
+                "SELECT id, vendor_name, receipt_date, total_amount, currency, processed_at "
+                "FROM receipts ORDER BY id DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        ]
+    finally:
+        con.close()
+    if not rows:
+        return []
+
+    def _ts(s):
+        try:
+            return datetime.fromisoformat(str(s or "").replace("Z", ""))
+        except (ValueError, TypeError):
+            return None
+
+    batch = [rows[0]]
+    for prev, cur in zip(rows, rows[1:]):
+        tp, tc = _ts(prev.get("processed_at")), _ts(cur.get("processed_at"))
+        if tp and tc and 0 <= (tp - tc).total_seconds() <= max_gap_seconds:
+            batch.append(cur)
+        else:
+            break
+    return batch
 
 
 def get_receipts_by_ids(receipt_ids) -> list[dict]:
@@ -911,6 +1230,22 @@ Rules:
   receipts.category column with an exact match — e.g. category = 'Food'. It is always
   one of 'Food', 'Shopping', 'Health', 'Other'. Do NOT match category words against
   item descriptions.
+- "Receipt N", "receipt #N", "receipt number N", "the Nth receipt" mean the internal
+  receipts.id column: use WHERE receipts.id = N (or line_items.receipt_id = N for its
+  items). This is NOT the printed receipt_number text column — never match a bare
+  number against receipt_number.
+- "my most recent / latest / last / newest receipt" or "the receipt I just added"
+  means the one most recently ADDED — the highest receipts.id. Resolve it with a
+  subquery, e.g. WHERE receipt_id = (SELECT id FROM receipts ORDER BY id DESC LIMIT 1),
+  or ORDER BY id DESC LIMIT 1 directly. "Recent" here is about when it was ADDED
+  (id / processed_at), NOT the printed receipt_date.
+- A single receipt's own subtotal / total / tax / discount lives on the receipts row:
+  SELECT that column directly, e.g. SELECT subtotal FROM receipts WHERE id = N. NEVER
+  SUM those columns over a JOIN with line_items — the join repeats the receipt once
+  per line item and multiplies the value.
+- When matching an ITEM by its description (line_items.description LIKE '%...%'), do
+  NOT also filter by vendor_name unless the user EXPLICITLY named a vendor. An item
+  name does not imply a vendor — never guess one (e.g. do not add "Jollibee").
 - Use ROUND(SUM(...), 2) for monetary totals to avoid floating point issues.
 - Always include an alias for aggregate results (AS total_spend, AS count, etc.).
 - When counting, use COUNT(*) not COUNT(column) unless you need non-null counts.
@@ -945,6 +1280,24 @@ SQL: SELECT vendor_name, ROUND(SUM(total_amount), 2) AS total_spend FROM receipt
 
 Question: How many items did I buy from Jollibee?
 SQL: SELECT COUNT(*) AS item_count FROM line_items li JOIN receipts r ON li.receipt_id = r.id WHERE r.vendor_name LIKE '%Jollibee%'
+
+Question: What are the line items on receipt 2?
+SQL: SELECT description, quantity, unit_price, amount FROM line_items WHERE receipt_id = 2
+
+Question: How much did the JUMB BEEF PR cost?
+SQL: SELECT description, unit_price, amount FROM line_items WHERE description LIKE '%JUMB BEEF PR%'
+
+Question: What's on my most recent receipt?
+SQL: SELECT description, quantity, unit_price, amount FROM line_items WHERE receipt_id = (SELECT id FROM receipts ORDER BY id DESC LIMIT 1)
+
+Question: How much was my last receipt?
+SQL: SELECT vendor_name, receipt_date, total_amount FROM receipts ORDER BY id DESC LIMIT 1
+
+Question: What was the subtotal of receipt 3?
+SQL: SELECT subtotal FROM receipts WHERE id = 3
+
+Question: What's the total and tax on receipt #4?
+SQL: SELECT total_amount, vat_amount FROM receipts WHERE id = 4
 
 Question: What's the average receipt amount?
 SQL: SELECT ROUND(AVG(total_amount), 2) AS average_amount FROM receipts WHERE total_amount IS NOT NULL
@@ -991,6 +1344,22 @@ Write ONE corrected read-only SQLite SELECT statement. No semicolon, no comments
 Question: {question}
 SQL:"""
 
+# A `receipt_id = N` / `id = N` predicate (optionally table-qualified) in a WHERE.
+_RECEIPT_FILTER_PRED = r"(?:\w+\.)?(?:receipt_id|id)\s*=\s*\d+"
+
+
+def _strip_receipt_filter(sql: str) -> str:
+    """Remove a `receipt_id = N` / `id = N` predicate from a query's WHERE clause so a
+    query that matched a stale/nonexistent receipt can be retried by item/vendor. Handles
+    the common shapes: '<pred> AND ...', '... AND <pred>', and 'WHERE <pred>' alone."""
+    s = sql
+    s = re.sub(rf"\s+AND\s+{_RECEIPT_FILTER_PRED}\b", "", s, flags=re.IGNORECASE)
+    s = re.sub(rf"\b{_RECEIPT_FILTER_PRED}\s+AND\s+", "", s, flags=re.IGNORECASE)
+    # sole condition: drop the whole WHERE up to the next clause / end
+    s = re.sub(rf"\s+WHERE\s+{_RECEIPT_FILTER_PRED}\s*(?=$|\bGROUP\b|\bORDER\b|\bLIMIT\b)",
+               " ", s, flags=re.IGNORECASE)
+    return re.sub(r"\s+", " ", s).strip()
+
 _ANSWER_PROMPT = """You are summarizing SQL query results from a personal receipts ledger for a user.
 Today's date is {today}.
 
@@ -1001,8 +1370,8 @@ Result rows (JSON): {rows}
 Rules for your answer:
 - Write a short, direct, natural-language answer (1-3 sentences).
 - Use only the data in the result rows - do not invent numbers.
-- For monetary values, use comma separators and 2 decimal places (e.g. "12,345.67"),
-  prefixed with the currency symbol if one appears in the rows, otherwise no symbol.
+- For monetary values, use comma separators and 2 decimal places (e.g. "12,345.67").
+  {currency_hint}
 - For counts, use the exact number from the results.
 - If the rows are empty, say "No matching records were found."
 - Do not mention SQL, queries, or databases.
@@ -1058,6 +1427,31 @@ def _format_peso(value) -> str:
         return "₱0.00"
 
 
+_CURRENCY_SYMBOL = {
+    "PHP": "₱", "USD": "$", "EUR": "€", "GBP": "£", "JPY": "¥", "INR": "₹",
+    "AUD": "A$", "CAD": "C$", "SGD": "S$", "HKD": "HK$", "MYR": "RM", "THB": "฿",
+}
+
+
+def _ledger_currency_symbol() -> str:
+    """The symbol for the ledger's dominant currency, so answers don't default to
+    '$' for e.g. peso receipts. Empty string if unknown/mixed."""
+    try:
+        con = _readonly_connection()
+        try:
+            row = con.execute(
+                "SELECT currency, COUNT(*) c FROM receipts WHERE currency IS NOT NULL "
+                "GROUP BY currency ORDER BY c DESC LIMIT 1"
+            ).fetchone()
+        finally:
+            con.close()
+        if row and row["currency"]:
+            return _CURRENCY_SYMBOL.get(str(row["currency"]).strip().upper(), "")
+    except Exception:  # noqa: BLE001
+        pass
+    return ""
+
+
 def _generate_answer(question: str, sql: str, rows: list[dict], model: str) -> str:
     """Turn raw SQL rows into a natural-language answer."""
     if not rows:
@@ -1068,6 +1462,13 @@ def _generate_answer(question: str, sql: str, rows: list[dict], model: str) -> s
             raise RuntimeError("ollama not installed")
         
         today = date.today().isoformat()
+        sym = _ledger_currency_symbol()
+        currency_hint = (
+            f"Prefix monetary amounts with '{sym}' (the user's currency) unless a row "
+            f"names a different currency. Do NOT use '$' unless the currency is USD."
+            if sym else
+            "Do NOT invent a currency symbol; if none is given, use the plain number."
+        )
         resp = ollama.chat(
             model=model,
             messages=[
@@ -1077,7 +1478,8 @@ def _generate_answer(question: str, sql: str, rows: list[dict], model: str) -> s
                         question=question,
                         sql=sql,
                         rows=json.dumps(rows, default=str)[:4000],
-                        today=today
+                        today=today,
+                        currency_hint=currency_hint,
                     ),
                 }
             ],
@@ -1251,6 +1653,26 @@ def _sql_agent_core(question: str, model: str, receipt_ids: list[int] | None = N
             sql = _extract_sql(gen2["message"]["content"])
             _validate_sql(sql)
             rows = [dict(r) for r in con.execute(sql).fetchall()]
+
+        # 0-row broadening: a query that filters on a specific receipt id but finds
+        # nothing is usually a STALE id (e.g. carried over from earlier in the chat
+        # after the ledger changed). Deterministically strip the receipt-id predicate
+        # (asking the model to drop it is unreliable — it re-adds it because the
+        # question still says "on receipt N") and re-run, matching by the remaining
+        # conditions (item description / vendor). Safe in a scoped sandbox too, which
+        # only contains the allowed receipts.
+        if not rows and not retried and re.search(_RECEIPT_FILTER_PRED, sql, re.IGNORECASE):
+            sql_b = _strip_receipt_filter(sql)
+            if not re.search(_RECEIPT_FILTER_PRED, sql_b, re.IGNORECASE):
+                retried = True
+                try:
+                    _validate_sql(sql_b)
+                    rows_b = [dict(r) for r in con.execute(sql_b).fetchall()]
+                    if rows_b:
+                        sql, rows = sql_b, rows_b
+                except (GuardrailError, sqlite3.Error):
+                    pass  # keep the original empty result
+
         if scope is not None:
             rows = _assert_in_scope(rows, scope)
     finally:
@@ -1270,7 +1692,7 @@ def _sql_agent_core(question: str, model: str, receipt_ids: list[int] | None = N
 
 def ask_ledger(question: str, model: str = AGENT_MODEL, receipt_ids: list[int] | None = None) -> dict:
     """MLflow-traced wrapper around the SQL agent."""
-    with mlflow.start_run(run_name=f"sql_agent_{int(time.time())}"):
+    with _fresh_run(f"sql_agent_{int(time.time())}"):
         mlflow.log_param("question", question[:250])
         mlflow.log_param("model", model)
         t0 = time.time()
@@ -1304,6 +1726,22 @@ def ask_ledger(question: str, model: str = AGENT_MODEL, receipt_ids: list[int] |
 
 _EMBED_OK: bool | None = None  # cached availability of the embedding model
 
+# nomic-embed-text is an ASYMMETRIC model: documents and queries must be embedded
+# with task-instruction prefixes, or cosine similarity is unreliable (relevant and
+# irrelevant receipts end up scoring almost the same). Prefix docs and queries
+# differently. Bump _EMBED_VERSION whenever this convention changes so ensure_index
+# re-embeds any vectors written under the old scheme (a query embedded with the new
+# prefix must never be compared against a doc embedded with the old one).
+_EMBED_VERSION = 2
+_DOC_PREFIX = "search_document: "
+_QUERY_PREFIX = "search_query: "
+
+# Below this cosine similarity a whole-ledger match is treated as "not relevant"
+# and dropped, so RAG can honestly answer "I couldn't find that" instead of
+# returning unrelated receipts. Not applied when the caller scopes to specific
+# receipt ids (there the user has already chosen which receipts to look at).
+_VEC_MIN_SCORE = 0.5
+
 
 def init_rag_db() -> None:
     with sqlite3.connect(DB_PATH) as con:
@@ -1313,10 +1751,19 @@ def init_rag_db() -> None:
                 receipt_id INTEGER PRIMARY KEY,
                 doc TEXT,
                 embedding BLOB,
+                emb_ver INTEGER,
                 FOREIGN KEY (receipt_id) REFERENCES receipts(id)
             )
             """
         )
+        # Migration: older DBs have receipt_docs without emb_ver. Add it so stale
+        # (prefix-less) embeddings can be detected and re-embedded.
+        cols = {r[1] for r in con.execute("PRAGMA table_info(receipt_docs)").fetchall()}
+        if "emb_ver" not in cols:
+            try:
+                con.execute("ALTER TABLE receipt_docs ADD COLUMN emb_ver INTEGER")
+            except sqlite3.OperationalError:
+                pass
         con.commit()
 
 
@@ -1405,11 +1852,15 @@ def index_receipt(receipt_id: int, data, source_file: str) -> None:
     header["id"] = receipt_id
     header["source_file"] = source_file
     doc = _compose_doc(header, header.get("items") or [])
-    blob = _emb_to_blob(_embed(doc))
+    blob = _emb_to_blob(_embed(_DOC_PREFIX + doc))
+    # Record the version only when we actually stored a vector, so a failed embed
+    # (NULL blob) is retried by ensure_index once the model becomes available.
+    ver = _EMBED_VERSION if blob is not None else None
     with sqlite3.connect(DB_PATH) as con:
         con.execute(
-            "INSERT OR REPLACE INTO receipt_docs (receipt_id, doc, embedding) VALUES (?,?,?)",
-            (receipt_id, doc, blob),
+            "INSERT OR REPLACE INTO receipt_docs (receipt_id, doc, embedding, emb_ver) "
+            "VALUES (?,?,?,?)",
+            (receipt_id, doc, blob, ver),
         )
         con.commit()
 
@@ -1428,15 +1879,17 @@ def ensure_index() -> None:
             WHERE d.receipt_id IS NULL
             """
         ).fetchall()
-        # Also retry rows whose embedding is still NULL, but only if the model
-        # is now reachable — otherwise we'd re-probe on every single search.
+        # Also retry rows whose embedding is missing OR was written under an older
+        # embedding convention (emb_ver != current) — but only if the model is now
+        # reachable, otherwise we'd re-probe on every single search.
         if _embeddings_available():
             pending = list(pending) + con.execute(
                 """
                 SELECT r.* FROM receipts r
                 JOIN receipt_docs d ON d.receipt_id = r.id
-                WHERE d.embedding IS NULL
-                """
+                WHERE d.embedding IS NULL OR d.emb_ver IS NULL OR d.emb_ver != ?
+                """,
+                (_EMBED_VERSION,),
             ).fetchall()
 
         for row in pending:
@@ -1450,10 +1903,12 @@ def ensure_index() -> None:
                 ).fetchall()
             ]
             doc = _compose_doc(header, items)
-            blob = _emb_to_blob(_embed(doc))
+            blob = _emb_to_blob(_embed(_DOC_PREFIX + doc))
+            ver = _EMBED_VERSION if blob is not None else None
             con.execute(
-                "INSERT OR REPLACE INTO receipt_docs (receipt_id, doc, embedding) VALUES (?,?,?)",
-                (row["id"], doc, blob),
+                "INSERT OR REPLACE INTO receipt_docs (receipt_id, doc, embedding, emb_ver) "
+                "VALUES (?,?,?,?)",
+                (row["id"], doc, blob, ver),
             )
         con.commit()
 
@@ -1463,6 +1918,27 @@ def _cosine(a, b) -> float:
         return 0.0
     denom = (np.linalg.norm(a) * np.linalg.norm(b))
     return float(np.dot(a, b) / denom) if denom else 0.0
+
+
+# "receipt 3", "receipt #2", "receipt no. 5", "receipt id 4", or a bare "#7" all
+# refer to a specific receipt by its id. A pattern like "3 receipts" or "top 5" does
+# NOT match (the number must follow the word receipt / a #).
+_RECEIPT_REF_RE = re.compile(r"(?:receipts?\s*(?:no\.?|number|id|#)?\s*|#)(\d{1,7})", re.IGNORECASE)
+
+
+def _parse_receipt_refs(text: str) -> list[int]:
+    """Receipt ids explicitly named in a question, so retrieval can be pinned to the
+    exact receipt instead of guessing by semantic similarity."""
+    return [int(m) for m in _RECEIPT_REF_RE.findall(text or "")]
+
+
+# "my recent receipt", "the latest receipt", "last receipt", "newest grocery receipt",
+# "the receipt I just added/uploaded" — a reference to the most recently ADDED receipt.
+_RECENT_RECEIPT_RE = re.compile(
+    r"\b(?:most\s+recent|recent|latest|last|newest)\s+(?:\w+\s+){0,2}receipt\b"
+    r"|\breceipt\s+(?:that\s+)?i\s+(?:just\s+)?(?:added|uploaded|scanned|processed)\b",
+    re.IGNORECASE,
+)
 
 
 def semantic_search(query: str, k: int = 4, receipt_ids: list[int] | None = None) -> list[dict]:
@@ -1490,21 +1966,36 @@ def semantic_search(query: str, k: int = 4, receipt_ids: list[int] | None = None
             """
         ).fetchall()
 
+    # If the question explicitly names a receipt ("receipt #3", "receipt 2"),
+    # resolve it to that receipt's id and pin the search there. Semantic similarity
+    # alone can't match a bare id, so without this an id-specific question would
+    # retrieve whatever is merely closest in content — the wrong receipt.
+    if scope is None:
+        refs = {i for i in _parse_receipt_refs(query) if any(r["receipt_id"] == i for r in rows)}
+        if refs:
+            scope = refs
+
     # Hard filter: out-of-scope receipts are removed before any scoring, so a
     # single-receipt query can only ever surface that receipt.
     candidates = [dict(r) for r in rows if scope is None or r["receipt_id"] in scope]
     if not candidates:
         return []
 
-    qvec = _embed(query)
+    qvec = _embed(_QUERY_PREFIX + query)
     scored: list[tuple[float, dict]] = []
+    used_vectors = False
     if qvec is not None and np is not None:
         q = np.asarray(qvec, dtype=np.float32)
         for c in candidates:
             if c["embedding"] is None:
                 continue
             vec = np.frombuffer(c["embedding"], dtype=np.float32)
+            # Guard against a stale vector written by a different embedding model
+            # (different dimension) — comparing mismatched shapes would crash.
+            if vec.shape[0] != q.shape[0]:
+                continue
             scored.append((_cosine(q, vec), c))
+        used_vectors = len(scored) > 0
 
     if not scored:
         # keyword fallback: overlap of query terms with the document text
@@ -1513,6 +2004,15 @@ def semantic_search(query: str, k: int = 4, receipt_ids: list[int] | None = None
             doc_l = (c["doc"] or "").lower()
             score = sum(doc_l.count(t) for t in terms)
             scored.append((float(score), c))
+
+    # Relevance filter (whole-ledger searches only): drop non-matches so RAG can
+    # honestly say "not found" instead of returning arbitrary receipts. When the
+    # caller scoped to specific receipts, keep them all — the user chose those.
+    if scope is None:
+        if used_vectors:
+            scored = [(s, c) for s, c in scored if s >= _VEC_MIN_SCORE]
+        else:
+            scored = [(s, c) for s, c in scored if s > 0]
 
     scored.sort(key=lambda x: x[0], reverse=True)
     results = []
@@ -1581,7 +2081,7 @@ def _rag_core(query: str, model: str, k: int = 4, receipt_ids: list[int] | None 
 def rag_answer(query: str, model: str = AGENT_MODEL, k: int = 4,
                receipt_ids: list[int] | None = None) -> dict:
     """MLflow-traced RAG question-answering over the receipts."""
-    with mlflow.start_run(run_name=f"rag_{int(time.time())}"):
+    with _fresh_run(f"rag_{int(time.time())}"):
         mlflow.log_param("query", query[:250])
         mlflow.log_param("model", model)
         t0 = time.time()
@@ -1625,18 +2125,62 @@ After each Action you will be shown an Observation. When you have enough to answ
 Thought: <brief reasoning>
 Final Answer: <a concise, direct answer for the user>
 
+If — and ONLY if — the question is genuinely ambiguous or you lack the context to
+answer it, ask the user ONE short clarifying question instead of guessing:
+Thought: <why you cannot answer yet>
+Clarification: <one concise question for the user>
+
+Ask a Clarification when, for example:
+- a reference like "those" / "that receipt" / "it" has nothing in the conversation to
+  point to;
+- the question names something that could match several different things and the
+  choice changes the answer (e.g. an ambiguous vendor, or "this month" with no date);
+- the request cannot be mapped to the receipts data at all.
+
 Rules:
 - Most questions need only ONE tool call. Take at most {max_steps} actions.
 - Call each tool AT MOST ONCE. Never repeat the same Action with the same input.
 - As soon as an Observation answers the question, immediately reply with
   "Final Answer:" — do not think further or call another tool.
-- Choose sql_ledger for math/counts; choose search_receipts for item/content lookups.
-- "How much did I spend", "what's my total", "spending by category", "how many
-  receipts" are ALWAYS sql_ledger — never search_receipts. Keep the Action Input a
-  simple aggregate question ("total spend", "spend per category"); do NOT drill into
-  a single item or vendor unless the user explicitly named one.
+- Anything about a SPECIFIC receipt named by number ("receipt #2", "receipt 3", "the
+  4th receipt") — its line items, subtotal, total, tax, vendor, or date — is
+  sql_ledger; pass the receipt number through in the Action Input. search_receipts
+  cannot match a bare receipt number and will return the wrong receipt.
+- Use search_receipts ONLY for fuzzy content with NO receipt number: "what did I buy
+  at the coffee shop", "which receipt had sushi", "find the pharmacy receipt".
+- Otherwise use sql_ledger for math/counts and search_receipts for open-ended lookups.
+- ANY question about amounts of money is ALWAYS sql_ledger — "how much", "how many",
+  "total", "spend", "cost", "price", "how much did X cost", "what did each of those
+  cost" — EVEN when it names a vendor, store, item, or category. A named vendor/item
+  does NOT make it a content search: "how much have I spent on Pepper Lunch", "what
+  did the JUMB BEEF PR cost", "total for groceries" are all sql_ledger (it filters by
+  vendor/item with LIKE, or by category). NEVER route a money/cost/count question to
+  search_receipts, no matter what it names.
+- Prefer to ANSWER whenever you reasonably can — only ask a Clarification when you are
+  genuinely stuck or would otherwise have to GUESS. Never clarify something the tools
+  can already answer, and ask at most one short question.
+- Superlatives about spending are aggregates too — ALWAYS sql_ledger: "what did I
+  spend the most/least on", "biggest/highest/largest purchase", "top vendor/category",
+  "most expensive receipt". Ask it as a ranking question ("category with the highest
+  total spend", "vendor I spent the most at").
 - Base the Final Answer ONLY on the Observations you received.
-{scope}
+- The Final Answer is shown directly to the user: state it plainly and briefly. Do
+  NOT mention tools, SQL, "the ledger", observations, or that a value was "calculated"
+  or "confirmed". Do NOT repeat the words "Final Answer:" inside your answer.
+- This is a conversation. Use the recent messages below to resolve references —
+  "those", "them", "it", "that receipt", "each of those items" — into the concrete
+  item names or vendor they point to. NEVER pass a pronoun to a tool: put the actual
+  names in the Action Input (e.g. not "cost of those" but "unit price of JUMB BEEF PR
+  and SET MEAL A").
+- Before asking a Clarification, RE-READ the conversation. If a previous answer (yours
+  or the user's) already named the items, receipt, or vendor, USE those — do NOT ask
+  the user to repeat what was just said. Example: your last answer said "SHK CHICKEN S
+  and SHK FRIES", and the user asks "how much did each of those cost" → look up SHK
+  CHICKEN S and SHK FRIES; do not ask which items.
+- Receipt numbers mentioned EARLIER in the conversation may be out of date. Do NOT add
+  a "receipt N" filter unless THIS question itself names a receipt number — instead
+  match by item name and/or vendor, which stays correct even if the ledger changed.
+{scope}{history}
 Example:
 Question: How much did I spend in total?
 Thought: This is an aggregate over all receipts, so I should query the ledger.
@@ -1646,6 +2190,20 @@ Observation: Your total spend is 4,210.00.
 Thought: I have the total.
 Final Answer: You've spent a total of 4,210.00 across your receipts.
 
+Example:
+Question: How much have I spent on Pepper Lunch?
+Thought: This is a spend total for a named vendor — an aggregate, so I query the ledger.
+Action: sql_ledger
+Action Input: total amount spent at Pepper Lunch
+Observation: You spent 2,635.00 at Pepper Lunch.
+Thought: I have the total.
+Final Answer: You've spent 2,635.00 at Pepper Lunch.
+
+Example:
+Question: how much did that cost?
+Thought: "that" has no referent — nothing earlier in the conversation names an item, vendor, or receipt, so I cannot answer without guessing.
+Clarification: Which item or receipt do you mean?
+
 Begin.
 Question: {question}
 """
@@ -1653,11 +2211,36 @@ Question: {question}
 _ACTION_RE = re.compile(r"Action:\s*([a-zA-Z_]+)", re.IGNORECASE)
 _ACTION_INPUT_RE = re.compile(r"Action Input:\s*(.+)", re.IGNORECASE)
 _FINAL_RE = re.compile(r"Final Answer:\s*(.+)", re.IGNORECASE | re.DOTALL)
+# Small models sometimes emit "Final Answer: Final Answer: ..." or a stray "Answer:"
+# / "Thought:" prefix; strip any of those leading labels so they don't reach the user.
+_LEADING_LABEL_RE = re.compile(r"^\s*(?:final\s*answer|answer|thought)\s*:\s*", re.IGNORECASE)
+
+
+def _clean_answer(text: str) -> str:
+    """Strip leaked ReAct scaffolding (repeated 'Final Answer:' etc.) from an answer
+    before it is shown to the user."""
+    t = (text or "").strip()
+    prev = None
+    while prev != t:  # peel repeated leading labels
+        prev = t
+        t = _LEADING_LABEL_RE.sub("", t).strip()
+    # if the model kept going with another Thought/Action after the answer, cut it
+    t = re.split(r"\n\s*(?:Thought|Action|Observation)\s*:", t)[0].strip()
+    return t
+
+
+_CLARIFY_RE = re.compile(r"Clarification:\s*(.+)", re.IGNORECASE | re.DOTALL)
 
 
 def _parse_final(text: str) -> str | None:
     m = _FINAL_RE.search(text)
-    return m.group(1).strip() if m else None
+    return _clean_answer(m.group(1)) if m else None
+
+
+def _parse_clarification(text: str) -> str | None:
+    """A clarifying question the agent asks the user when it's genuinely stuck."""
+    m = _CLARIFY_RE.search(text)
+    return _clean_answer(m.group(1)) if m else None
 
 
 def _parse_action(text: str) -> tuple[str | None, str]:
@@ -1735,8 +2318,30 @@ def _force_final(question: str, steps: list[dict], model: str) -> str:
     return obs[-1]
 
 
+# How many past turns of conversation to give the agent as memory, and how much of
+# each to keep. A wider window lets it resolve follow-ups like "each of those items"
+# from an earlier answer instead of losing the thread.
+_HISTORY_TURNS = 10
+_HISTORY_CHARS = 600
+
+
+def _format_history(history) -> str:
+    """Turn recent chat messages into a compact block the ReAct model can use to
+    resolve follow-up references ("those", "it", "that receipt", "each of those")."""
+    if not history:
+        return ""
+    lines = []
+    for m in list(history)[-_HISTORY_TURNS:]:
+        role = str(m.get("role") or "").lower()
+        who = "User" if role in ("me", "user", "human") else "Assistant"
+        text = str(m.get("text") or m.get("content") or "").strip().replace("\n", " ")
+        if text:
+            lines.append(f"{who}: {text[:_HISTORY_CHARS]}")
+    return ("Recent conversation (use it to resolve references):\n" + "\n".join(lines) + "\n") if lines else ""
+
+
 def agent_stream(question: str, model: str = AGENT_MODEL,
-                 receipt_ids: list[int] | None = None):
+                 receipt_ids: list[int] | None = None, history: list | None = None):
     """Run the ReAct loop, yielding events as they happen so a UI can render the
     agent's reasoning live. Event `type`s:
         start                       — loop started
@@ -1746,7 +2351,7 @@ def agent_stream(question: str, model: str = AGENT_MODEL,
         final   {answer, steps}     — the final answer (last event on success)
         error   {message}           — something failed
     """
-    mlflow.start_run(run_name=f"agent_{int(time.time())}")
+    _fresh_run(f"agent_{int(time.time())}")
     t0 = time.time()
     tools_used: list[str] = []
     steps: list[dict] = []
@@ -1757,6 +2362,34 @@ def agent_stream(question: str, model: str = AGENT_MODEL,
             raise RuntimeError("The `ollama` package is not installed.")
 
         yield {"type": "start"}
+
+        # Disambiguation: "my recent/latest receipt" is ambiguous when several were
+        # uploaded together — ask which one instead of guessing. (Skipped when the
+        # caller already scoped the request to specific receipts.)
+        if receipt_ids is None and _RECENT_RECEIPT_RE.search(question):
+            batch = recent_receipts()
+            if len(batch) > 1:
+                listing = "; ".join(
+                    "#{id} {v}{d}{t}".format(
+                        id=r["id"],
+                        v=r.get("vendor_name") or "Unknown",
+                        d=f", {r['receipt_date']}" if r.get("receipt_date") else "",
+                        t=f" — {r['total_amount']}" if r.get("total_amount") is not None else "",
+                    )
+                    for r in batch
+                )
+                clarification = (
+                    f'You recently added {len(batch)} receipts, so "recent receipt" '
+                    f"could mean any of them — which one? {listing}"
+                )
+                steps.append({"clarify": clarification})
+                mlflow.log_metric("num_steps", 0)
+                mlflow.log_metric("clarified", 1)
+                mlflow.log_metric("latency_seconds", time.time() - t0)
+                mlflow.log_metric("error", 0)
+                yield {"type": "clarify", "question": clarification, "steps": steps}
+                return
+
         scope = ""
         if receipt_ids:
             scope = ("- The user is asking about a specific receipt/batch only; "
@@ -1766,9 +2399,11 @@ def agent_stream(question: str, model: str = AGENT_MODEL,
             question=question,
             max_steps=_MAX_AGENT_STEPS,
             scope=scope,
+            history=_format_history(history),
         )
 
         final_answer: str | None = None
+        clarification: str | None = None
         seen: dict[tuple[str, str], str] = {}  # (tool, input) -> observation, to dedup
         repeats = 0
         for _ in range(_MAX_AGENT_STEPS):
@@ -1790,10 +2425,16 @@ def agent_stream(question: str, model: str = AGENT_MODEL,
                 steps.append({"thought": text})
                 break
 
+            # Disambiguation: the agent can ask the user instead of guessing.
+            clarification = _parse_clarification(text)
+            if clarification is not None:
+                steps.append({"thought": text, "clarify": clarification})
+                break
+
             tool, tool_input = _parse_action(text)
             if not tool:
                 # No action and no final answer — treat the whole reply as the answer.
-                final_answer = text or "I'm not sure how to answer that."
+                final_answer = _clean_answer(text) or "I'm not sure how to answer that."
                 steps.append({"thought": text})
                 break
 
@@ -1803,7 +2444,7 @@ def agent_stream(question: str, model: str = AGENT_MODEL,
                 # again — reuse the cached result and steer it hard toward answering.
                 repeats += 1
                 if repeats >= 2:
-                    final_answer = _force_final(question, steps, model)
+                    final_answer = _clean_answer(_force_final(question, steps, model))
                     break
                 obs_text = (
                     f"You already ran {tool} with that input; the result was: {seen[key]} "
@@ -1826,14 +2467,18 @@ def agent_stream(question: str, model: str = AGENT_MODEL,
             )
             transcript += text + f"\nObservation: {obs_text}\n"
 
-        if final_answer is None:
-            final_answer = _force_final(question, steps, model)
+        if clarification is None and final_answer is None:
+            final_answer = _clean_answer(_force_final(question, steps, model))
 
         mlflow.log_metric("num_steps", len(steps))
         mlflow.log_param("tools_used", ",".join(tools_used) or "none")
         mlflow.log_metric("latency_seconds", time.time() - t0)
+        mlflow.log_metric("clarified", int(clarification is not None))
         mlflow.log_metric("error", 0)
-        yield {"type": "final", "answer": final_answer, "steps": steps}
+        if clarification is not None:
+            yield {"type": "clarify", "question": clarification, "steps": steps}
+        else:
+            yield {"type": "final", "answer": final_answer, "steps": steps}
     except Exception as exc:  # noqa: BLE001
         mlflow.log_metric("error", 1)
         mlflow.log_param("error_message", str(exc)[:250])
@@ -1844,14 +2489,18 @@ def agent_stream(question: str, model: str = AGENT_MODEL,
 
 
 def agent_run(question: str, model: str = AGENT_MODEL,
-              receipt_ids: list[int] | None = None) -> dict:
+              receipt_ids: list[int] | None = None, history: list | None = None) -> dict:
     """Non-streaming convenience wrapper: consume the stream, return the result
     plus the full reasoning trace (for the REST API)."""
     final = ""
     steps: list[dict] = []
-    for ev in agent_stream(question, model, receipt_ids):
+    needs_clarification = False
+    for ev in agent_stream(question, model, receipt_ids, history):
         if ev["type"] == "final":
             final, steps = ev["answer"], ev["steps"]
+        elif ev["type"] == "clarify":
+            final, steps, needs_clarification = ev["question"], ev["steps"], True
         elif ev["type"] == "error":
             raise RuntimeError(ev["message"])
-    return {"question": question, "answer": final, "steps": steps}
+    return {"question": question, "answer": final, "steps": steps,
+            "needs_clarification": needs_clarification}

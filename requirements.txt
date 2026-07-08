@@ -1,8 +1,6 @@
-streamlit==1.38.0
-ollama==0.3.3
-pandas==2.2.2
+# >=0.5 is required for per-token logprobs (used for measured OCR confidence).
+ollama==0.6.2
 numpy==1.26.4
-openpyxl==3.1.5
 pillow==10.4.0
 fastapi==0.112.2
 uvicorn[standard]==0.30.6

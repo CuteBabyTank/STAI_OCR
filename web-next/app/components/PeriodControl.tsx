@@ -32,17 +32,25 @@ export default function PeriodControl({
   return (
     <div className="period-bar">
       <div className="seg">
+        <button className={"seg-btn" + (granularity === "all" ? " on" : "")} onClick={() => setGran("all")}>All time</button>
         <button className={"seg-btn" + (granularity === "month" ? " on" : "")} onClick={() => setGran("month")}>Month</button>
         <button className={"seg-btn" + (granularity === "year" ? " on" : "")} onClick={() => setGran("year")}>Year</button>
       </div>
       <div className="period-nav">
-        <button className="pn-btn" onClick={() => step(-1)} disabled={atMin} aria-label="Previous period">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M15 18l-6-6 6-6" /></svg>
-        </button>
-        <span className="period-label">{label}</span>
-        <button className="pn-btn" onClick={() => step(1)} disabled={atMax} aria-label="Next period">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M9 18l6-6-6-6" /></svg>
-        </button>
+        {granularity === "all" ? (
+          // All-time spans everything — nothing to scroll through, just the label.
+          <span className="period-label">{label}</span>
+        ) : (
+          <>
+            <button className="pn-btn" onClick={() => step(-1)} disabled={atMin} aria-label="Previous period">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M15 18l-6-6 6-6" /></svg>
+            </button>
+            <span className="period-label">{label}</span>
+            <button className="pn-btn" onClick={() => step(1)} disabled={atMax} aria-label="Next period">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M9 18l6-6-6-6" /></svg>
+            </button>
+          </>
+        )}
       </div>
     </div>
   );

@@ -26,7 +26,7 @@ services:
       wait
       "
 
-  # Aperture — the Next.js frontend (replaces the old Streamlit UI). It calls the
+  # Aperture — the Next.js frontend (the app's only UI). It calls the
   # FastAPI `api` service for OCR extraction, the ledger, and the RAG agent. The
   # browser hits same-origin /api/* which Next rewrites to http://api:8000 (see
   # web-next/next.config.js), so there's no CORS to configure.

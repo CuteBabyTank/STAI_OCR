@@ -54,3 +54,21 @@ export function monthShort(key: string) {
   const d = new Date(key + "-01T00:00:00");
   return isNaN(d.getTime()) ? key : d.toLocaleDateString(undefined, { month: "short" });
 }
+
+// Measured OCR confidence (0..1) -> display metadata; null when there is no score.
+export function confMeta(p?: number | null) {
+  if (p == null || isNaN(p)) return null;
+  const level = p >= 0.85 ? "hi" : p >= 0.65 ? "mid" : "lo";
+  const label = level === "hi" ? "high" : level === "mid" ? "medium" : "low";
+  return { pct: Math.round(p * 100), level, label };
+}
+
+// Human labels for the confidence breakdown keys.
+export const CONF_FIELD_LABELS: Record<string, string> = {
+  vendor_name: "Vendor", vendor_tin: "Tax ID", vendor_address: "Address",
+  receipt_number: "Receipt no.", receipt_date: "Date", currency: "Currency",
+  category: "Category", subtotal: "Subtotal", vatable_sales: "Taxable sales",
+  vat_exempt_sales: "Tax-exempt", zero_rated_sales: "Zero-rated",
+  vat_amount: "Tax / VAT", discount: "Discount", discount_type: "Discount type",
+  total_amount: "Total", cash: "Cash", change: "Change",
+};

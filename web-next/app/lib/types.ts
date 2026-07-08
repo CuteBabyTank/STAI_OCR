@@ -10,6 +10,15 @@ export interface Receipt {
   currency: string | null;
   receipt_date: string | null;
   source_file: string | null;
+  confidence?: number | null;         // measured OCR confidence 0..1 (overall)
+  field_confidence?: string | null;   // JSON string: {overall, fields, items}
+}
+
+// Parsed shape of Receipt.field_confidence / the /extract "confidence" payload.
+export interface FieldConfidence {
+  overall: number | null;
+  fields: Record<string, number>;
+  items: Array<Record<string, number>>;
 }
 
 export interface LineItem {
@@ -35,7 +44,7 @@ export interface Bar {
   expense: number;
 }
 
-export type Granularity = "month" | "year";
+export type Granularity = "month" | "year" | "all";
 
 export interface Period {
   granularity: Granularity;

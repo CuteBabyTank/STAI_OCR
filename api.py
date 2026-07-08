@@ -53,6 +53,9 @@ class AskRequest(BaseModel):
     model: str = AGENT_MODEL
     # Optional: scope the answer to specific receipts (e.g. a single receipt).
     receipt_ids: list[int] | None = None
+    # Optional: recent chat turns [{role, text}] so the agent can resolve follow-up
+    # references like "those" / "that receipt".
+    history: list[dict] | None = None
 
 
 class SearchRequest(BaseModel):
@@ -84,7 +87,7 @@ def health() -> dict:
 async def extract(file: UploadFile = File(...), model: str = DEFAULT_MODEL):
     image_bytes = await file.read()
     try:
-        data, disambiguation_reasons = extract_receipt_validated(
+        data, disambiguation_reasons, confidence = extract_receipt_validated(
             image_bytes, model=model, content_type=file.content_type
         )
     except GuardrailError as exc:
@@ -92,12 +95,18 @@ async def extract(file: UploadFile = File(...), model: str = DEFAULT_MODEL):
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    receipt_id = save_receipt(data, file.filename or "upload", flagged=bool(disambiguation_reasons))
+    receipt_id = save_receipt(
+        data, file.filename or "upload",
+        flagged=bool(disambiguation_reasons), confidence=confidence,
+    )
     return {
         "receipt_id": receipt_id,
         "data": data.model_dump(),
         "needs_review": bool(disambiguation_reasons),
         "review_reasons": disambiguation_reasons,
+        # Measured confidence from the model's token logprobs (0..1), plus the
+        # per-field / per-item breakdown so clients can flag weak reads.
+        "confidence": confidence,
     }
 
 
@@ -192,7 +201,8 @@ def agent(req: AskRequest):
     """ReAct agent: reasons, routes to the SQL tool or the RAG search tool as
     needed, and returns the final answer plus the full reasoning trace."""
     try:
-        return agent_run(req.question, model=req.model, receipt_ids=req.receipt_ids)
+        return agent_run(req.question, model=req.model, receipt_ids=req.receipt_ids,
+                         history=req.history)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -203,7 +213,18 @@ def agent_stream_endpoint(req: AskRequest):
     client can show the agent thinking in real time."""
 
     def event_source():
-        for ev in agent_stream(req.question, model=req.model, receipt_ids=req.receipt_ids):
+        for ev in agent_stream(req.question, model=req.model, receipt_ids=req.receipt_ids,
+                               history=req.history):
             yield f"data: {json.dumps(ev, default=str)}\n\n"
 
-    return StreamingResponse(event_source(), media_type="text/event-stream")
+    # Anti-buffering headers so events reach the browser live through the Next.js
+    # proxy / any reverse proxy instead of being held until the stream closes.
+    return StreamingResponse(
+        event_source(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )

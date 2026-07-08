@@ -3,7 +3,8 @@
 A drag-and-drop web app that reads **any purchase receipt** — restaurant, cafe,
 grocery, retail, pharmacy — with a **local vision model** and extracts the useful
 fields (merchant, tax ID, line items, subtotal, tax/VAT, discounts, total, cash
-and change) into an editable ledger you can export to CSV / Excel.
+and change) into a searchable ledger — with a **measured confidence score** on
+every field, computed from the model's own token probabilities.
 
 On top of the ledger sits a **ReAct agent** you can talk to in plain English. It
 decides on its own whether a question needs a **database query** (totals, counts,
@@ -19,14 +20,17 @@ leaves your machine.
 ## Architecture
 
 ```
-receipt_processor.py   Streamlit UI (drag-and-drop, editable ledger, streaming agent)
-core.py                Shared pipeline: schema validation, guardrails,
-                        disambiguation, SQLite memory, RAG retriever, SQL agent,
-                        ReAct agent, MLflow logging
-api.py                  FastAPI REST API (same pipeline, headless)
+web-next/              Next.js frontend (drag-and-drop scan, dashboard,
+                        streaming chat agent, measured OCR confidence)
+extraction.py          Pure extraction primitives: prompt, JSON coercion +
+                        clean-up, reconciliation (no UI, no heavy deps)
+core.py                Backend pipeline: schema validation, guardrails,
+                        disambiguation, confidence scoring, SQLite memory,
+                        RAG retriever, SQL agent, ReAct agent, MLflow logging
+api.py                  FastAPI REST API the frontend calls
 ledger.db               SQLite memory + vector store, created on first run
-Dockerfile               App container (UI or API, selectable via CMD)
-docker-compose.yml       app + api + ollama + mlflow, wired together
+Dockerfile               API container (backend)
+docker-compose.yml       web + api + ollama + mlflow, wired together
 ```
 
 **Three models, all local via Ollama:**
@@ -42,7 +46,7 @@ docker-compose.yml       app + api + ollama + mlflow, wired together
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                      Receipt image upload                        │
-│              (Streamlit UI  or  POST /extract)                   │
+│              (Next.js UI  →  POST /extract)                      │
 └──────────────────────────────┬──────────────────────────────────┘
                                │
                     ┌──────────▼──────────┐
@@ -77,12 +81,13 @@ docker-compose.yml       app + api + ollama + mlflow, wired together
                                │
                ┌───────────────┼───────────────┐
                │               │               │
-    ┌──────────▼────┐  ┌───────▼──────┐  ┌────▼──────────┐
-    │  save_receipt  │  │  Editable    │  │  MLflow run    │
-    │  → ledger.db   │  │  ledger UI   │  │  (latency,     │
-    │  (SQLite)      │  │  CSV / Excel │  │  token counts, │
-    └───────────────┘  └──────────────┘  │  errors)       │
-                                         └────────────────┘
+    ┌──────────▼────┐  ┌───────▼────────┐  ┌────▼──────────┐
+    │  save_receipt  │  │  confidence     │  │  MLflow run    │
+    │  → ledger.db   │  │  from token     │  │  (latency,     │
+    │  (SQLite) +    │  │  logprobs       │  │  token counts, │
+    │  confidence    │  │  (per field)    │  │  confidence,   │
+    └───────────────┘  └────────────────┘  │  errors)       │
+                                           └────────────────┘
 
 ────────────────────────────────────────────────────────────────
          ReAct Agent  (Ask your receipts / POST /agent)
@@ -140,7 +145,7 @@ docker-compose.yml       app + api + ollama + mlflow, wired together
 | SQL Agent | `core.ask_ledger` — NL question → generated SQL → executed against `ledger.db` |
 | ReAct Agent | `core.agent_stream` — Thought→Action→Observation loop that routes between the SQL tool and the RAG tool, streams reasoning, and cites its sources |
 | Tool Use | the agent's two tools — `sql_ledger` (SQL over the ledger) and `search_receipts` (vector search) — plus the `qwen2.5vl:7b` vision tool |
-| Chat UI | "Ask your receipts" streaming agent panel in the Streamlit app |
+| Chat UI | "Ask your receipts" streaming agent panel in the Next.js app (`web-next`) |
 | API Endpoint | `api.py` — `POST /extract`, `GET /receipts`, `POST /ask`, `POST /search`, `POST /agent`, `POST /agent/stream` |
 | LLMOps Monitoring | every extraction, SQL-agent, RAG, and ReAct-agent call wrapped in `mlflow.start_run()`, logging latency, params, token counts, tools used, and errors |
 | Dockerization | `Dockerfile` + `docker-compose.yml` |
@@ -168,8 +173,9 @@ Fill in owners before the presentation — each member owns and can walk through
 - Automatic clean-up: removes `2 @ price` notation from item names, de-duplicates
   repeated line items, and fixes mis-assigned Total / Cash / Change
 - Reconciliation check flags receipts where line items don't add up to the total
-- Editable tables — correct any misread value before exporting
-- Export to CSV (summary + line items) or a single Excel workbook
+- **Measured OCR confidence** — every field gets a real confidence score computed
+  from the vision model's token-level logprobs (not a self-reported number), shown
+  as color-coded badges on every receipt and a per-field breakdown on expand
 - Every processed receipt is saved to a persistent SQLite ledger **and** indexed
   into a local vector store for semantic search
 - **Ask your receipts** — a ReAct agent answers in plain English, choosing between
@@ -195,15 +201,13 @@ Fill in owners before the presentation — each member owns and can walk through
 ## Setup (local, no Docker)
 
 ```bash
-# 1. Install Python dependencies
-pip install streamlit ollama pandas numpy openpyxl pillow \
-            fastapi uvicorn pydantic mlflow
+# 1. Install the backend (Python) dependencies
+pip install -r requirements.txt
 ```
 
-> If the project ships a `requirements.txt`, you can use that instead:
-> ```bash
-> pip install -r requirements.txt
-> ```
+> The frontend (Next.js) is installed separately with `npm install` in `web-next/`
+> — see **Running locally** below. The simplest way to run everything is Docker
+> (see **Running with Docker**), which builds both.
 
 ```bash
 # 2. Install Ollama (macOS example; see ollama.com/download for other platforms)
@@ -234,21 +238,27 @@ ollama pull nomic-embed-text
 # 1. Start the Ollama server (leave this running in its own terminal)
 ollama serve
 
-# 2. In another terminal, launch the UI
-streamlit run receipt_processor.py
-
-# 2b. ...and/or launch the REST API
+# 2. Launch the REST API (the backend the frontend calls)
 uvicorn api:app --host 0.0.0.0 --port 8000
 # interactive docs at http://localhost:8000/docs
 
-# 2c. ...and/or launch the MLflow dashboard to see traces
+# 3. In another terminal, launch the Next.js frontend
+cd web-next
+npm install          # first time only
+npm run dev          # dev server at http://localhost:3000
+
+# 4. ...and/or launch the MLflow dashboard to see traces
 mlflow ui --backend-store-uri file:./mlruns
 ```
 
-Streamlit prints a local URL (default <http://localhost:8501>). Drag a receipt
-onto the dropzone, click **Process receipts**, review/edit the ledger, then
-download CSV or Excel. Use the **Ask your receipts** panel at the bottom to talk
-to the ReAct agent — watch it stream its reasoning, pick a tool, and answer.
+Open the frontend (default <http://localhost:3000>). Click **Scan receipts**, drop
+one or more receipt images, and each is read and filed automatically — with a
+color-coded **confidence** badge on every receipt (expand a row for the per-field
+breakdown). Use the floating chat assistant to talk to the ReAct agent — watch it
+stream its reasoning, pick a tool, and answer.
+
+> The frontend proxies same-origin `/api/*` to the API. In dev it expects the API
+> at `http://localhost:8000`; under Docker Compose this is wired automatically.
 
 ---
 
@@ -269,9 +279,8 @@ This brings up four containers:
 - `api` — the REST API at <http://localhost:8001> (docs at `/docs`)
 - `mlflow` — the MLflow tracking UI at <http://localhost:5001>
 
-The frontend source lives in `web-next/`. The original Streamlit app
-(`receipt_processor.py`) is kept in the repo but no longer wired into the stack;
-run it standalone with `streamlit run receipt_processor.py` if you want it.
+The frontend source lives in `web-next/`. It is the only UI — the app is a Next.js
+dashboard talking to the FastAPI backend.
 
 First start will take a while while the models download (~7.8 GB total).
 
@@ -304,7 +313,8 @@ Two tables are created automatically in `ledger.db` on first run:
 `id`, `source_file`, `processed_at`, `vendor_name`, `vendor_tin`, `vendor_address`,
 `receipt_number`, `receipt_date`, `subtotal`, `vatable_sales`, `vat_exempt_sales`,
 `zero_rated_sales`, `vat_amount`, `discount`, `discount_type`, `total_amount`,
-`cash`, `change`, `currency`, `flagged`
+`cash`, `change`, `currency`, `category`, `flagged`, `confidence` (overall OCR
+confidence 0–1), `field_confidence` (JSON: per-field + per-item confidence)
 
 **`line_items`** — one row per line item, linked by `receipt_id`  
 `id`, `receipt_id`, `description`, `quantity`, `unit_price`, `amount`
@@ -328,16 +338,23 @@ Routed to **`search_receipts`** (content/semantic):
 
 ---
 
-## Using from a Jupyter / Colab notebook
+## Using the pipeline from Python / a notebook
+
+The extraction pipeline is importable directly, with no UI:
 
 ```python
-%pip install streamlit ollama pandas numpy openpyxl pillow fastapi uvicorn pydantic mlflow --quiet
+%pip install -r requirements.txt --quiet
 !ollama pull qwen2.5vl:7b
-!ollama pull llama3.2:3b
+!ollama pull qwen2.5:latest
 !ollama pull nomic-embed-text
+
+from core import extract_receipt_validated
+data, review_reasons, confidence = extract_receipt_validated(open("Receipt.jpg","rb").read())
+print(data.total_amount, "overall confidence:", confidence["overall"])
 ```
 
-Then run `streamlit run receipt_processor.py` from a terminal as above.
+Or run the REST API (`uvicorn api:app`) and the Next.js frontend as in
+**Running locally** above.
 
 ---
 
@@ -348,13 +365,14 @@ the best results:
 
 - Use a **flat, well-lit, straight-on** photo with no shadow over the figures
 - Avoid blur and steep angles
-- Always glance at the editable table and fix any value the ⚠ flag points to
-  before exporting; receipts flagged for **disambiguation** (missing total,
-  missing items, discount without a matching TIN) are called out explicitly
-  and should always be reviewed before being treated as final
+- Watch the **confidence** badges: fields the model was unsure of turn amber/red,
+  so you know exactly which values to double-check. Receipts flagged for
+  **disambiguation** (missing total, missing items, discount without a matching
+  TIN) are also called out explicitly and should be reviewed before being treated
+  as final
 
-For tougher receipts you can switch the model name in the sidebar to any other
-Ollama vision model you've pulled.
+For tougher receipts you can pass a different `model=` to `/extract` (any Ollama
+vision model you've pulled).
 
 ---
 
@@ -373,10 +391,15 @@ Ollama vision model you've pulled.
    passed through.
 5. **Reconciliation + disambiguation** checks decide whether the receipt can be
    auto-filed or needs a human's eyes first.
-6. The result is saved to a **persistent SQLite ledger** (memory), shown in
-   editable tables, and exported. It is also turned into a short document,
-   **embedded**, and stored in the `receipt_docs` **vector store** for RAG.
-7. Every step (1–4) is timed and logged to **MLflow** for observability.
+6. **Confidence** is measured from the model's per-token logprobs: each field's
+   value is scored by the geometric mean of its tokens' probabilities — a real read
+   of the output distribution, never a self-reported number. This is shown as
+   badges in the UI and stored with the receipt.
+7. The result is saved to a **persistent SQLite ledger** (memory) with its
+   confidence. It is also turned into a short document, **embedded**, and stored in
+   the `receipt_docs` **vector store** for RAG.
+8. Every model call is timed and logged to **MLflow** for observability (latency,
+   token counts, confidence, errors).
 8. The **"Ask your receipts"** panel / `POST /agent` runs a **ReAct agent**: it
    reasons in a Thought→Action→Observation loop and routes each question to the
    right tool —
@@ -387,5 +410,5 @@ Ollama vision model you've pulled.
 
    The agent streams its reasoning to the UI, and can be scoped to one receipt or
    the whole ledger. `POST /ask` and `POST /search` expose the two tools directly.
-  
-The Streamlit theme lives in `.streamlit/config.toml`.
+
+The frontend theme and components live in `web-next/`.
