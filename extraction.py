@@ -14,12 +14,16 @@ here when that UI was retired in favour of the Next.js frontend.
 from __future__ import annotations
 
 import json
+import os
 import re
 
 # --------------------------------------------------------------------------- #
 # Configuration
 # --------------------------------------------------------------------------- #
-DEFAULT_MODEL = "qwen2.5vl:7b"
+# The vision/OCR model. Overridable via the VISION_MODEL env var so a resource-
+# constrained deployment can drop to a smaller model (e.g. qwen2.5vl:3b) without
+# a code change; defaults to the 7B model used in development.
+DEFAULT_MODEL = os.environ.get("VISION_MODEL", "qwen2.5vl:7b")
 
 EXTRACTION_PROMPT = """You are a careful transcription tool reading a purchase
 receipt or invoice — the kind you get at a restaurant, cafe, grocery, retail

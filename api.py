@@ -35,7 +35,9 @@ from core import (
     delete_receipt,
     expense_summary,
     extract_receipt_validated,
+    get_receipt,
     get_receipt_items,
+    update_receipt,
     list_budgets,
     list_income,
     list_receipts,
@@ -113,6 +115,25 @@ async def extract(file: UploadFile = File(...), model: str = DEFAULT_MODEL):
 @app.get("/receipts")
 def receipts(limit: int = 100):
     return {"receipts": list_receipts(limit=limit)}
+
+
+@app.get("/receipts/{receipt_id}")
+def receipt_detail(receipt_id: int):
+    """Full detail for one receipt: its header row plus its line items."""
+    row = get_receipt(receipt_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"Receipt {receipt_id} not found")
+    return {"receipt": row, "items": get_receipt_items(receipt_id)}
+
+
+@app.put("/receipts/{receipt_id}")
+def edit_receipt(receipt_id: int, payload: dict):
+    """Update a receipt's editable header fields (vendor, date, amounts, category…).
+    Only whitelisted fields are written; unknown keys are ignored."""
+    row = update_receipt(receipt_id, payload)
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"Receipt {receipt_id} not found")
+    return {"receipt": row}
 
 
 @app.get("/receipts/{receipt_id}/items")

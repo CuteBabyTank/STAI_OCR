@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
 import sqlite3
 import time
@@ -38,12 +39,65 @@ except ImportError:  # pragma: no cover
 # client. Feature-detect so an older client degrades gracefully — extraction
 # still works, confidence is simply omitted — instead of raising on the kwarg.
 _OLLAMA_SUPPORTS_LOGPROBS = False
+_OLLAMA_SUPPORTS_THINK = False
 if ollama is not None:
     try:
         import inspect as _inspect
-        _OLLAMA_SUPPORTS_LOGPROBS = "logprobs" in _inspect.signature(ollama.chat).parameters
+        _params = _inspect.signature(ollama.chat).parameters
+        _OLLAMA_SUPPORTS_LOGPROBS = "logprobs" in _params
+        _OLLAMA_SUPPORTS_THINK = "think" in _params
     except (ValueError, TypeError):  # pragma: no cover
-        _OLLAMA_SUPPORTS_LOGPROBS = False
+        pass
+
+
+def _chat(**kwargs):
+    """Call ``ollama.chat`` with hidden 'thinking' disabled, retrying once on a
+    transient failure.
+
+    The LLM now runs on a shared remote Ollama endpoint (set via OLLAMA_HOST)
+    rather than locally. Several models served there are reasoning ('thinking')
+    models that otherwise spend their whole token budget on hidden reasoning and
+    return empty content — think=False makes them answer directly. This is a
+    no-op for clients or models without thinking support; all prompts, guardrails,
+    structured-output parsing and confidence logic are unchanged.
+
+    Because the endpoint is shared, it can briefly be busy / time out / return a
+    5xx. We retry once after a short backoff so a one-off hiccup doesn't surface
+    to the user as a 500."""
+    if _OLLAMA_SUPPORTS_THINK:
+        kwargs.setdefault("think", False)
+    for _attempt in range(2):
+        try:
+            return ollama.chat(**kwargs)
+        except Exception:  # noqa: BLE001 - retry once, then let it propagate
+            if _attempt == 0:
+                time.sleep(1.5)
+                continue
+            raise
+
+# Vision input controls. Defaults preserve original behaviour (no downscale, 8192
+# context); a constrained deployment sets these via env to fit CPU/RAM limits.
+_VISION_MAX_DIM = int(os.environ.get("VISION_MAX_DIM", "0"))     # 0 = no downscaling
+_VISION_NUM_CTX = int(os.environ.get("VISION_NUM_CTX", "8192"))
+
+
+def _downscale_image(image_bytes: bytes, max_dim: int) -> bytes:
+    """Shrink an image so its longest side is <= max_dim, re-encoded as JPEG.
+    Best-effort: on any failure the original bytes are returned unchanged."""
+    try:
+        import io as _io
+        from PIL import Image
+        img = Image.open(_io.BytesIO(image_bytes))
+        w, h = img.size
+        if max(w, h) <= max_dim:
+            return image_bytes
+        scale = max_dim / float(max(w, h))
+        resized = img.convert("RGB").resize((max(1, int(w * scale)), max(1, int(h * scale))))
+        buf = _io.BytesIO()
+        resized.save(buf, format="JPEG", quality=88)
+        return buf.getvalue()
+    except Exception:  # noqa: BLE001 - never let preprocessing break extraction
+        return image_bytes
 
 try:
     import numpy as np
@@ -306,11 +360,11 @@ ALLOWED_CONTENT_TYPES = {"image/png", "image/jpeg", "image/webp", "image/bmp"}
 # Text-only model used by the SQL agent, the RAG answerer, and the ReAct planner.
 # qwen2.5:7b reasons/routes and summarizes numbers far more reliably than a 3B model
 # (which mis-routed tools, looped, and garbled amounts). It runs partly on CPU on a
-# 4GB GPU so it's a bit slower per turn — worth it for correct answers. Swap back to
-# "llama3.2:3b" if you want faster-but-weaker responses.
-AGENT_MODEL = "qwen2.5:latest"
+# 4GB GPU so it's a bit slower per turn — worth it for correct answers. Overridable
+# via AGENT_MODEL env (e.g. "llama3.2:3b" for faster/smaller on constrained hosts).
+AGENT_MODEL = os.environ.get("AGENT_MODEL", "qwen2.5:latest")
 # Embedding model used by the RAG retriever. Small (~275 MB), fast, local.
-EMBED_MODEL = "nomic-embed-text"
+EMBED_MODEL = os.environ.get("EMBED_MODEL", "nomic-embed-text")
 
 mlflow.set_experiment("stai_ocr_receipts")
 
@@ -500,19 +554,35 @@ def extract_receipt_validated(
             if ollama is None:
                 raise RuntimeError("The `ollama` package is not installed.")
 
+            # Downscale large images before OCR (env-gated; off by default). A vision
+            # model turns each image into tokens proportional to its pixel count, so a
+            # big photo can blow past the context window and balloon KV-cache memory.
+            # On a small/CPU host, capping the longest side keeps token count (and RAM)
+            # in check and speeds up prefill. VISION_MAX_DIM=0 disables it.
+            if _VISION_MAX_DIM > 0:
+                image_bytes = _downscale_image(image_bytes, _VISION_MAX_DIM)
+                mlflow.log_param("image_bytes_scaled", len(image_bytes))
+
             # Ask the runtime to return the per-token probability distribution so we
             # can *measure* field confidence instead of guessing it (when supported).
             logprob_kwargs = {"logprobs": True, "top_logprobs": 1} if _OLLAMA_SUPPORTS_LOGPROBS else {}
-            response = ollama.chat(
+            chat_args = dict(
                 model=model,
                 messages=[{"role": "user", "content": EXTRACTION_PROMPT, "images": [image_bytes]}],
                 format="json",
-                # num_ctx: the extraction prompt + a tokenized receipt image can
-                # exceed Ollama's 4096-token default context; 8192 gives headroom.
-                options={"temperature": 0, "num_predict": 1024, "num_ctx": 8192},
+                # num_ctx: prompt + tokenized image can exceed Ollama's 4096 default;
+                # 8192 gives headroom. Overridable (VISION_NUM_CTX) so a memory-limited
+                # host can shrink the KV cache (Ollama allocates it for the full ctx).
+                options={"temperature": 0, "num_predict": 1024, "num_ctx": _VISION_NUM_CTX},
                 **logprob_kwargs,
             )
+            response = _chat(**chat_args)
             content = response["message"]["content"]
+            # A reasoning model can occasionally emit empty content even with
+            # thinking disabled; retry once so an empty read doesn't 500 on parsing.
+            if not (content or "").strip():
+                response = _chat(**chat_args)
+                content = response["message"]["content"]
             raw = _coerce_json(content)
             # Keep a pristine copy of the model's own items (pre-cleanup) so
             # confidence can be aligned back to the values it actually printed.
@@ -701,6 +771,69 @@ def get_receipt_items(receipt_id: int) -> list[dict]:
             (receipt_id,),
         ).fetchall()
         return [dict(r) for r in rows]
+
+
+def get_receipt(receipt_id: int) -> dict | None:
+    """Return one receipt's full header row (all columns), or None if not found."""
+    init_db()
+    with sqlite3.connect(DB_PATH) as con:
+        con.row_factory = sqlite3.Row
+        row = con.execute(
+            "SELECT * FROM receipts WHERE id = ?", (receipt_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+
+# Header fields a user is allowed to edit from the receipt detail page.
+_EDITABLE_RECEIPT_FIELDS = (
+    "vendor_name", "vendor_tin", "vendor_address", "receipt_number", "receipt_date",
+    "subtotal", "vatable_sales", "vat_exempt_sales", "zero_rated_sales", "vat_amount",
+    "discount", "discount_type", "total_amount", "cash", "change", "currency", "category",
+)
+_EDITABLE_NUMERIC_FIELDS = {
+    "subtotal", "vatable_sales", "vat_exempt_sales", "zero_rated_sales", "vat_amount",
+    "discount", "total_amount", "cash", "change",
+}
+
+
+def update_receipt(receipt_id: int, fields: dict) -> dict | None:
+    """Update a receipt's editable header fields in place. Only whitelisted fields
+    are written; numeric fields are coerced with the same parser used elsewhere.
+    Returns the updated row, or None if the receipt doesn't exist. Re-indexes the
+    receipt for RAG (best-effort) so semantic search reflects the edits."""
+    init_db()
+    updates: dict = {}
+    for key, value in (fields or {}).items():
+        if key not in _EDITABLE_RECEIPT_FIELDS:
+            continue
+        if key in _EDITABLE_NUMERIC_FIELDS:
+            updates[key] = _num(value)
+        else:
+            v = None if value is None else str(value).strip()
+            updates[key] = v or None
+    with sqlite3.connect(DB_PATH) as con:
+        if con.execute("SELECT id FROM receipts WHERE id = ?", (receipt_id,)).fetchone() is None:
+            return None
+        if updates:
+            set_clause = ", ".join(f"{k} = ?" for k in updates)
+            con.execute(
+                f"UPDATE receipts SET {set_clause} WHERE id = ?",
+                (*updates.values(), receipt_id),
+            )
+            con.commit()
+
+    # Keep RAG search consistent with the edited values (never let this block a save).
+    try:
+        row = get_receipt(receipt_id)
+        items = get_receipt_items(receipt_id)
+        data = ReceiptData(
+            **{k: row.get(k) for k in ReceiptData.model_fields if k != "items"},
+            items=[LineItem(**it) for it in items],
+        )
+        index_receipt(receipt_id, data, row.get("source_file") or "")
+    except Exception:  # noqa: BLE001
+        pass
+    return get_receipt(receipt_id)
 
 
 def delete_receipt(receipt_id: int) -> bool:
@@ -1469,7 +1602,7 @@ def _generate_answer(question: str, sql: str, rows: list[dict], model: str) -> s
             if sym else
             "Do NOT invent a currency symbol; if none is given, use the plain number."
         )
-        resp = ollama.chat(
+        resp = _chat(
             model=model,
             messages=[
                 {
@@ -1620,7 +1753,7 @@ def _sql_agent_core(question: str, model: str, receipt_ids: list[int] | None = N
     today = date.today().isoformat()
     prompt = _SQL_AGENT_PROMPT.format(schema=SCHEMA_DESCRIPTION, question=question, today=today)
 
-    gen = ollama.chat(
+    gen = _chat(
         model=model,
         messages=[{"role": "user", "content": prompt}],
         options={"temperature": 0},
@@ -1645,7 +1778,7 @@ def _sql_agent_core(question: str, model: str, receipt_ids: list[int] | None = N
             retry_prompt = _SQL_RETRY_PROMPT.format(
                 schema=SCHEMA_DESCRIPTION, sql=sql, error=error_message, question=question
             )
-            gen2 = ollama.chat(
+            gen2 = _chat(
                 model=model,
                 messages=[{"role": "user", "content": retry_prompt}],
                 options={"temperature": 0},
@@ -2057,7 +2190,7 @@ def _rag_core(query: str, model: str, k: int = 4, receipt_ids: list[int] | None 
     answer = ""
     if ollama is not None:
         try:
-            resp = ollama.chat(
+            resp = _chat(
                 model=model,
                 messages=[
                     {
@@ -2297,7 +2430,7 @@ def _force_final(question: str, steps: list[dict], model: str) -> str:
         return "I wasn't able to find an answer to that in your receipts."
     if ollama is not None:
         try:
-            resp = ollama.chat(
+            resp = _chat(
                 model=model,
                 messages=[
                     {
@@ -2408,7 +2541,7 @@ def agent_stream(question: str, model: str = AGENT_MODEL,
         repeats = 0
         for _ in range(_MAX_AGENT_STEPS):
             text = ""
-            for chunk in ollama.chat(
+            for chunk in _chat(
                 model=model,
                 messages=[{"role": "user", "content": transcript}],
                 stream=True,

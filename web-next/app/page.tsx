@@ -2,9 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Analytics, Granularity, Receipt } from "./lib/types";
-import {
-  CAT_ORDER, catMeta, money, monthKey, monthLabel,
-} from "./lib/format";
+import { CAT_ORDER, catMeta, money, monthKey, monthLabel } from "./lib/format";
 import StatTiles from "./components/StatTiles";
 import CashflowChart from "./components/CashflowChart";
 import TopVendors from "./components/TopVendors";
@@ -13,8 +11,13 @@ import IncomePanel from "./components/IncomePanel";
 import PeriodControl from "./components/PeriodControl";
 import TxnRow from "./components/TxnRow";
 import ConfidenceBadge from "./components/ConfidenceBadge";
+import Sidebar from "./components/Sidebar";
 
-interface PeriodSel { granularity: Granularity; year: number; month: number; }
+interface PeriodSel {
+  granularity: Granularity;
+  year: number;
+  month: number;
+}
 
 interface BatchItem {
   name: string;
@@ -25,7 +28,7 @@ interface BatchItem {
   amount?: number;
   currency?: string;
   needsReview?: boolean;
-  confidence?: number;   // measured OCR confidence (0..1) from token logprobs
+  confidence?: number; // measured OCR confidence (0..1) from token logprobs
   error?: string;
 }
 
@@ -43,8 +46,8 @@ interface ChatMsg {
   cite?: string;
   err?: boolean;
   steps?: ReasonStep[]; // the ReAct reasoning behind a bot answer
-  thinking?: boolean;   // still streaming
-  clarify?: boolean;    // a clarifying question back to the user
+  thinking?: boolean; // still streaming
+  clarify?: boolean; // a clarifying question back to the user
 }
 
 // Keep only the "Thought:" portion of a raw ReAct block for display, dropping the
@@ -64,7 +67,10 @@ function obsSummary(ev: any): string {
   if (d.kind === "search") {
     const hits = d.hits || [];
     if (!hits.length) return "searched receipts · no matches";
-    const names = hits.slice(0, 3).map((h: any) => `#${h.receipt_id} ${h.vendor_name || "—"}`).join(", ");
+    const names = hits
+      .slice(0, 3)
+      .map((h: any) => `#${h.receipt_id} ${h.vendor_name || "—"}`)
+      .join(", ");
     return `searched receipts · ${hits.length} found · ${names}`;
   }
   if (d.kind === "note") return "already had that result";
@@ -74,7 +80,13 @@ function obsSummary(ev: any): string {
 // --------------------------------------------------------------------------- //
 // Icons
 // --------------------------------------------------------------------------- //
-const RobotSVG = ({ eye = "#fff", body = "var(--accent)" }: { eye?: string; body?: string }) => (
+const RobotSVG = ({
+  eye = "#fff",
+  body = "var(--accent)",
+}: {
+  eye?: string;
+  body?: string;
+}) => (
   <svg viewBox="0 0 40 40" fill="none">
     <rect x="9" y="12" width="22" height="18" rx="6" fill={body} />
     <rect x="13" y="17" width="5" height="6" rx="2.5" fill={eye} />
@@ -129,7 +141,11 @@ export default function Dashboard() {
       // backend's latest year/month as the baseline for when the user switches to
       // Month/Year with the period control.
       if (!periodSel && a.period) {
-        setPeriodSel({ granularity: "all", year: a.period.year, month: a.period.month });
+        setPeriodSel({
+          granularity: "all",
+          year: a.period.year,
+          month: a.period.month,
+        });
       }
     } catch {
       /* backend not ready yet — leave last-known state */
@@ -138,8 +154,15 @@ export default function Dashboard() {
 
   useEffect(() => {
     const h = new Date().getHours();
-    setGreeting(h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening");
-    setToday(new Date().toLocaleDateString(undefined, { month: "long", day: "numeric" }));
+    setGreeting(
+      h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening",
+    );
+    setToday(
+      new Date().toLocaleDateString(undefined, {
+        month: "long",
+        day: "numeric",
+      }),
+    );
   }, []);
 
   useEffect(() => {
@@ -147,7 +170,8 @@ export default function Dashboard() {
   }, [refresh]);
 
   useEffect(() => {
-    if (chatBodyRef.current) chatBodyRef.current.scrollTop = chatBodyRef.current.scrollHeight;
+    if (chatBodyRef.current)
+      chatBodyRef.current.scrollTop = chatBodyRef.current.scrollHeight;
   }, [msgs, typing]);
 
   const flashToast = (m: string) => {
@@ -169,13 +193,17 @@ export default function Dashboard() {
         // Error" when extraction is slow), so read text first and parse defensively.
         const raw = await res.text();
         let j: any = {};
-        try { j = raw ? JSON.parse(raw) : {}; } catch { /* non-JSON error body */ }
+        try {
+          j = raw ? JSON.parse(raw) : {};
+        } catch {
+          /* non-JSON error body */
+        }
         if (!res.ok) {
           throw new Error(
             j.detail ||
-            (res.status >= 500
-              ? "The model took too long to read this receipt (it may be running on CPU). Try again in a moment."
-              : raw.slice(0, 160) || res.statusText)
+              (res.status >= 500
+                ? "The model took too long to read this receipt (it may be running on CPU). Try again in a moment."
+                : raw.slice(0, 160) || res.statusText),
           );
         }
         const d = j.data || {};
@@ -191,14 +219,21 @@ export default function Dashboard() {
             amount: d.total_amount ?? 0,
             currency: d.currency,
             needsReview: !!j.needs_review,
-            confidence: typeof j.confidence?.overall === "number" ? j.confidence.overall : undefined,
+            confidence:
+              typeof j.confidence?.overall === "number"
+                ? j.confidence.overall
+                : undefined,
           };
           return next;
         });
       } catch (e: any) {
         setBatch((prev) => {
           const next = [...prev];
-          next[i] = { name: files[i].name, status: "error", error: e?.message || "Failed to read" };
+          next[i] = {
+            name: files[i].name,
+            status: "error",
+            error: e?.message || "Failed to read",
+          };
           return next;
         });
       }
@@ -237,7 +272,11 @@ export default function Dashboard() {
       await fetch("/api/budgets", {
         method: "PUT",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ category, monthly_limit: limit, currency: analytics?.currency }),
+        body: JSON.stringify({
+          category,
+          monthly_limit: limit,
+          currency: analytics?.currency,
+        }),
       });
       await refresh();
       flashToast(`${category} budget set`);
@@ -259,7 +298,12 @@ export default function Dashboard() {
   const seedChat = () => {
     if (seeded) return;
     setSeeded(true);
-    setMsgs([{ who: "bot", text: "Hi 👋 I'm your receipt assistant. Ask me anything about your spending — I'll show you my reasoning as I look it up." }]);
+    setMsgs([
+      {
+        who: "bot",
+        text: "Hi 👋 I'm your receipt assistant. Ask me anything about your spending — I'll show you my reasoning as I look it up.",
+      },
+    ]);
   };
   const openChat = () => {
     setChatOpen(true);
@@ -274,9 +318,16 @@ export default function Dashboard() {
     const history = msgs
       .filter((m) => m.text)
       .slice(-10)
-      .map((m) => ({ role: m.who === "me" ? "user" : "assistant", text: m.text }));
+      .map((m) => ({
+        role: m.who === "me" ? "user" : "assistant",
+        text: m.text,
+      }));
     // Append the user's message plus an empty bot bubble we fill in as events stream.
-    setMsgs((m) => [...m, { who: "me", text: q }, { who: "bot", text: "", steps: [], thinking: true }]);
+    setMsgs((m) => [
+      ...m,
+      { who: "me", text: q },
+      { who: "bot", text: "", steps: [], thinking: true },
+    ]);
     setChatText("");
     setTyping(true);
 
@@ -285,7 +336,10 @@ export default function Dashboard() {
       setMsgs((m) => {
         const copy = m.slice();
         for (let i = copy.length - 1; i >= 0; i--) {
-          if (copy[i].who === "bot") { copy[i] = fn(copy[i]); break; }
+          if (copy[i].who === "bot") {
+            copy[i] = fn(copy[i]);
+            break;
+          }
         }
         return copy;
       });
@@ -307,21 +361,33 @@ export default function Dashboard() {
         });
       } else if (ev.type === "action") {
         patchBot((b) => {
-          const steps = (b.steps || []).map((s) => (s.live ? { ...s, live: false } : s));
+          const steps = (b.steps || []).map((s) =>
+            s.live ? { ...s, live: false } : s,
+          );
           steps.push({ kind: "action", tool: ev.tool, text: ev.input });
           return { ...b, steps };
         });
         curThought = "";
       } else if (ev.type === "observation") {
-        patchBot((b) => ({ ...b, steps: [...(b.steps || []), { kind: "observation", tool: ev.tool, text: obsSummary(ev) }] }));
+        patchBot((b) => ({
+          ...b,
+          steps: [
+            ...(b.steps || []),
+            { kind: "observation", tool: ev.tool, text: obsSummary(ev) },
+          ],
+        }));
       } else if (ev.type === "final") {
         const nCalls = (ev.steps || []).filter((s: any) => s.tool).length;
         patchBot((b) => ({
           ...b,
           text: ev.answer || "I couldn't find an answer for that.",
           thinking: false,
-          steps: (b.steps || []).map((s) => (s.live ? { ...s, live: false } : s)),
-          cite: nCalls ? `reasoned · ${nCalls} tool call${nCalls === 1 ? "" : "s"}` : undefined,
+          steps: (b.steps || []).map((s) =>
+            s.live ? { ...s, live: false } : s,
+          ),
+          cite: nCalls
+            ? `reasoned · ${nCalls} tool call${nCalls === 1 ? "" : "s"}`
+            : undefined,
         }));
       } else if (ev.type === "clarify") {
         // The agent is unsure and is asking the user a question instead of guessing.
@@ -330,10 +396,19 @@ export default function Dashboard() {
           text: ev.question || "Could you clarify what you mean?",
           thinking: false,
           clarify: true,
-          steps: (b.steps || []).map((s) => (s.live ? { ...s, live: false } : s)),
+          steps: (b.steps || []).map((s) =>
+            s.live ? { ...s, live: false } : s,
+          ),
         }));
       } else if (ev.type === "error") {
-        patchBot((b) => ({ ...b, err: true, thinking: false, text: `Something went wrong: ${ev.message || "the agent didn't respond"}.` }));
+        patchBot((b) => ({
+          ...b,
+          err: true,
+          thinking: false,
+          text: `Something went wrong: ${
+            ev.message || "the agent didn't respond"
+          }.`,
+        }));
       }
     };
 
@@ -360,13 +435,34 @@ export default function Dashboard() {
           const frame = buf.slice(0, idx);
           buf = buf.slice(idx + 2);
           const line = frame.split("\n").find((l) => l.startsWith("data:"));
-          if (line) { try { handle(JSON.parse(line.slice(5).trim())); } catch { /* ignore partial */ } }
+          if (line) {
+            try {
+              handle(JSON.parse(line.slice(5).trim()));
+            } catch {
+              /* ignore partial */
+            }
+          }
         }
       }
       // Safety net: if the stream ended without a final/error, don't leave it spinning.
-      patchBot((b) => (b.thinking ? { ...b, thinking: false, text: b.text || "I couldn't find an answer for that." } : b));
+      patchBot((b) =>
+        b.thinking
+          ? {
+              ...b,
+              thinking: false,
+              text: b.text || "I couldn't find an answer for that.",
+            }
+          : b,
+      );
     } catch (e: any) {
-      patchBot((b) => ({ ...b, err: true, thinking: false, text: `Something went wrong: ${e?.message || "the agent didn't respond"}.` }));
+      patchBot((b) => ({
+        ...b,
+        err: true,
+        thinking: false,
+        text: `Something went wrong: ${
+          e?.message || "the agent didn't respond"
+        }.`,
+      }));
     } finally {
       setTyping(false);
     }
@@ -374,8 +470,11 @@ export default function Dashboard() {
 
   const toggleTheme = () => {
     const root = document.documentElement;
-    const cur = root.getAttribute("data-theme") ||
-      (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    const cur =
+      root.getAttribute("data-theme") ||
+      (window.matchMedia("(prefers-color-scheme: dark)").matches
+        ? "dark"
+        : "light");
     root.setAttribute("data-theme", cur === "dark" ? "light" : "dark");
   };
 
@@ -385,7 +484,9 @@ export default function Dashboard() {
   const catTotal = Object.values(byCat).reduce((s, v) => s + v, 0);
   const donutCats = [
     ...CAT_ORDER.filter((c) => byCat[c] > 0),
-    ...Object.keys(byCat).filter((c) => !CAT_ORDER.includes(c as any) && byCat[c] > 0),
+    ...Object.keys(byCat).filter(
+      (c) => !CAT_ORDER.includes(c as any) && byCat[c] > 0,
+    ),
   ];
   let acc = 0;
   const stops = donutCats
@@ -401,44 +502,35 @@ export default function Dashboard() {
   const recent = receipts.slice(0, 6);
   const periodLabel = analytics?.period.label || "this period";
 
-  const pastMonths = Array.from(new Set(receipts.map((r) => monthKey(r.receipt_date)))).sort().reverse();
-  const filtered = pastMonth === "All months"
-    ? receipts
-    : receipts.filter((r) => monthLabel(monthKey(r.receipt_date)) === pastMonth);
-  const groupMonths = Array.from(new Set(filtered.map((r) => monthKey(r.receipt_date)))).sort().reverse();
+  const pastMonths = Array.from(
+    new Set(receipts.map((r) => monthKey(r.receipt_date))),
+  )
+    .sort()
+    .reverse();
+  const filtered =
+    pastMonth === "All months"
+      ? receipts
+      : receipts.filter(
+          (r) => monthLabel(monthKey(r.receipt_date)) === pastMonth,
+        );
+  const groupMonths = Array.from(
+    new Set(filtered.map((r) => monthKey(r.receipt_date))),
+  )
+    .sort()
+    .reverse();
 
-  const chips = ["How much did I spend?", "Top category?", "My biggest purchase", "Food spending"];
+  const chips = [
+    "How much did I spend?",
+    "Top category?",
+    "My biggest purchase",
+    "Food spending",
+  ];
   const savedInBatch = batch.filter((b) => b.status === "done").length;
 
   return (
     <div className="shell">
       {/* Sidebar */}
-      <aside className="sidebar">
-        <div className="sidebar-inner">
-          <div className="brand">
-            <div className="brand-mark">◆</div>
-            <span className="brand-name">Receipt Ledger</span>
-          </div>
-          <nav>
-            <button className="nav-item active">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="7" height="9" rx="1.5" /><rect x="14" y="3" width="7" height="5" rx="1.5" /><rect x="14" y="12" width="7" height="9" rx="1.5" /><rect x="3" y="16" width="7" height="5" rx="1.5" /></svg>Overview
-            </button>
-            <button className="nav-item" onClick={() => setIncomeOpen(true)}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></svg>Income
-            </button>
-            <button className="nav-item" onClick={openChat}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>Ask receipts
-            </button>
-          </nav>
-          <div className="nav-user">
-            <div className="avatar">◆</div>
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 13.5, fontWeight: 560, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>Local ledger</div>
-              <div style={{ fontSize: 12, color: "var(--ink-3)" }}>runs on your machine</div>
-            </div>
-          </div>
-        </div>
-      </aside>
+      <Sidebar onIncome={() => setIncomeOpen(true)} onChat={openChat} />
 
       {/* Main */}
       <main>
@@ -448,21 +540,37 @@ export default function Dashboard() {
             <p className="subhead">Here&apos;s your cashflow · {today}</p>
           </div>
           <div className="header-actions">
-            <button className="icon-btn" onClick={toggleTheme} title="Toggle theme" aria-label="Toggle theme">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" /></svg>
+            <button
+              className="icon-btn"
+              onClick={toggleTheme}
+              title="Toggle theme"
+              aria-label="Toggle theme"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
+              </svg>
             </button>
             <button className="btn-ghost" onClick={() => setIncomeOpen(true)}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 5v14M5 12h14" /></svg>Income
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+              Income
             </button>
             <button className="btn-primary" onClick={openPanel}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 5v14M5 12h14" /></svg>Add receipt
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+              Add receipt
             </button>
           </div>
         </header>
 
         {/* Period selector — scopes every panel below */}
         {analytics && periodSel && (
-          <PeriodControl period={analytics.period} onChange={(next) => setPeriodSel(next)} />
+          <PeriodControl
+            period={analytics.period}
+            onChange={(next) => setPeriodSel(next)}
+          />
         )}
 
         {/* Overview cards with period-over-period deltas */}
@@ -473,16 +581,31 @@ export default function Dashboard() {
           <div className="card-head">
             <p className="card-title">Cashflow over time</p>
             <div className="cf-legend">
-              <span><i className="sw" style={{ background: "var(--positive)" }} />Income</span>
-              <span><i className="sw inset" style={{ background: "var(--accent)" }} />Expense</span>
+              <span>
+                <i className="sw" style={{ background: "var(--positive)" }} />
+                Income
+              </span>
+              <span>
+                <i
+                  className="sw inset"
+                  style={{ background: "var(--accent)" }}
+                />
+                Expense
+              </span>
             </div>
           </div>
           {analytics && analytics.bars.length > 0 ? (
-            <CashflowChart bars={analytics.bars} currency={analytics.currency} focusKey={analytics.focus_key} />
+            <CashflowChart
+              bars={analytics.bars}
+              currency={analytics.currency}
+              focusKey={analytics.focus_key}
+            />
           ) : (
             <div className="empty">
               <p className="h">No activity in {periodLabel}</p>
-              <p className="s">Add a receipt or some income, or pick another period above.</p>
+              <p className="s">
+                Add a receipt or some income, or pick another period above.
+              </p>
             </div>
           )}
         </section>
@@ -490,7 +613,9 @@ export default function Dashboard() {
         {/* Category + budgets (both scoped to the selected period) */}
         <section className="band">
           <div className="card">
-            <div className="card-head"><p className="card-title">Spending by category · {periodLabel}</p></div>
+            <div className="card-head">
+              <p className="card-title">Spending by category · {periodLabel}</p>
+            </div>
             <div className="donut-wrap">
               <div className="donut" style={{ background: donutBg }}>
                 <div className="donut-hole">
@@ -502,10 +627,16 @@ export default function Dashboard() {
               </div>
               <ul className="legend">
                 {CAT_ORDER.map((c) => {
-                  const pct = catTotal > 0 ? Math.round(((byCat[c] || 0) / catTotal) * 100) : 0;
+                  const pct =
+                    catTotal > 0
+                      ? Math.round(((byCat[c] || 0) / catTotal) * 100)
+                      : 0;
                   return (
                     <li key={c}>
-                      <span className="dot" style={{ background: catMeta(c).color }} />
+                      <span
+                        className="dot"
+                        style={{ background: catMeta(c).color }}
+                      />
                       <span className="name">{c}</span>
                       <span className="pct num">{pct}%</span>
                     </li>
@@ -526,24 +657,38 @@ export default function Dashboard() {
         {/* Top vendors + recent transactions */}
         <section className="band">
           <div className="card">
-            <div className="card-head"><p className="card-title">Top vendors</p></div>
-            <TopVendors vendors={analytics?.top_vendors || []} currency={analytics?.currency ?? null} />
+            <div className="card-head">
+              <p className="card-title">Top vendors</p>
+            </div>
+            <TopVendors
+              vendors={analytics?.top_vendors || []}
+              currency={analytics?.currency ?? null}
+            />
           </div>
 
           <div className="card">
             <div className="card-head">
               <p className="card-title">Recent transactions</p>
-              <button className="link" onClick={() => setShowPast(true)}>View all</button>
+              <button className="link" onClick={() => setShowPast(true)}>
+                View all
+              </button>
             </div>
             {recent.length === 0 ? (
               <div className="empty">
                 <p className="h">Nothing logged yet</p>
-                <p className="s">Scan a receipt with “Add” and it&apos;ll show up here.</p>
+                <p className="s">
+                  Scan a receipt with “Add” and it&apos;ll show up here.
+                </p>
               </div>
             ) : (
               <ul className="txn-list">
                 {recent.map((t) => (
-                  <TxnRow key={t.id} r={t} isNew={newIds.includes(t.id)} onDelete={deleteReceipt} />
+                  <TxnRow
+                    key={t.id}
+                    r={t}
+                    isNew={newIds.includes(t.id)}
+                    onDelete={deleteReceipt}
+                  />
                 ))}
               </ul>
             )}
@@ -561,20 +706,40 @@ export default function Dashboard() {
       />
 
       {/* Past receipts modal */}
-      <div className={"scrim" + (showPast ? " open" : "")} onClick={() => setShowPast(false)} />
-      <div className={"modal" + (showPast ? " open" : "")} role="dialog" aria-modal="true" aria-label="Past receipts">
+      <div
+        className={"scrim" + (showPast ? " open" : "")}
+        onClick={() => setShowPast(false)}
+      />
+      <div
+        className={"modal" + (showPast ? " open" : "")}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Past receipts"
+      >
         <div className="modal-head">
           <p className="section-eyebrow">Past receipts</p>
-          <button className="close-x" onClick={() => setShowPast(false)} aria-label="Close">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M6 6l12 12M18 6 6 18" /></svg>
+          <button
+            className="close-x"
+            onClick={() => setShowPast(false)}
+            aria-label="Close"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <path d="M6 6l12 12M18 6 6 18" />
+            </svg>
           </button>
         </div>
         <div className="modal-body">
           {receipts.length === 0 ? (
-            <p className="s" style={{ color: "var(--ink-3)", fontSize: 14 }}>No receipts yet.</p>
+            <p className="s" style={{ color: "var(--ink-3)", fontSize: 14 }}>
+              No receipts yet.
+            </p>
           ) : (
             <>
-              <select className="month-filter" value={pastMonth} onChange={(e) => setPastMonth(e.target.value)}>
+              <select
+                className="month-filter"
+                value={pastMonth}
+                onChange={(e) => setPastMonth(e.target.value)}
+              >
                 <option>All months</option>
                 {pastMonths.map((m) => (
                   <option key={m}>{monthLabel(m)}</option>
@@ -583,25 +748,50 @@ export default function Dashboard() {
               {groupMonths.map((m) => {
                 const group = filtered
                   .filter((r) => monthKey(r.receipt_date) === m)
-                  .sort((a, b) => (b.receipt_date || "").localeCompare(a.receipt_date || ""));
-                const subtotal = group.reduce((s, r) => s + (r.total_amount || 0), 0);
+                  .sort((a, b) =>
+                    (b.receipt_date || "").localeCompare(a.receipt_date || ""),
+                  );
+                const subtotal = group.reduce(
+                  (s, r) => s + (r.total_amount || 0),
+                  0,
+                );
                 const cur = group.find((r) => r.currency)?.currency;
                 return (
                   <div key={m} className="month-group">
-                    <p className="month-head">{monthLabel(m)} — {group.length} receipt{group.length > 1 ? "s" : ""} · {money(subtotal, cur)}</p>
+                    <p className="month-head">
+                      {monthLabel(m)} — {group.length} receipt
+                      {group.length > 1 ? "s" : ""} · {money(subtotal, cur)}
+                    </p>
                     {group.map((r) => (
                       <div key={r.id} className="past-row">
-                        <div className="txn-icon">{catMeta(r.category).emoji}</div>
+                        <div className="txn-icon">
+                          {catMeta(r.category).emoji}
+                        </div>
                         <div className="p-body">
-                          <div className="p-merch">#{r.id} · {r.vendor_name || "Unknown merchant"}</div>
+                          <div className="p-merch">
+                            #{r.id} · {r.vendor_name || "Unknown merchant"}
+                          </div>
                           <div className="p-meta">
-                            {r.category || "Other"} · {r.receipt_date || "Undated"}
+                            {r.category || "Other"} ·{" "}
+                            {r.receipt_date || "Undated"}
                             <ConfidenceBadge value={r.confidence} />
                           </div>
                         </div>
-                        <span className="p-amt num">{money(r.total_amount, r.currency)}</span>
-                        <button className="p-del" title="Delete (also removes from search memory)" onClick={() => deleteReceipt(r.id)}>
-                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M6 6l12 12M18 6 6 18" /></svg>
+                        <span className="p-amt num">
+                          {money(r.total_amount, r.currency)}
+                        </span>
+                        <button
+                          className="p-del"
+                          title="Delete (also removes from search memory)"
+                          onClick={() => deleteReceipt(r.id)}
+                        >
+                          <svg
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                          >
+                            <path d="M6 6l12 12M18 6 6 18" />
+                          </svg>
                         </button>
                       </div>
                     ))}
@@ -614,54 +804,114 @@ export default function Dashboard() {
       </div>
 
       {/* Add / scan slide-over */}
-      <div className={"scrim" + (panelOpen ? " open" : "")} onClick={closePanel} />
-      <div className={"panel" + (panelOpen ? " open" : "")} role="dialog" aria-modal="true" aria-label="Add receipts">
+      <div
+        className={"scrim" + (panelOpen ? " open" : "")}
+        onClick={closePanel}
+      />
+      <div
+        className={"panel" + (panelOpen ? " open" : "")}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Add receipts"
+      >
         <div className="panel-head">
           <h2>Scan receipts</h2>
-          <button className="icon-btn" style={{ width: 34, height: 34 }} onClick={closePanel} aria-label="Close">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M6 6l12 12M18 6 6 18" /></svg>
+          <button
+            className="icon-btn"
+            style={{ width: 34, height: 34 }}
+            onClick={closePanel}
+            aria-label="Close"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <path d="M6 6l12 12M18 6 6 18" />
+            </svg>
           </button>
         </div>
-        <p className="panel-desc">Drop one or more receipt images — the local vision model reads each and files it automatically.</p>
+        <p className="panel-desc">
+          Drop one or more receipt images — the local vision model reads each
+          and files it automatically.
+        </p>
 
         <div className="panel-scroll">
-          <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={(e) => onFiles(e.target.files)} />
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            multiple
+            hidden
+            onChange={(e) => onFiles(e.target.files)}
+          />
           <div
             className={"dropzone" + (dragging ? " drag" : "")}
             onClick={onPick}
-            onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
-            onDragLeave={(e) => { e.preventDefault(); setDragging(false); }}
-            onDrop={(e) => { e.preventDefault(); setDragging(false); onFiles(e.dataTransfer.files); }}
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDragging(true);
+            }}
+            onDragLeave={(e) => {
+              e.preventDefault();
+              setDragging(false);
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragging(false);
+              onFiles(e.dataTransfer.files);
+            }}
           >
             <div className="dz-icon">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 16V4M12 4 8 8M12 4l4 4" /><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" /></svg>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                <path d="M12 16V4M12 4 8 8M12 4l4 4" />
+                <path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" />
+              </svg>
             </div>
             <div className="dz-title">Drop images or click to browse</div>
-            <div className="dz-sub">PNG · JPG · WEBP · reads with qwen2.5vl</div>
+            <div className="dz-sub">PNG · JPG · WEBP</div>
           </div>
 
           {batch.length > 0 && (
             <>
               <p className="batch-head">
-                {savedInBatch > 0 ? `${savedInBatch} of ${batch.length} filed` : `Reading ${batch.length} receipt${batch.length > 1 ? "s" : ""}…`}
+                {savedInBatch > 0
+                  ? `${savedInBatch} of ${batch.length} filed`
+                  : `Reading ${batch.length} receipt${
+                      batch.length > 1 ? "s" : ""
+                    }…`}
               </p>
               <div className="batch-list">
                 {batch.map((b, i) => (
-                  <div key={i} className={"batch-row" + (b.status === "error" ? " error" : "")}>
+                  <div
+                    key={i}
+                    className={
+                      "batch-row" + (b.status === "error" ? " error" : "")
+                    }
+                  >
                     {b.status === "reading" ? (
-                      <div className="b-spin-wrap"><div className="dz-spin" /></div>
+                      <div className="b-spin-wrap">
+                        <div className="dz-spin" />
+                      </div>
                     ) : (
-                      <span className="b-emoji">{b.status === "error" ? "⚠️" : catMeta(b.category).emoji}</span>
+                      <span className="b-emoji">
+                        {b.status === "error"
+                          ? "⚠️"
+                          : catMeta(b.category).emoji}
+                      </span>
                     )}
                     <div className="b-body">
                       {b.status === "done" ? (
                         <>
                           <div className="b-merch">
                             {b.merchant}
-                            {b.needsReview && <span className="b-review">needs review</span>}
+                            {b.needsReview && (
+                              <span className="b-review">needs review</span>
+                            )}
                             <ConfidenceBadge value={b.confidence} />
                           </div>
-                          <span className="b-cat" style={{ background: catMeta(b.category).color }}>{b.category}</span>
+                          <span
+                            className="b-cat"
+                            style={{ background: catMeta(b.category).color }}
+                          >
+                            {b.category}
+                          </span>
                         </>
                       ) : b.status === "error" ? (
                         <>
@@ -671,14 +921,31 @@ export default function Dashboard() {
                       ) : (
                         <>
                           <div className="b-merch">{b.name}</div>
-                          <div className="b-file">Reading with the vision model… (can take a few minutes)</div>
+                          <div className="b-file">
+                            Reading with the vision model… (can take a few
+                            minutes)
+                          </div>
                         </>
                       )}
                     </div>
-                    {b.status === "done" && <span className="b-amt num">{money(b.amount, b.currency)}</span>}
+                    {b.status === "done" && (
+                      <span className="b-amt num">
+                        {money(b.amount, b.currency)}
+                      </span>
+                    )}
                     {b.status === "done" && b.id != null && (
-                      <button className="b-del" title="Delete" onClick={() => deleteReceipt(b.id!, true)}>
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M6 6l12 12M18 6 6 18" /></svg>
+                      <button
+                        className="b-del"
+                        title="Delete"
+                        onClick={() => deleteReceipt(b.id!, true)}
+                      >
+                        <svg
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                        >
+                          <path d="M6 6l12 12M18 6 6 18" />
+                        </svg>
                       </button>
                     )}
                   </div>
@@ -689,28 +956,54 @@ export default function Dashboard() {
         </div>
 
         <div className="panel-foot">
-          <button className="btn-save" onClick={closePanel}>Done</button>
+          <button className="btn-save" onClick={closePanel}>
+            Done
+          </button>
         </div>
       </div>
 
       {/* Toast */}
-      <div className={"toast" + (toast ? " show" : "")}><span className="tdot" />{toast}</div>
+      <div className={"toast" + (toast ? " show" : "")}>
+        <span className="tdot" />
+        {toast}
+      </div>
 
       {/* Robot RAG assistant */}
-      <button className="robot-fab" onClick={() => (chatOpen ? setChatOpen(false) : openChat())} aria-label="Ask the assistant">
+      <button
+        className="robot-fab"
+        onClick={() => (chatOpen ? setChatOpen(false) : openChat())}
+        aria-label="Ask the assistant"
+      >
         {!chatOpen && <span className="ping" />}
-        <span className="float"><RobotSVG /></span>
+        <span className="float">
+          <RobotSVG />
+        </span>
       </button>
 
-      <div className={"chat" + (chatOpen ? " open" : "")} role="dialog" aria-label="Receipt assistant">
+      <div
+        className={"chat" + (chatOpen ? " open" : "")}
+        role="dialog"
+        aria-label="Receipt assistant"
+      >
         <div className="chat-head">
-          <div className="chat-ava"><RobotSVG eye="var(--accent)" body="var(--accent-wash)" /></div>
+          <div className="chat-ava">
+            <RobotSVG eye="var(--accent)" body="var(--accent-wash)" />
+          </div>
           <div>
             <div className="ct">Receipt Assistant</div>
-            <div className="cs"><span className="live" />ReAct agent · shows its reasoning</div>
+            <div className="cs">
+              <span className="live" />
+              ReAct agent · shows its reasoning
+            </div>
           </div>
-          <button className="close-x" onClick={() => setChatOpen(false)} aria-label="Close chat">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M6 6l12 12M18 6 6 18" /></svg>
+          <button
+            className="close-x"
+            onClick={() => setChatOpen(false)}
+            aria-label="Close chat"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <path d="M6 6l12 12M18 6 6 18" />
+            </svg>
           </button>
         </div>
         <div className="chat-body" ref={chatBodyRef}>
@@ -722,14 +1015,35 @@ export default function Dashboard() {
                 {m.who === "bot" && steps.length > 0 && (
                   <details className="reason" open={m.thinking || undefined}>
                     <summary>
-                      {m.thinking ? "Thinking…" : `Reasoning · ${nCalls} tool call${nCalls === 1 ? "" : "s"}`}
+                      {m.thinking
+                        ? "Thinking…"
+                        : `Reasoning · ${nCalls} tool call${
+                            nCalls === 1 ? "" : "s"
+                          }`}
                     </summary>
                     <div className="rsteps">
                       {steps.map((s, j) => (
-                        <div key={j} className={"rstep " + s.kind + (s.live ? " live" : "")}>
-                          <span className="ri">{s.kind === "thought" ? "🧠" : s.kind === "action" ? "🔧" : "↳"}</span>
+                        <div
+                          key={j}
+                          className={
+                            "rstep " + s.kind + (s.live ? " live" : "")
+                          }
+                        >
+                          <span className="ri">
+                            {s.kind === "thought"
+                              ? "🧠"
+                              : s.kind === "action"
+                              ? "🔧"
+                              : "↳"}
+                          </span>
                           <span className="rt">
-                            {s.kind === "action" ? <><b>{s.tool}</b> · {s.text}</> : s.text || "…"}
+                            {s.kind === "action" ? (
+                              <>
+                                <b>{s.tool}</b> · {s.text}
+                              </>
+                            ) : (
+                              s.text || "…"
+                            )}
                           </span>
                         </div>
                       ))}
@@ -737,9 +1051,15 @@ export default function Dashboard() {
                   </details>
                 )}
                 {m.thinking && !m.text && steps.length === 0 && (
-                  <span className="typing inline"><span /><span /><span /></span>
+                  <span className="typing inline">
+                    <span />
+                    <span />
+                    <span />
+                  </span>
                 )}
-                {m.clarify && <span className="clarify-tag">❓ Quick question</span>}
+                {m.clarify && (
+                  <span className="clarify-tag">❓ Quick question</span>
+                )}
                 {m.text && <div className="ans">{m.text}</div>}
                 {m.cite && <span className="cite">📎 {m.cite}</span>}
               </div>
@@ -749,7 +1069,9 @@ export default function Dashboard() {
         {msgs.length <= 1 && !typing && (
           <div className="chips">
             {chips.map((c) => (
-              <button key={c} className="chip" onClick={() => ask(c)}>{c}</button>
+              <button key={c} className="chip" onClick={() => ask(c)}>
+                {c}
+              </button>
             ))}
           </div>
         )}
@@ -757,11 +1079,20 @@ export default function Dashboard() {
           <input
             value={chatText}
             onChange={(e) => setChatText(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") ask(chatText); }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") ask(chatText);
+            }}
             placeholder="Ask about your spending…"
           />
-          <button className="send" disabled={typing} onClick={() => ask(chatText)} aria-label="Send">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z" /></svg>
+          <button
+            className="send"
+            disabled={typing}
+            onClick={() => ask(chatText)}
+            aria-label="Send"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z" />
+            </svg>
           </button>
         </div>
       </div>

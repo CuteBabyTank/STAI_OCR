@@ -1,34 +1,7 @@
 services:
-  ollama:
-    image: ollama/ollama:latest
-    ports:
-      - "11435:11434"
-    volumes:
-      - ollama_data:/root/.ollama
-    environment:
-      - OLLAMA_KEEP_ALIVE=5m
-    healthcheck:
-      test: ["CMD", "ollama", "list"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    # Pulls are best-effort: a failed download (e.g. no internet in the container)
-    # must NOT kill the server, or dependent containers lose the `ollama` hostname.
-    # `ollama serve` stays in the foreground via `wait`; each pull is isolated with
-    # `|| true` so the container keeps serving whatever models are already cached.
-    entrypoint: >
-      sh -c "
-      ollama serve &
-      sleep 5;
-      (ollama list | grep -q qwen2.5vl || ollama pull qwen2.5vl:7b) || true;
-      (ollama list | grep -q llama3.2:3b || ollama pull llama3.2:3b) || true;
-      (ollama list | grep -q nomic-embed-text || ollama pull nomic-embed-text) || true;
-      wait
-      "
-
-  # Aperture — the Next.js frontend (the app's only UI). It calls the
-  # FastAPI `api` service for OCR extraction, the ledger, and the RAG agent. The
-  # browser hits same-origin /api/* which Next rewrites to http://api:8000 (see
+  # Aperture — the Next.js frontend (the app's only UI). It calls the FastAPI
+  # `api` service for OCR extraction, the ledger, and the RAG agent. The browser
+  # hits same-origin /api/* which Next rewrites to http://api:8000 (see
   # web-next/next.config.js), so there's no CORS to configure.
   web:
     build: ./web-next
@@ -45,12 +18,19 @@ services:
     ports:
       - "8001:8000"
     depends_on:
-      ollama:
-        condition: service_healthy
       mlflow:
         condition: service_started
+    # LLM runs on the shared class Ollama endpoint (Week 5 lab server) instead of
+    # a local model, so no GPU/large-RAM is needed here. Override any of these via
+    # the environment / an .env file. Set OLLAMA_HOST back to a local Ollama and
+    # VISION_MODEL/AGENT_MODEL to local models to run fully offline.
     environment:
-      - OLLAMA_HOST=http://host.docker.internal:11434
+      - OLLAMA_HOST=${OLLAMA_HOST:-http://103.231.240.155:11434}
+      - VISION_MODEL=${VISION_MODEL:-gemma4:e4b}
+      - AGENT_MODEL=${AGENT_MODEL:-gemma4:12b}
+      - EMBED_MODEL=${EMBED_MODEL:-nomic-embed-text}
+      - VISION_MAX_DIM=${VISION_MAX_DIM:-0}
+      - VISION_NUM_CTX=${VISION_NUM_CTX:-8192}
       - MLFLOW_TRACKING_URI=sqlite:////app/mlflow.db
     volumes:
       - .:/app
@@ -69,6 +49,3 @@ services:
       - "5001:5000"
     volumes:
       - .:/app
-
-volumes:
-  ollama_data:
