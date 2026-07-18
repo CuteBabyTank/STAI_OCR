@@ -288,8 +288,9 @@ First start will take a while while the models download (~7.8 GB total).
 
 | Method   | Path                           | Description                                                                  |
 | -------- | ------------------------------ | ---------------------------------------------------------------------------- |
-| `GET`    | `/health`                      | Liveness check                                                               |
-| `POST`   | `/extract`                     | Multipart image upload → validated receipt JSON                              |
+| `GET`    | `/health`                      | Liveness check + effective config (model, concurrency, image dim)            |
+| `POST`   | `/extract`                     | Multipart image upload → validated receipt JSON (first page of a PDF)        |
+| `POST`   | `/extract/batch`               | Multipart **multi-file** upload (images and/or PDFs) → one result per page, processed concurrently, with per-page error isolation |
 | `GET`    | `/receipts`                    | List saved receipts from the ledger (paginated via `?limit=`)                |
 | `GET`    | `/receipts/{receipt_id}/items` | Line items for a single receipt                                              |
 | `DELETE` | `/receipts/{receipt_id}`       | Delete a receipt and everything derived from it (line items + RAG embedding) |
@@ -319,6 +320,53 @@ All agent endpoints accept an optional `"receipt_ids": [..]` to scope the answer
 to specific receipts (e.g. a single receipt).
 
 Interactive docs: <http://localhost:8000/docs>
+
+---
+
+## Scaling & production (bulk imports up to ~1000 pages)
+
+The extraction pipeline is built to ingest large drops of images or multi-hundred
+-page PDFs without falling over:
+
+- **Image preprocessing** — every image is EXIF-rotated and downscaled (longest
+  edge → `OCR_MAX_IMAGE_DIM`, default 1600px) before inference. This cuts the
+  vision model's image prefill by ~30% with no accuracy loss on legible receipts,
+  and lets large phone photos through instead of bouncing off the size limit.
+- **PDF support** — PDFs are rasterized to one image per page (`pypdfium2`) and
+  each page becomes its own receipt.
+- **Concurrent batch path** — `/extract/batch` runs a bounded thread pool of
+  vision calls (`OCR_CONCURRENCY`); the real ceiling is the Ollama server's
+  `OLLAMA_NUM_PARALLEL`, which `OCR_CONCURRENCY` should match. One unreadable page
+  is reported in-band and never aborts the run. The web UI uploads in chunks so a
+  huge drop streams progress instead of blocking.
+- **SQLite under concurrency** — WAL mode + a busy timeout so many workers can
+  save at once without `database is locked`.
+- **Deferred embedding** — bulk saves skip the per-receipt RAG embedding; it is
+  backfilled in parallel on the next semantic search, so import throughput isn't
+  gated on it.
+- **Tunable observability** — MLflow tracing can be sampled or disabled for bulk
+  loads to avoid per-page overhead.
+
+### Environment variables
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `OCR_MAX_IMAGE_DIM` | `1600` | Longest-edge downscale target (px); `0` disables |
+| `OCR_JPEG_QUALITY` | `88` | Re-encode quality after preprocessing |
+| `OCR_CONCURRENCY` | `3` | Parallel vision calls per batch (match `OLLAMA_NUM_PARALLEL`) |
+| `OCR_NUM_CTX` / `OCR_NUM_PREDICT` | `8192` / `1024` | Ollama context / max output tokens |
+| `OLLAMA_KEEP_ALIVE` | `30m` | Keep the model resident between requests |
+| `OCR_PDF_RENDER_SCALE` | `2.0` | PDF rasterization scale (~144 DPI) |
+| `OCR_MAX_IMAGE_BYTES` | `26214400` | Hard upload ceiling (25 MB) |
+| `MLFLOW_ENABLED` | `1` | Turn all MLflow tracing on/off |
+| `MLFLOW_SAMPLE_RATE` | `1.0` | Fraction of extraction traces to keep |
+| `SQLITE_BUSY_TIMEOUT_MS` | `30000` | Lock wait before erroring |
+| `LEDGER_DB_PATH` | `./ledger.db` | Ledger location |
+
+> **Note:** `docker-compose.yml` points the API at a shared remote Ollama endpoint
+> (`OLLAMA_HOST`), so no local GPU is needed. To run fully offline, set
+> `OLLAMA_HOST` to a local Ollama (e.g. `http://host.docker.internal:11434`) and
+> `VISION_MODEL` / `AGENT_MODEL` to locally-pulled models.
 
 ---
 

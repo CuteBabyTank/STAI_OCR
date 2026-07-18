@@ -179,22 +179,30 @@ export default function Dashboard() {
     window.setTimeout(() => setToast(""), 2600);
   };
 
-  // ---- upload / OCR (real /extract) ----
+  // ---- upload / OCR (real /extract/batch) ----
+  // Files are sent in chunks to the batch endpoint, which expands PDFs to one
+  // receipt per page and processes each chunk with server-side concurrency. We
+  // send one chunk at a time (so we never oversubscribe the vision model) and
+  // update the UI as each chunk returns — this is what makes a large drop of
+  // images or a multi-hundred-page PDF import tractable instead of one-at-a-time.
+  const CLIENT_CHUNK = 12;
   const processFiles = async (files: File[]) => {
     if (!files.length) return;
     setBatch(files.map((f) => ({ name: f.name, status: "reading" as const })));
     const added: number[] = [];
-    for (let i = 0; i < files.length; i++) {
+
+    for (let start = 0; start < files.length; start += CLIENT_CHUNK) {
+      const chunk = files.slice(start, start + CLIENT_CHUNK);
+      const fd = new FormData();
+      chunk.forEach((f) => fd.append("files", f));
       try {
-        const fd = new FormData();
-        fd.append("file", files[i]);
-        const res = await fetch("/api/extract", { method: "POST", body: fd });
-        // The response may be a non-JSON error (e.g. a proxy "Internal Server
-        // Error" when extraction is slow), so read text first and parse defensively.
-        const raw = await res.text();
+        const res = await fetch("/api/extract/batch", { method: "POST", body: fd });
+        // Parse defensively: a slow/overloaded endpoint can return a non-JSON
+        // proxy error body instead of JSON.
+        const rawText = await res.text();
         let j: any = {};
         try {
-          j = raw ? JSON.parse(raw) : {};
+          j = rawText ? JSON.parse(rawText) : {};
         } catch {
           /* non-JSON error body */
         }
@@ -202,43 +210,62 @@ export default function Dashboard() {
           throw new Error(
             j.detail ||
               (res.status >= 500
-                ? "The model took too long to read this receipt (it may be running on CPU). Try again in a moment."
-                : raw.slice(0, 160) || res.statusText),
+                ? "The model took too long to read these receipts (it may be busy). Try again in a moment."
+                : rawText.slice(0, 160) || res.statusText),
           );
         }
-        const d = j.data || {};
-        added.push(j.receipt_id);
-        setBatch((prev) => {
-          const next = [...prev];
-          next[i] = {
-            name: files[i].name,
-            status: "done",
-            id: j.receipt_id,
-            merchant: d.vendor_name || files[i].name,
-            category: d.category || "Other",
-            amount: d.total_amount ?? 0,
-            currency: d.currency,
-            needsReview: !!j.needs_review,
-            confidence:
-              typeof j.confidence?.overall === "number"
-                ? j.confidence.overall
-                : undefined,
-          };
-          return next;
+        const results: any[] = j.results || [];
+        chunk.forEach((f, ci) => {
+          const idx = start + ci;
+          // Results link back by source filename; a PDF yields several pages.
+          const mine = results.filter((r) => r.source_file === f.name);
+          const ok = mine.filter((r) => !r.error && r.receipt_id);
+          ok.forEach((r) => added.push(r.receipt_id));
+          setBatch((prev) => {
+            const next = [...prev];
+            if (ok.length === 0) {
+              next[idx] = {
+                name: f.name,
+                status: "error",
+                error: mine[0]?.error || "Failed to read",
+              };
+            } else {
+              const first = ok[0].data || {};
+              const pages = mine.length;
+              next[idx] = {
+                name: pages > 1 ? `${f.name} · ${ok.length}/${pages} pages` : f.name,
+                status: "done",
+                id: ok[0].receipt_id,
+                merchant: first.vendor_name || f.name,
+                category: first.category || "Other",
+                amount: pages > 1
+                  ? ok.reduce((s, r) => s + (r.data?.total_amount || 0), 0)
+                  : (first.total_amount ?? 0),
+                currency: first.currency,
+                needsReview: ok.some((r) => r.needs_review),
+                confidence:
+                  typeof ok[0].confidence?.overall === "number"
+                    ? ok[0].confidence.overall
+                    : undefined,
+              };
+            }
+            return next;
+          });
         });
       } catch (e: any) {
-        setBatch((prev) => {
-          const next = [...prev];
-          next[i] = {
-            name: files[i].name,
-            status: "error",
-            error: e?.message || "Failed to read",
-          };
-          return next;
+        chunk.forEach((f, ci) => {
+          const idx = start + ci;
+          setBatch((prev) => {
+            const next = [...prev];
+            next[idx] = { name: f.name, status: "error", error: e?.message || "Failed to read" };
+            return next;
+          });
         });
       }
     }
-    setNewIds(added);
+
+    const uniq = Array.from(new Set(added));
+    setNewIds(uniq);
     window.setTimeout(() => setNewIds([]), 700);
 
     // Reflect the upload in the dashboard's grand total: switch to All time so the
@@ -249,7 +276,7 @@ export default function Dashboard() {
       year: p?.year ?? new Date().getFullYear(),
       month: p?.month ?? new Date().getMonth() + 1,
     }));
-    const ok = added.length;
+    const ok = uniq.length;
     if (ok) flashToast(`Added ${ok} receipt${ok > 1 ? "s" : ""}`);
   };
 
@@ -828,15 +855,15 @@ export default function Dashboard() {
           </button>
         </div>
         <p className="panel-desc">
-          Drop one or more receipt images — the local vision model reads each
-          and files it automatically.
+          Drop receipt images or PDFs — the vision model reads every page and
+          files each one automatically.
         </p>
 
         <div className="panel-scroll">
           <input
             ref={fileRef}
             type="file"
-            accept="image/*"
+            accept="image/*,application/pdf"
             multiple
             hidden
             onChange={(e) => onFiles(e.target.files)}

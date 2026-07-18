@@ -31,7 +31,21 @@ services:
       - EMBED_MODEL=${EMBED_MODEL:-nomic-embed-text}
       - VISION_MAX_DIM=${VISION_MAX_DIM:-0}
       - VISION_NUM_CTX=${VISION_NUM_CTX:-8192}
+      - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-30m}
       - MLFLOW_TRACKING_URI=sqlite:////app/mlflow.db
+      # Parallel vision calls per batch. Match this to how many concurrent requests
+      # the OLLAMA_HOST endpoint will serve (its OLLAMA_NUM_PARALLEL).
+      - OCR_CONCURRENCY=3
+      # Downscale long edge before inference (speed + accepts big phone photos).
+      - OCR_MAX_IMAGE_DIM=1600
+      # For high-volume bulk imports, sample traces instead of one run per page:
+      #   - MLFLOW_SAMPLE_RATE=0.05   # keep 5% of extraction traces
+      #   - MLFLOW_ENABLED=0          # or turn tracing off entirely
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
     volumes:
       - .:/app
 

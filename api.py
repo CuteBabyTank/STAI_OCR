@@ -5,13 +5,15 @@ Run with:
     uvicorn api:app --host 0.0.0.0 --port 8000
 
 Endpoints:
-    POST /extract        multipart file upload -> validated receipt JSON
+    POST /extract        multipart file upload (image) -> validated receipt JSON
+    POST /extract/batch   multipart multi-file upload (images + PDFs) -> per-page
+                          results, processed concurrently. The 1000-page path.
     GET  /receipts        list saved receipts (memory)
     POST /ask             {"question": "..."} -> SQL agent over the ledger
     POST /search          {"query": "..."} -> RAG semantic search over receipts
     POST /agent           {"question": "..."} -> ReAct agent (routes SQL vs RAG) + trace
     POST /agent/stream     same as /agent but streams the reasoning as SSE
-    GET  /health           liveness check
+    GET  /health           liveness check + effective config
 """
 
 from __future__ import annotations
@@ -19,12 +21,15 @@ from __future__ import annotations
 import json
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from core import (
     DEFAULT_MODEL,
     AGENT_MODEL,
+    OCR_CONCURRENCY,
+    OCR_MAX_IMAGE_DIM,
     GuardrailError,
     add_income,
     agent_run,
@@ -34,9 +39,11 @@ from core import (
     delete_income,
     delete_receipt,
     expense_summary,
+    extract_batch,
     extract_receipt_validated,
     get_receipt,
     get_receipt_items,
+    iter_page_images,
     update_receipt,
     list_budgets,
     list_income,
@@ -47,7 +54,7 @@ from core import (
     set_budget,
 )
 
-app = FastAPI(title="STAI_OCR Receipt API", version="2.0")
+app = FastAPI(title="STAI_OCR Receipt API", version="2.1")
 
 
 class AskRequest(BaseModel):
@@ -82,24 +89,38 @@ class BudgetRequest(BaseModel):
 
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+        "vision_model": DEFAULT_MODEL,
+        "ocr_concurrency": OCR_CONCURRENCY,
+        "max_image_dim": OCR_MAX_IMAGE_DIM,
+    }
 
 
 @app.post("/extract")
 async def extract(file: UploadFile = File(...), model: str = DEFAULT_MODEL):
+    """Single raster image -> one validated receipt. For PDFs or many files at
+    once, use /extract/batch (this endpoint reads only the first page of a PDF)."""
     image_bytes = await file.read()
+
+    def _work():
+        # A PDF slipping in here shouldn't 500: extract just its first page so the
+        # single-receipt contract still holds. Multi-page PDFs belong on /batch.
+        first = iter_page_images(image_bytes, file.content_type)[0]
+        return extract_receipt_validated(first, model=model, content_type="image/jpeg")
+
     try:
-        data, disambiguation_reasons, confidence = extract_receipt_validated(
-            image_bytes, model=model, content_type=file.content_type
-        )
+        # Offload the blocking vision call to a worker thread so the event loop
+        # stays free to accept other requests during the ~seconds-long extraction.
+        data, disambiguation_reasons, confidence = await run_in_threadpool(_work)
     except GuardrailError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    receipt_id = save_receipt(
-        data, file.filename or "upload",
-        flagged=bool(disambiguation_reasons), confidence=confidence,
+    receipt_id = await run_in_threadpool(
+        save_receipt, data, file.filename or "upload",
+        bool(disambiguation_reasons), confidence,
     )
     return {
         "receipt_id": receipt_id,
@@ -109,6 +130,31 @@ async def extract(file: UploadFile = File(...), model: str = DEFAULT_MODEL):
         # Measured confidence from the model's token logprobs (0..1), plus the
         # per-field / per-item breakdown so clients can flag weak reads.
         "confidence": confidence,
+    }
+
+
+@app.post("/extract/batch")
+async def extract_batch_endpoint(
+    files: list[UploadFile] = File(...), model: str = DEFAULT_MODEL
+):
+    """Many files at once (images and/or PDFs) -> one result per page, processed
+    with bounded server-side concurrency. PDFs are expanded to a result per page.
+    Individual page failures are reported in-band (never abort the batch), so a
+    thousand-page import returns partial success rather than a single 500."""
+    payloads = []
+    for f in files:
+        payloads.append((await f.read(), f.content_type, f.filename or "upload"))
+    try:
+        # extract_batch runs its own thread pool of vision calls; run the whole
+        # thing off the event loop so this request doesn't block the server.
+        results = await run_in_threadpool(extract_batch, payloads, model)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    ok = sum(1 for r in results if r["error"] is None)
+    return {
+        "results": results,
+        "summary": {"total": len(results), "succeeded": ok, "failed": len(results) - ok},
     }
 
 
