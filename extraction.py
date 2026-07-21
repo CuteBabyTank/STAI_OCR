@@ -77,8 +77,12 @@ STRICT RULES — follow exactly:
     name ("Peri-Peri Chicken"). Do NOT repeat the name and do NOT put the "2 @ 270.00"
     text in the description. Put the line's total amount in "amount", and the
     quantity ("2") in "quantity".
-14. List each printed line item exactly once. Do NOT output the same item as two
-    separate rows.
+14. Transcribe EVERY printed line item, top to bottom, including the ones that
+    repeat. If the same product at the same price is printed on three separate
+    lines, output three separate rows — do not merge them into one row and do not
+    add up their quantities. The only rows to leave out are echoes of a line you
+    have already recorded (the same line printed once but wrapped onto a
+    continuation line).
 15. currency is the currency actually shown on the receipt — read it from the
     symbol or code printed next to the amounts (₱/PHP, $/USD, €/EUR, £/GBP, ¥/JPY,
     ₹/INR, etc.). If no currency is indicated, return null.
@@ -191,32 +195,39 @@ def _clean_items(data: dict) -> dict:
 
 
 def _dedupe_items(data: dict) -> dict:
-    """Drop duplicate line items the model emitted for the same product, e.g. one
-    "Peri-Peri Chicken ₱540" row plus an empty "Peri-Peri Chicken" row. Items with
-    the same description are merged: the row carrying an amount wins, exact repeats
-    collapse to one. Two same-name rows with *different* amounts are kept (could be
-    genuinely separate lines). Blank descriptions are always kept (e.g. modifiers).
+    """Drop the echo rows the model emits for a single printed line, e.g. one
+    "Peri-Peri Chicken ₱540" row plus a bare "Peri-Peri Chicken" row with no
+    amount. Only amount-less echoes are removed: the priced row wins and the
+    echo is discarded.
+
+    Rows that carry an amount are ALWAYS kept, even when a same-named row with
+    the same amount is already present. Receipts genuinely print the same
+    product at the same price on consecutive lines (Bench Boutique prints
+    "Kiss & Tell Deo Body Spray 128.00" three times), and collapsing those
+    silently deletes money from the ledger. If the model really did double up a
+    line, reconcile() flags the mismatch for review rather than us guessing.
+    Blank descriptions are always kept (e.g. modifiers).
     """
     result: list[dict] = []
-    seen: dict[str, int] = {}
+    unpriced: dict[str, int] = {}  # key -> index of an amount-less row awaiting a price
+    priced: set[str] = set()
     for item in data.get("items") or []:
         key = re.sub(r"[^a-z0-9]", "", str(item.get("description") or "").lower())
         amt = _num(item.get("amount"))
         if not key:
             result.append(item)
             continue
-        if key in seen:
-            existing = result[seen[key]]
-            ex_amt = _num(existing.get("amount"))
-            if ex_amt is None and amt is not None:
-                result[seen[key]] = item  # replace the empty row with the real one
-            elif amt is None or (ex_amt is not None and abs(ex_amt - amt) <= 0.01):
-                continue  # amount-less or exact duplicate -> drop
-            else:
-                result.append(item)  # different amount -> keep as a distinct line
-        else:
-            seen[key] = len(result)
+        if amt is None:
+            if key in priced or key in unpriced:
+                continue  # echo of a row we already have -> drop
+            unpriced[key] = len(result)
             result.append(item)
+        else:
+            if key in unpriced:
+                result[unpriced.pop(key)] = item  # fill the echo row in place
+            else:
+                result.append(item)
+            priced.add(key)
     data["items"] = result
     return data
 
@@ -327,8 +338,13 @@ def _fix_payment_fields(data: dict) -> dict:
             data["total_amount"], data["cash"], data["change"] = due, c, ch
             return data
 
-    # Couldn't reassign cleanly; at least trust the subtotal for the amount due.
-    if total is None or abs(total - due) > max(1.0, due * 0.02):
+    # Couldn't reassign cleanly. Only fill in a total we never read; NEVER
+    # replace one the model transcribed off the receipt. `due` is anchored to
+    # subtotal-or-item-sum, and both go wrong on a long receipt whose lines were
+    # only partly captured — on the Bench Boutique receipt that turned a
+    # correctly read "TOTAL SALE 972.00" into 256.00. A total that disagrees with
+    # the anchor is left alone for reconcile() to flag for human review.
+    if total is None:
         data["total_amount"] = due
     return data
 
