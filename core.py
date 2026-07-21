@@ -414,7 +414,12 @@ PDF_MAX_PAGES = _env_int("OCR_PDF_MAX_PAGES", 1000)
 # Ollama runtime options.
 OLLAMA_KEEP_ALIVE = os.getenv("OLLAMA_KEEP_ALIVE", "30m")  # keep the model resident
 OCR_NUM_CTX = _env_int("OCR_NUM_CTX", 8192)
-OCR_NUM_PREDICT = _env_int("OCR_NUM_PREDICT", 1024)
+# Output budget. A receipt with many line items easily exceeds 1024 tokens of
+# JSON: the response is then cut off mid-object and the whole extraction fails
+# on a parse error (observed with gemma4:12b on a 9-line receipt — 1024 tokens,
+# done_reason="length", unterminated JSON). Headroom is cheap; truncation is
+# total data loss.
+OCR_NUM_PREDICT = _env_int("OCR_NUM_PREDICT", 4096)
 # How many extractions to run concurrently against Ollama in a batch. The real
 # throughput ceiling is the server's OLLAMA_NUM_PARALLEL; match this to it.
 OCR_CONCURRENCY = max(1, _env_int("OCR_CONCURRENCY", 3))
@@ -769,6 +774,15 @@ def _run_vision_model(
     if not (content or "").strip():
         response = _chat(**chat_args)
         content = response["message"]["content"]
+
+    # A response cut off at the token cap leaves unterminated JSON, which would
+    # otherwise surface as an opaque JSONDecodeError. Name the actual cause.
+    if response.get("done_reason") == "length":
+        raise GuardrailError(
+            "The model's reply was cut off at the output limit "
+            f"(OCR_NUM_PREDICT={OCR_NUM_PREDICT}), so the JSON is incomplete. "
+            "Raise OCR_NUM_PREDICT for receipts with many line items."
+        )
 
     raw = _coerce_json(content)
     # Keep a pristine copy of the model's own items (pre-cleanup) so confidence can
