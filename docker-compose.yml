@@ -14,7 +14,16 @@ services:
 
   api:
     build: .
-    command: uvicorn api:app --host 0.0.0.0 --port 8000
+    # SQLite's file locking does not work on Docker Desktop's Windows/Mac bind
+    # mount (the virtual FS can't provide POSIX locks / WAL shared memory), which
+    # makes every DB write fail with "unable to open database file". So the ledger
+    # lives on a named volume (real Linux fs) instead of the bind-mounted repo.
+    # On first start we seed that volume from the repo's ledger.db if present, so
+    # existing data carries over; thereafter the volume is the source of truth.
+    command: >
+      sh -c "mkdir -p /data &&
+             { [ -f /data/ledger.db ] || cp /app/ledger.db /data/ledger.db 2>/dev/null || true; } &&
+             exec uvicorn api:app --host 0.0.0.0 --port 8000"
     ports:
       - "8001:8000"
     depends_on:
@@ -25,6 +34,8 @@ services:
     # the environment / an .env file. Set OLLAMA_HOST back to a local Ollama and
     # VISION_MODEL/AGENT_MODEL to local models to run fully offline.
     environment:
+      # Keep the ledger off the bind mount (see command above) so SQLite locking works.
+      - LEDGER_DB_PATH=/data/ledger.db
       - OLLAMA_HOST=${OLLAMA_HOST:-http://103.231.240.155:11434}
       - VISION_MODEL=${VISION_MODEL:-gemma4:e4b}
       - AGENT_MODEL=${AGENT_MODEL:-gemma4:12b}
@@ -48,6 +59,7 @@ services:
       retries: 5
     volumes:
       - .:/app
+      - ledger_data:/data
 
   mlflow:
     image: ghcr.io/mlflow/mlflow:v3.14.0
@@ -63,3 +75,8 @@ services:
       - "5001:5000"
     volumes:
       - .:/app
+
+volumes:
+  # Named volume for the SQLite ledger — a real Linux filesystem where SQLite
+  # locking/WAL work, unlike the Windows/Mac bind mount. Persists across restarts.
+  ledger_data:

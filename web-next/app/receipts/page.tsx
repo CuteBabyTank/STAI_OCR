@@ -1,22 +1,26 @@
 "use client";
-import { useEffect, useState } from "react";
+// Combined Receipts module: browse receipts and add new ones (upload or camera)
+// from the same screen. The "Add receipts" button opens the OCR upload flow.
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import type { Receipt } from "../lib/types";
 import { catMeta, fmtDate, money } from "../lib/format";
-import Sidebar from "../components/Sidebar";
 import ConfidenceBadge from "../components/ConfidenceBadge";
+import ReceiptUpload from "../components/ReceiptUpload";
 
 export default function ReceiptsPage() {
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [loading, setLoading] = useState(true);
+  const [adding, setAdding] = useState(false);
 
-  useEffect(() => {
+  const load = useCallback(() => {
     fetch("/api/receipts?limit=1000")
       .then((r) => r.json())
       .then((j) => setReceipts(j.receipts || []))
       .catch(() => setReceipts([]))
       .finally(() => setLoading(false));
   }, []);
+  useEffect(() => load(), [load]);
 
   // Most-recent to oldest by receipt_date (undated last); tiebreak by id.
   const sorted = [...receipts].sort((a, b) => {
@@ -29,23 +33,28 @@ export default function ReceiptsPage() {
   });
 
   return (
-    <div className="shell">
-      <Sidebar />
+    <>
       <main>
         <header>
           <div>
             <h1>Receipts</h1>
             <p className="subhead">
-              {receipts.length} receipt{receipts.length === 1 ? "" : "s"} · most recent first
+              {receipts.length} receipt{receipts.length === 1 ? "" : "s"}
             </p>
           </div>
+          <button className="btn-primary" onClick={() => setAdding(true)}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 5v14M5 12h14" strokeLinecap="round" /></svg>
+            Add receipts
+          </button>
         </header>
 
         <div className="card">
           {loading ? (
             <p className="rl-empty">Loading…</p>
           ) : sorted.length === 0 ? (
-            <p className="rl-empty">No receipts yet — scan one from the dashboard.</p>
+            <p className="rl-empty">
+              No receipts yet — click <strong>Add receipts</strong> to scan or photograph one.
+            </p>
           ) : (
             <ul className="rl-list">
               {sorted.map((r) => (
@@ -68,6 +77,8 @@ export default function ReceiptsPage() {
           )}
         </div>
       </main>
-    </div>
+
+      {adding && <ReceiptUpload onClose={() => setAdding(false)} onDone={load} />}
+    </>
   );
 }

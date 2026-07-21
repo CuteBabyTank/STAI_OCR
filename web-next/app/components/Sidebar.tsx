@@ -1,56 +1,184 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 
-// Shared left sidebar. On the dashboard the Income/Ask items open in-page panels
-// (callbacks passed in); on other pages they fall back to links to the dashboard.
-export default function Sidebar({
-  onIncome,
-  onChat,
-}: {
-  onIncome?: () => void;
-  onChat?: () => void;
-}) {
-  const path = usePathname() || "/";
-  const onDash = path === "/";
-  const onReceipts = path.startsWith("/receipts");
+// Full budget-tracker navigation (PRD §2.1). Wallet and Plan are expandable
+// groups. A collapse toggle shrinks the rail to icons — a client-only preference
+// persisted to localStorage, so it survives reloads without touching routing.
 
-  const IncomeIcon = (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></svg>
+type Item = { href: string; label: string };
+
+const WALLET: Item[] = [
+  { href: "/wallet", label: "Accounts" },
+  { href: "/wallet/payments", label: "Payments" },
+];
+
+const PLAN: Item[] = [
+  { href: "/plan/upcoming", label: "Upcoming" },
+  { href: "/plan/budgets", label: "Budgets" },
+  { href: "/plan/categories", label: "Categories" },
+  { href: "/plan/tags", label: "Tags" },
+  { href: "/plan/templates", label: "Templates" },
+  { href: "/plan/recurring", label: "Recurring" },
+  { href: "/plan/installments", label: "Installments" },
+  { href: "/plan/goals", label: "Goals" },
+  { href: "/plan/goal-activity", label: "Goal activity" },
+];
+
+// Debts & receivables and their activity logs live in their own category.
+const LENDING: Item[] = [
+  { href: "/lending/debts", label: "Debts" },
+  { href: "/lending/debt-activity", label: "Debt activity" },
+  { href: "/lending/receivables", label: "Owed to you" },
+  { href: "/lending/receivable-activity", label: "Receivable activity" },
+];
+
+// Every navigable href, used to pick the single most-specific active route.
+const ALL_HREFS: string[] = [
+  "/", "/history", "/statistics", "/receipts", "/settings",
+  ...WALLET.map((i) => i.href),
+  ...PLAN.map((i) => i.href),
+  ...LENDING.map((i) => i.href),
+];
+
+function Icon({ d }: { d: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <path d={d} strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
   );
-  const ChatIcon = (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
+}
+
+const ICONS = {
+  home: "M3 10.5 12 3l9 7.5M5 9.5V21h14V9.5",
+  history: "M3 3v6h6M3 9a9 9 0 1 1 2 9M12 7v5l3 2",
+  wallet: "M3 7a2 2 0 0 1 2-2h14v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM16 12h4",
+  plan: "M9 11l3 3 8-8M20 12v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h9",
+  lending: "M3 6h18M3 12h18M3 18h18M7 3v3M7 18v3M17 3v3M17 18v3",
+  stats: "M3 3v18h18M8 13v5M13 9v9M18 5v13",
+  settings: "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-2.9 1.3V22a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 7 20.4l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 3.6 15H3.5a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 5 8.6l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 10 5.6V5.5a2 2 0 0 1 4 0v.09A1.65 1.65 0 0 0 17 7l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 20.4 12v.09a1.65 1.65 0 0 0 1.3 2.9",
+  receipt: "M6 2h9l5 5v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1zM14 2v6h6M8 13h8M8 17h6",
+  scan: "M4 7V5a1 1 0 0 1 1-1h2M17 4h2a1 1 0 0 1 1 1v2M20 17v2a1 1 0 0 1-1 1h-2M7 20H5a1 1 0 0 1-1-1v-2M3 12h18",
+  caret: "m9 6 6 6-6 6",
+};
+
+export default function Sidebar() {
+  const path = usePathname() || "/";
+  // Defaults match the server render to avoid hydration mismatches; persisted
+  // prefs are applied in an effect after mount. Because the sidebar is persistent
+  // (mounted once in AppShell), this runs only on first load — not per navigation
+  // — so there's no navigation flash.
+  const [collapsed, setCollapsed] = useState(false);
+  const [open, setOpen] = useState<Record<string, boolean>>({ wallet: true, plan: false, lending: false });
+
+  useEffect(() => {
+    setCollapsed(localStorage.getItem("sb-collapsed") === "1");
+    const groups = localStorage.getItem("sb-groups");
+    if (groups) {
+      try { setOpen((o) => ({ ...o, ...JSON.parse(groups) })); } catch { /* ignore */ }
+    }
+  }, []);
+
+  // Auto-open the group that contains the current route — only ever opens (never
+  // closes), and skips the state update when already open so navigation between
+  // sibling routes doesn't trigger a needless expand/collapse jump.
+  useEffect(() => {
+    if (path.startsWith("/wallet")) setOpen((o) => (o.wallet ? o : { ...o, wallet: true }));
+    if (path.startsWith("/plan")) setOpen((o) => (o.plan ? o : { ...o, plan: true }));
+    if (path.startsWith("/lending")) setOpen((o) => (o.lending ? o : { ...o, lending: true }));
+  }, [path]);
+
+  const toggleCollapse = () => {
+    setCollapsed((c) => {
+      localStorage.setItem("sb-collapsed", c ? "0" : "1");
+      return !c;
+    });
+  };
+  const toggleGroup = (key: string) =>
+    setOpen((o) => {
+      const next = { ...o, [key]: !o[key] };
+      localStorage.setItem("sb-groups", JSON.stringify(next));
+      return next;
+    });
+
+  // A route matches if it's an exact hit or an ancestor of the current path.
+  // But `/wallet` is an ancestor of `/wallet/payments`, so on the Payments page
+  // both would match. Resolve by letting only the *most specific* (longest)
+  // matching href stay active — otherwise a parent index route lights up
+  // alongside its sibling child routes.
+  const matches = (href: string) =>
+    href === "/" ? path === "/" : path === href || path.startsWith(href + "/");
+  const bestLen = Math.max(0, ...ALL_HREFS.filter(matches).map((h) => h.length));
+  const active = (href: string) => matches(href) && href.length === bestLen;
+
+  const NavLink = ({ href, label, icon }: { href: string; label: string; icon?: string }) => (
+    <Link href={href} className={"nav-item" + (active(href) ? " active" : "")} title={label}>
+      {icon && <Icon d={icon} />}
+      <span className="label">{label}</span>
+    </Link>
+  );
+
+  const Group = ({ id, label, icon, items }: { id: string; label: string; icon: string; items: Item[] }) => (
+    <>
+      <button
+        className={"nav-item nav-group-btn" + (path.startsWith("/" + id) ? " active" : "")}
+        onClick={() => toggleGroup(id)}
+        title={label}
+      >
+        <Icon d={icon} />
+        <span className="label">{label}</span>
+        <svg className={"sb-caret" + (open[id] ? " open" : "")} viewBox="0 0 24 24" fill="none" stroke="currentColor">
+          <path d={ICONS.caret} strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+      {open[id] && !collapsed && (
+        <div className="nav-sub">
+          {items.map((it) => (
+            <NavLink key={it.href} href={it.href} label={it.label} />
+          ))}
+        </div>
+      )}
+    </>
   );
 
   return (
-    <aside className="sidebar">
+    <aside className={"sidebar" + (collapsed ? " collapsed" : "")}>
       <div className="sidebar-inner">
-        <div className="brand">
-          <div className="brand-mark">◆</div>
-          <span className="brand-name">Receipt Ledger</span>
+        <div className="brand-wrap">
+          <div className="brand">
+            <div className="brand-mark">◆</div>
+            <div>
+              <span className="brand-name">
+                Ledger<span className="beta-pill">BETA</span>
+              </span>
+              <div className="brand-sub">Budget Tracker</div>
+            </div>
+          </div>
+          <button className="collapse-btn" onClick={toggleCollapse} aria-label="Collapse sidebar">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <path d={collapsed ? "m9 6 6 6-6 6" : "m15 6-6 6 6 6"} strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
         </div>
+
         <nav>
-          <Link href="/" className={"nav-item" + (onDash ? " active" : "")}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="7" height="9" rx="1.5" /><rect x="14" y="3" width="7" height="5" rx="1.5" /><rect x="14" y="12" width="7" height="9" rx="1.5" /><rect x="3" y="16" width="7" height="5" rx="1.5" /></svg>Overview
-          </Link>
-          <Link href="/receipts" className={"nav-item" + (onReceipts ? " active" : "")}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M6 2h9l5 5v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" /><path d="M14 2v6h6M8 13h8M8 17h6" /></svg>Receipts
-          </Link>
-          {onIncome ? (
-            <button className="nav-item" onClick={onIncome}>{IncomeIcon}Income</button>
-          ) : (
-            <Link href="/" className="nav-item">{IncomeIcon}Income</Link>
-          )}
-          {onChat ? (
-            <button className="nav-item" onClick={onChat}>{ChatIcon}Ask receipts</button>
-          ) : (
-            <Link href="/" className="nav-item">{ChatIcon}Ask receipts</Link>
-          )}
+          <NavLink href="/" label="Home" icon={ICONS.home} />
+          <NavLink href="/history" label="History" icon={ICONS.history} />
+          <Group id="wallet" label="Wallet" icon={ICONS.wallet} items={WALLET} />
+          <Group id="plan" label="Plan" icon={ICONS.plan} items={PLAN} />
+          <Group id="lending" label="Borrowing & Lending" icon={ICONS.lending} items={LENDING} />
+          <NavLink href="/statistics" label="Statistics" icon={ICONS.stats} />
+          <NavLink href="/receipts" label="Receipts" icon={ICONS.receipt} />
+          <NavLink href="/settings" label="Settings" icon={ICONS.settings} />
         </nav>
+
         <div className="nav-user">
           <div className="avatar">◆</div>
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 13.5, fontWeight: 560, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>Local ledger</div>
+            <div style={{ fontSize: 13.5, fontWeight: 560, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              Local ledger
+            </div>
             <div style={{ fontSize: 12, color: "var(--ink-3)" }}>runs on your machine</div>
           </div>
         </div>

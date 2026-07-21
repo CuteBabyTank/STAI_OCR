@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import type { LineItem } from "../../lib/types";
 import { money } from "../../lib/format";
-import Sidebar from "../../components/Sidebar";
+import { Select } from "../../components/ui";
 
 type Row = Record<string, any>;
 
@@ -83,8 +83,7 @@ export default function ReceiptDetail() {
   };
 
   return (
-    <div className="shell">
-      <Sidebar />
+    <>
       <main>
         <header>
           <div>
@@ -132,13 +131,12 @@ export default function ReceiptDetail() {
                         {!editing ? (
                           <span className={f.type === "number" ? "num" : ""}>{displayVal(f, receipt[f.key])}</span>
                         ) : f.type === "category" ? (
-                          <select
-                            className="vt-input"
+                          <Select
                             value={draft[f.key] ?? "Other"}
                             onChange={(e) => setDraft({ ...draft, [f.key]: e.target.value })}
                           >
                             {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
-                          </select>
+                          </Select>
                         ) : (
                           <input
                             className="vt-input"
@@ -184,6 +182,6 @@ export default function ReceiptDetail() {
           </>
         )}
       </main>
-    </div>
+    </>
   );
 }

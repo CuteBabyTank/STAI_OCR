@@ -53,6 +53,65 @@ from core import (
     semantic_search,
     set_budget,
 )
+from finance import (
+    FinanceError,
+    account_balance,
+    advance_recurring,
+    create_account,
+    create_budget_plan,
+    create_category,
+    create_debt,
+    create_goal,
+    create_installment,
+    create_receivable,
+    create_recurring,
+    create_tag,
+    create_template,
+    create_transaction,
+    debt_activity,
+    delete_account,
+    delete_budget_plan,
+    delete_category,
+    delete_debt,
+    delete_goal,
+    delete_installment,
+    delete_receivable,
+    delete_recurring,
+    delete_tag,
+    delete_template,
+    delete_transaction,
+    export_backup,
+    get_account,
+    get_settings,
+    get_transaction,
+    goal_activity,
+    import_backup,
+    list_accounts,
+    list_budget_plans,
+    list_categories,
+    list_debt_activity,
+    list_debts,
+    list_goals,
+    list_installments,
+    list_receivable_activity,
+    list_receivables,
+    list_recurring,
+    list_tags,
+    list_templates,
+    list_transactions,
+    log_installment_payment,
+    net_worth,
+    parse_quick_text,
+    post_receipt_as_expense,
+    receivable_activity,
+    set_account_balance,
+    set_settings,
+    update_account,
+    update_goal,
+    update_transaction,
+    upcoming,
+    use_template,
+)
 
 app = FastAPI(title="STAI_OCR Receipt API", version="2.1")
 
@@ -240,6 +299,526 @@ def get_budgets():
 def put_budget(req: BudgetRequest):
     set_budget(req.category, req.monthly_limit, req.currency)
     return {"category": req.category, "monthly_limit": req.monthly_limit}
+
+
+# --------------------------------------------------------------------------- #
+# Budget-tracker: accounts, transactions, categories, tags (finance.py)
+# --------------------------------------------------------------------------- #
+class AccountRequest(BaseModel):
+    name: str
+    type: str
+    opening_balance: float = 0.0
+    currency: str | None = None
+    include_in_totals: bool = True
+
+
+class TransactionRequest(BaseModel):
+    kind: str                       # expense | income | transfer
+    amount: float
+    account_id: int | None = None
+    to_account_id: int | None = None
+    category_id: int | None = None
+    note: str | None = None
+    occurred_at: str | None = None
+    fee: float = 0.0
+    receipt_id: int | None = None
+    template_id: int | None = None
+
+
+class BalanceAdjustRequest(BaseModel):
+    balance: float
+
+
+class CategoryRequest(BaseModel):
+    name: str
+    kind: str                       # expense | income
+    color: str | None = None
+    parent_id: int | None = None
+
+
+class TagRequest(BaseModel):
+    name: str
+    kind: str = "Custom"
+    color: str | None = None
+
+
+@app.get("/accounts")
+def get_accounts(include_archived: bool = False):
+    return {"accounts": list_accounts(include_archived=include_archived)}
+
+
+@app.post("/accounts")
+def post_account(req: AccountRequest):
+    try:
+        account_id = create_account(
+            req.name, req.type, req.opening_balance, req.currency, req.include_in_totals
+        )
+    except FinanceError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"account": get_account(account_id)}
+
+
+@app.get("/accounts/{account_id}")
+def account_detail(account_id: int):
+    acct = get_account(account_id)
+    if acct is None:
+        raise HTTPException(status_code=404, detail=f"Account {account_id} not found")
+    return {"account": acct}
+
+
+@app.put("/accounts/{account_id}")
+def put_account(account_id: int, payload: dict):
+    try:
+        acct = update_account(account_id, payload)
+    except FinanceError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if acct is None:
+        raise HTTPException(status_code=404, detail=f"Account {account_id} not found")
+    return {"account": acct}
+
+
+@app.put("/accounts/{account_id}/balance")
+def put_account_balance(account_id: int, req: BalanceAdjustRequest):
+    """Balance adjustment (PRD §5.3): overwrite an account's balance directly."""
+    acct = set_account_balance(account_id, req.balance)
+    if acct is None:
+        raise HTTPException(status_code=404, detail=f"Account {account_id} not found")
+    return {"account": acct}
+
+
+@app.delete("/accounts/{account_id}")
+def remove_account(account_id: int):
+    try:
+        removed = delete_account(account_id)
+    except FinanceError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if not removed:
+        raise HTTPException(status_code=404, detail=f"Account {account_id} not found")
+    return {"deleted": account_id}
+
+
+@app.get("/networth")
+def get_networth(include_credit: bool = True, show_liabilities: bool = True):
+    return net_worth(include_credit=include_credit, show_liabilities=show_liabilities)
+
+
+@app.get("/transactions")
+def get_transactions(
+    limit: int = 1000,
+    kind: str | None = None,
+    account_id: int | None = None,
+    category_id: int | None = None,
+    search: str | None = None,
+):
+    return {
+        "transactions": list_transactions(
+            limit=limit, kind=kind, account_id=account_id,
+            category_id=category_id, search=search,
+        )
+    }
+
+
+@app.post("/transactions")
+def post_transaction(req: TransactionRequest):
+    try:
+        txn_id = create_transaction(
+            req.kind, req.amount, account_id=req.account_id,
+            to_account_id=req.to_account_id, category_id=req.category_id,
+            note=req.note, occurred_at=req.occurred_at, fee=req.fee,
+            receipt_id=req.receipt_id, template_id=req.template_id,
+        )
+    except FinanceError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"transaction": get_transaction(txn_id)}
+
+
+@app.put("/transactions/{txn_id}")
+def put_transaction(txn_id: int, payload: dict):
+    try:
+        txn = update_transaction(txn_id, payload)
+    except FinanceError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if txn is None:
+        raise HTTPException(status_code=404, detail=f"Transaction {txn_id} not found")
+    return {"transaction": txn}
+
+
+@app.delete("/transactions/{txn_id}")
+def remove_transaction(txn_id: int):
+    if not delete_transaction(txn_id):
+        raise HTTPException(status_code=404, detail=f"Transaction {txn_id} not found")
+    return {"deleted": txn_id}
+
+
+class PostReceiptRequest(BaseModel):
+    account_id: int
+
+
+@app.post("/receipts/{receipt_id}/post")
+def post_receipt(receipt_id: int, req: PostReceiptRequest):
+    """Bridge an OCR'd receipt into the ledger as an expense against an account."""
+    try:
+        txn_id = post_receipt_as_expense(receipt_id, req.account_id)
+    except FinanceError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"transaction": get_transaction(txn_id)}
+
+
+@app.get("/categories")
+def get_categories():
+    return {"categories": list_categories()}
+
+
+@app.post("/categories")
+def post_category(req: CategoryRequest):
+    try:
+        cat_id = create_category(req.name, req.kind, req.color, req.parent_id)
+    except FinanceError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"id": cat_id}
+
+
+@app.delete("/categories/{category_id}")
+def remove_category(category_id: int):
+    try:
+        removed = delete_category(category_id)
+    except FinanceError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if not removed:
+        raise HTTPException(status_code=404, detail=f"Category {category_id} not found")
+    return {"deleted": category_id}
+
+
+@app.get("/tags")
+def get_tags():
+    return {"tags": list_tags()}
+
+
+@app.post("/tags")
+def post_tag(req: TagRequest):
+    try:
+        tag_id = create_tag(req.name, req.kind, req.color)
+    except FinanceError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"id": tag_id}
+
+
+@app.delete("/tags/{tag_id}")
+def remove_tag(tag_id: int):
+    if not delete_tag(tag_id):
+        raise HTTPException(status_code=404, detail=f"Tag {tag_id} not found")
+    return {"deleted": tag_id}
+
+
+# --------------------------------------------------------------------------- #
+# Plan: budgets, templates, recurring, installments, goals, debts, receivables
+# --------------------------------------------------------------------------- #
+class BudgetPlanRequest(BaseModel):
+    category_id: int
+    type: str = "fixed"          # fixed | percent
+    interval: str = "monthly"    # daily | weekly | monthly | yearly
+    limit_amount: float = 0
+    percent: float = 0
+    carry_forward: bool = False
+
+
+class TemplateRequest(BaseModel):
+    title: str
+    amount: float = 0
+    kind: str = "expense"
+    account_id: int | None = None
+    category_id: int | None = None
+
+
+class RecurringRequest(BaseModel):
+    kind: str = "expense"
+    amount: float = 0
+    name: str
+    account_id: int | None = None
+    category_id: int | None = None
+    next_due: str | None = None
+
+
+class InstallmentRequest(BaseModel):
+    title: str
+    total: float = 0
+    monthly: float = 0
+    months: int = 0
+
+
+class InstallmentPaymentRequest(BaseModel):
+    account_id: int
+    amount: float
+    occurred_at: str | None = None
+
+
+class GoalRequest(BaseModel):
+    title: str
+    target_amount: float = 0
+    current_amount: float = 0
+    currency: str | None = None
+    target_date: str | None = None
+
+
+class DebtRequest(BaseModel):
+    name: str
+    total_amount: float = 0
+    paid_amount: float = 0
+    currency: str | None = None
+    due_date: str | None = None
+
+
+class ReceivableRequest(BaseModel):
+    name: str
+    total_amount: float = 0
+    collected_amount: float = 0
+    currency: str | None = None
+    due_date: str | None = None
+
+
+class ActivityRequest(BaseModel):
+    account_id: int
+    amount: float
+    type: str                    # deposit/withdrawal | payment/borrowing | collection/advance
+    occurred_at: str | None = None
+
+
+def _guard(fn, *a, **k):
+    """Run a finance call, mapping FinanceError -> 422."""
+    try:
+        return fn(*a, **k)
+    except FinanceError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+# ---- Budgets ----
+@app.get("/budget-plans")
+def get_budget_plans():
+    return {"budget_plans": list_budget_plans()}
+
+
+@app.post("/budget-plans")
+def post_budget_plan(req: BudgetPlanRequest):
+    bid = _guard(create_budget_plan, req.category_id, req.type, req.interval,
+                 req.limit_amount, req.percent, req.carry_forward)
+    return {"id": bid}
+
+
+@app.delete("/budget-plans/{plan_id}")
+def remove_budget_plan(plan_id: int):
+    if not delete_budget_plan(plan_id):
+        raise HTTPException(status_code=404, detail="Budget not found")
+    return {"deleted": plan_id}
+
+
+# ---- Templates ----
+@app.get("/templates")
+def get_templates():
+    return {"templates": list_templates()}
+
+
+@app.post("/templates")
+def post_template(req: TemplateRequest):
+    tid = _guard(create_template, req.title, req.amount, req.kind, req.account_id, req.category_id)
+    return {"id": tid}
+
+
+@app.post("/templates/{template_id}/use")
+def post_use_template(template_id: int):
+    txn_id = _guard(use_template, template_id)
+    return {"transaction": get_transaction(txn_id)}
+
+
+@app.delete("/templates/{template_id}")
+def remove_template(template_id: int):
+    if not delete_template(template_id):
+        raise HTTPException(status_code=404, detail="Template not found")
+    return {"deleted": template_id}
+
+
+# ---- Recurring ----
+@app.get("/recurring")
+def get_recurring():
+    return {"recurring": list_recurring()}
+
+
+@app.post("/recurring")
+def post_recurring(req: RecurringRequest):
+    rid = _guard(create_recurring, req.kind, req.amount, req.name, req.account_id,
+                 req.next_due, req.category_id)
+    return {"id": rid}
+
+
+@app.post("/recurring/{rec_id}/advance")
+def post_advance_recurring(rec_id: int):
+    return _guard(advance_recurring, rec_id)
+
+
+@app.delete("/recurring/{rec_id}")
+def remove_recurring(rec_id: int):
+    if not delete_recurring(rec_id):
+        raise HTTPException(status_code=404, detail="Recurring item not found")
+    return {"deleted": rec_id}
+
+
+# ---- Installments ----
+@app.get("/installments")
+def get_installments():
+    return {"installments": list_installments()}
+
+
+@app.post("/installments")
+def post_installment(req: InstallmentRequest):
+    iid = _guard(create_installment, req.title, req.total, req.monthly, req.months)
+    return {"id": iid}
+
+
+@app.post("/installments/{plan_id}/pay")
+def post_installment_payment(plan_id: int, req: InstallmentPaymentRequest):
+    txn_id = _guard(log_installment_payment, plan_id, req.account_id, req.amount, req.occurred_at)
+    return {"transaction": get_transaction(txn_id)}
+
+
+@app.delete("/installments/{plan_id}")
+def remove_installment(plan_id: int):
+    if not delete_installment(plan_id):
+        raise HTTPException(status_code=404, detail="Installment plan not found")
+    return {"deleted": plan_id}
+
+
+# ---- Goals ----
+@app.get("/goals")
+def get_goals():
+    return {"goals": list_goals()}
+
+
+@app.post("/goals")
+def post_goal(req: GoalRequest):
+    gid = _guard(create_goal, req.title, req.target_amount, req.current_amount,
+                 req.currency, req.target_date)
+    return {"id": gid}
+
+
+@app.put("/goals/{goal_id}")
+def put_goal(goal_id: int, payload: dict):
+    if not update_goal(goal_id, payload):
+        raise HTTPException(status_code=404, detail="Goal not found")
+    return {"updated": goal_id}
+
+
+@app.delete("/goals/{goal_id}")
+def remove_goal(goal_id: int):
+    if not delete_goal(goal_id):
+        raise HTTPException(status_code=404, detail="Goal not found")
+    return {"deleted": goal_id}
+
+
+@app.post("/goals/{goal_id}/activity")
+def post_goal_activity(goal_id: int, req: ActivityRequest):
+    txn_id = _guard(goal_activity, goal_id, req.account_id, req.amount, req.type, req.occurred_at)
+    return {"transaction": get_transaction(txn_id)}
+
+
+# ---- Debts ----
+@app.get("/debts")
+def get_debts():
+    return {"debts": list_debts()}
+
+
+@app.post("/debts")
+def post_debt(req: DebtRequest):
+    did = _guard(create_debt, req.name, req.total_amount, req.paid_amount, req.currency, req.due_date)
+    return {"id": did}
+
+
+@app.delete("/debts/{debt_id}")
+def remove_debt(debt_id: int):
+    if not delete_debt(debt_id):
+        raise HTTPException(status_code=404, detail="Debt not found")
+    return {"deleted": debt_id}
+
+
+@app.get("/debt-activity")
+def get_debt_activity_log():
+    """Append-only log of debt payments/borrowings (history, not current balances)."""
+    return {"activity": list_debt_activity()}
+
+
+@app.post("/debts/{debt_id}/activity")
+def post_debt_activity(debt_id: int, req: ActivityRequest):
+    txn_id = _guard(debt_activity, debt_id, req.account_id, req.amount, req.type, req.occurred_at)
+    return {"transaction": get_transaction(txn_id)}
+
+
+# ---- Receivables ----
+@app.get("/receivables")
+def get_receivables():
+    return {"receivables": list_receivables()}
+
+
+@app.post("/receivables")
+def post_receivable(req: ReceivableRequest):
+    rid = _guard(create_receivable, req.name, req.total_amount, req.collected_amount,
+                 req.currency, req.due_date)
+    return {"id": rid}
+
+
+@app.delete("/receivables/{rec_id}")
+def remove_receivable(rec_id: int):
+    if not delete_receivable(rec_id):
+        raise HTTPException(status_code=404, detail="Receivable not found")
+    return {"deleted": rec_id}
+
+
+@app.get("/receivable-activity")
+def get_receivable_activity_log():
+    """Append-only log of receivable collections/advances."""
+    return {"activity": list_receivable_activity()}
+
+
+@app.post("/receivables/{rec_id}/activity")
+def post_receivable_activity(rec_id: int, req: ActivityRequest):
+    txn_id = _guard(receivable_activity, rec_id, req.account_id, req.amount, req.type, req.occurred_at)
+    return {"transaction": get_transaction(txn_id)}
+
+
+# ---- Upcoming ----
+@app.get("/upcoming")
+def get_upcoming():
+    return upcoming()
+
+
+# ---- Quick-chat NLP ----
+class ParseRequest(BaseModel):
+    text: str
+
+
+@app.post("/parse")
+def post_parse(req: ParseRequest):
+    """Parse a natural-language quick-entry into a draft transaction (PRD §2.2)."""
+    return parse_quick_text(req.text)
+
+
+# ---- Settings ----
+@app.get("/settings")
+def get_app_settings():
+    return {"settings": get_settings()}
+
+
+@app.put("/settings")
+def put_app_settings(payload: dict):
+    return {"settings": set_settings(payload)}
+
+
+# ---- Backup ----
+@app.get("/backup/export")
+def get_backup_export():
+    return export_backup()
+
+
+@app.post("/backup/import")
+def post_backup_import(payload: dict):
+    return _guard(import_backup, payload, payload.get("replace", True))
 
 
 @app.post("/ask")

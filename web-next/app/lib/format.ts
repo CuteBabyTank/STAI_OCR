@@ -21,6 +21,40 @@ export const money = (n: number | null | undefined, cur?: string | null, dp = 2)
   sym(cur) +
   Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: dp, maximumFractionDigits: dp });
 
+// Signed money for the ledger: "+₱1,200.00" / "−₱250.00" with the app's minus
+// glyph. `sign` forces a direction; otherwise the number's own sign is used.
+export function signedMoney(
+  n: number | null | undefined,
+  cur?: string | null,
+  sign?: "+" | "-",
+  dp = 2
+) {
+  const v = Math.abs(Number(n || 0));
+  const dir = sign || (Number(n || 0) < 0 ? "-" : "+");
+  const glyph = dir === "-" ? "−" : "+";
+  return `${glyph}${money(v, cur, dp)}`;
+}
+
+// The 21 currencies offered in the Add Account modal (PRD §4).
+export const CURRENCIES = [
+  "PHP", "USD", "EUR", "GBP", "JPY", "AUD", "CAD", "CHF", "CNY", "HKD",
+  "SGD", "MYR", "THB", "IDR", "VND", "KRW", "INR", "AED", "NZD", "TWD", "SAR",
+] as const;
+
+// Per-type color + label for account cards / net-worth grouping (PRD §4).
+export const ACCOUNT_META: Record<
+  string,
+  { label: string; color: string; group: "asset" | "liability" }
+> = {
+  debit: { label: "Debit", color: "#14B8A6", group: "asset" },
+  credit: { label: "Credit", color: "#EC4899", group: "liability" },
+  loans: { label: "Loan", color: "#F97316", group: "liability" },
+  assets: { label: "Asset", color: "#6366F1", group: "asset" },
+  stocks: { label: "Stocks", color: "#0EA5E9", group: "asset" },
+  crypto: { label: "Crypto", color: "#EAB308", group: "asset" },
+};
+export const acctMeta = (t?: string | null) => ACCOUNT_META[t || "debit"] || ACCOUNT_META.debit;
+
 // Compact money for chart axes / tight labels: ₱1.2k, ₱3.4M.
 export function moneyCompact(n: number | null | undefined, cur?: string | null) {
   const v = Number(n || 0);
