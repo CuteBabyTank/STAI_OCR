@@ -19,6 +19,10 @@ not blocked on receipt data. Start with [`REQUIREMENTS_AUDIT.md`](REQUIREMENTS_A
 | Everything (incl. the original 10 tests) | `./.venv/bin/python -m pytest -q` |
 | Quick Chat (TypeScript) | `cd web-next && npm test` |
 | Rebuild the finance fixture | `./.venv/bin/python evaluation/fixtures/seed_finance.py` |
+| Retrieval microbenchmark | `./.venv/bin/python evaluation/bench_retrieval.py` |
+
+Performance work is written up separately in [`PERFORMANCE.md`](PERFORMANCE.md) — what was
+changed, what was measured, and what was deliberately left alone.
 
 Evaluation-only dependencies (test runner, notebook runtime, EDA) install from
 `evaluation/requirements-eval.txt` — deliberately separate from the root

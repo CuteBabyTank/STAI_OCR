@@ -65,9 +65,31 @@ def _chat(**kwargs):
 
     Because the endpoint is shared, it can briefly be busy / time out / return a
     5xx. We retry once after a short backoff so a one-off hiccup doesn't surface
-    to the user as a 500."""
+    to the user as a 500.
+
+    Every default below is applied with setdefault, so an explicit caller argument
+    always wins — the vision path sets its own keep_alive/num_ctx/num_predict and is
+    unaffected."""
     if _OLLAMA_SUPPORTS_THINK:
         kwargs.setdefault("think", False)
+
+    # Keep the model resident between calls. Only the vision path used to pass this,
+    # so on a shared endpoint serving both a vision and a text model the text model
+    # fell back to Ollama's short default and was evicted — every agent turn then
+    # paid a cold model load, which dwarfs the actual inference.
+    kwargs.setdefault("keep_alive", OLLAMA_KEEP_ALIVE)
+
+    # Bound context and output for text calls. Without an explicit num_ctx the server
+    # default applies (as low as 2048 on some builds); a ReAct transcript carrying the
+    # schema plus accumulated observations can exceed that and is then SILENTLY
+    # truncated — the model loses the observation it is supposed to answer from, which
+    # shows up as a wrong answer or a repeated tool call, not as an error. num_predict
+    # bounds a model that would otherwise ramble to its own maximum.
+    opts = dict(kwargs.get("options") or {})
+    opts.setdefault("num_ctx", AGENT_NUM_CTX)
+    opts.setdefault("num_predict", AGENT_NUM_PREDICT)
+    kwargs["options"] = opts
+
     for _attempt in range(2):
         try:
             return ollama.chat(**kwargs)
@@ -396,6 +418,13 @@ PDF_MAX_PAGES = _env_int("OCR_PDF_MAX_PAGES", 1000)
 
 # Ollama runtime options.
 OLLAMA_KEEP_ALIVE = os.getenv("OLLAMA_KEEP_ALIVE", "30m")  # keep the model resident
+
+# Text/agent generation limits, applied by _chat() to every call that doesn't set its
+# own. num_ctx must comfortably hold the ReAct transcript (prompt + schema + observations)
+# or the server silently truncates it; num_predict caps a single turn — every text prompt
+# in this file asks for at most a few sentences or one SQL statement.
+AGENT_NUM_CTX = _env_int("AGENT_NUM_CTX", 8192)
+AGENT_NUM_PREDICT = _env_int("AGENT_NUM_PREDICT", 512)
 OCR_NUM_CTX = _env_int("OCR_NUM_CTX", 8192)
 # Output budget. A receipt with many line items easily exceeds 1024 tokens of
 # JSON: the response is then cut off mid-object and the whole extraction fails
@@ -630,13 +659,31 @@ def preprocess_image(image_bytes: bytes) -> bytes:
         return image_bytes
     try:
         im = Image.open(io.BytesIO(image_bytes))
+        source_format = im.format          # lost by exif_transpose, so read it first
+        needs_rotation = im.getexif().get(0x0112, 1) not in (1, None)  # 0x0112 = Orientation
+        w, h = im.size
+        longest = max(w, h)
+        needs_resize = bool(OCR_MAX_IMAGE_DIM and longest > OCR_MAX_IMAGE_DIM)
+
+        # Nothing to change: hand back the original bytes. Re-encoding a conforming
+        # JPEG is a second lossy generation for no benefit — it degrades exactly the
+        # faint thermal-receipt text the model has to read, costs CPU, and on the
+        # sample actually made the payload LARGER (251 KB -> 318 KB), which is extra
+        # upload to a remote endpoint.
+        if (
+            not needs_resize
+            and not needs_rotation
+            and source_format == "JPEG"
+            and im.mode in ("RGB", "L")
+        ):
+            return image_bytes
+
         im = ImageOps.exif_transpose(im)
         if im.mode not in ("RGB", "L"):
             im = im.convert("RGB")
-        w, h = im.size
-        longest = max(w, h)
-        if OCR_MAX_IMAGE_DIM and longest > OCR_MAX_IMAGE_DIM:
-            scale = OCR_MAX_IMAGE_DIM / longest
+        if needs_resize:
+            w, h = im.size                 # re-read: transpose may have swapped them
+            scale = OCR_MAX_IMAGE_DIM / max(w, h)
             im = im.resize((max(1, round(w * scale)), max(1, round(h * scale))), Image.LANCZOS)
         buf = io.BytesIO()
         im.save(buf, format="JPEG", quality=OCR_JPEG_QUALITY)
@@ -992,7 +1039,23 @@ def init_db() -> None:
             )
             """
         )
-        
+        # Every per-receipt line-item lookup was a full table SCAN without this.
+        # It is on several hot paths: the receipt detail view, delete, category
+        # backfill, ensure_index(), and the SQL the agent itself generates — the
+        # few-shot examples teach it `WHERE receipt_id = N`.
+        # Measured at 100k line items (20k receipts x 5): 500 single-receipt
+        # lookups 659 ms -> 2.9 ms. Cost is +16 ms on the 100k-row bulk insert,
+        # which the 1000-page import path pays once.
+        con.execute(
+            "CREATE INDEX IF NOT EXISTS idx_line_items_receipt "
+            "ON line_items(receipt_id)"
+        )
+        # The ledger is overwhelmingly read-heavy and almost every listing and
+        # analytics query orders or filters by date.
+        con.execute(
+            "CREATE INDEX IF NOT EXISTS idx_receipts_date ON receipts(receipt_date)"
+        )
+
         # Migration: add missing columns if they don't exist
         # This allows the schema to evolve without losing existing data
         cursor = con.execute("PRAGMA table_info(receipts)")
@@ -1920,11 +1983,59 @@ def _ledger_currency_symbol() -> str:
     return ""
 
 
+# Column-name hints for values that should be rendered as money.
+_MONEY_KEY_HINTS = (
+    "amount", "spend", "spent", "total", "vat", "discount", "subtotal",
+    "cash", "change", "sum", "avg", "price", "cost",
+)
+
+_NO_ROWS_ANSWER = "No matching records were found in the ledger for that question."
+
+
+def _is_money_key(key: str) -> bool:
+    return any(hint in key.lower() for hint in _MONEY_KEY_HINTS)
+
+
+def _deterministic_answer(rows: list[dict]) -> str | None:
+    """Format a simple SQL result in code, or return None if it needs prose.
+
+    Aggregates ("how much did I spend") come back as one row with one column, which
+    is both the most common question shape and the one a language model is worst at:
+    it re-types the number, and small models were observed garbling amounts. Formatting
+    those here is faster (it removes an entire model round trip from every SQL question,
+    including the one nested inside the ReAct loop) and strictly more accurate, because
+    the number reaches the user exactly as SQLite computed it.
+
+    Multi-row results still go to the model, where prose genuinely helps.
+    """
+    if not rows:
+        return _NO_ROWS_ANSWER
+
+    if len(rows) == 1 and len(rows[0]) == 1:
+        ((key, value),) = rows[0].items()
+        # SUM/AVG over zero matching rows returns a single NULL, which is "nothing
+        # found", not "the answer is None".
+        if value is None:
+            return _NO_ROWS_ANSWER
+        return _format_peso(value) if _is_money_key(key) else str(value)
+
+    if len(rows) == 1:
+        parts = []
+        for key, value in rows[0].items():
+            label = key.replace("_", " ")
+            shown = _format_peso(value) if _is_money_key(key) and value is not None else value
+            parts.append(f"{label}: {shown}")
+        return ", ".join(parts)
+
+    return None
+
+
 def _generate_answer(question: str, sql: str, rows: list[dict], model: str) -> str:
     """Turn raw SQL rows into a natural-language answer."""
-    if not rows:
-        return "No matching records were found in the ledger for that question."
-    
+    deterministic = _deterministic_answer(rows)
+    if deterministic is not None:
+        return deterministic
+
     try:
         if ollama is None:
             raise RuntimeError("ollama not installed")
@@ -1958,27 +2069,9 @@ def _generate_answer(question: str, sql: str, rows: list[dict], model: str) -> s
             return answer
     except Exception:
         pass
-    
-    # Fallback: simple templated summary
-    if len(rows) == 1 and len(rows[0]) == 1:
-        ((_, value),) = rows[0].items()
-        # Try to detect if it's a monetary value
-        if any(key for key in rows[0].keys() if 'amount' in key.lower() or 'spend' in key.lower() or 'vat' in key.lower() or 'discount' in key.lower()):
-            return _format_peso(value)
-        return str(value)
-    
-    if len(rows) == 1:
-        # Single row with multiple columns - try to format nicely
-        parts = []
-        for key, value in rows[0].items():
-            if 'amount' in key.lower() or 'spend' in key.lower() or 'vat' in key.lower() or 'discount' in key.lower():
-                parts.append(f"{key.replace('_', ' ')}: {_format_peso(value)}")
-            elif 'count' in key.lower() or 'number' in key.lower():
-                parts.append(f"{key.replace('_', ' ')}: {value}")
-            else:
-                parts.append(f"{key.replace('_', ' ')}: {value}")
-        return ", ".join(parts)
-    
+
+    # Only multi-row results reach here (simple shapes returned above), so the
+    # fallback when the model is unavailable or empty is a count.
     return f"Found {len(rows)} matching record(s)."
 
 
@@ -2461,77 +2554,133 @@ def semantic_search(query: str, k: int = 4, receipt_ids: list[int] | None = None
     scope = set(scope_list) if scope_list else None
     ensure_index()
 
+    # An explicitly named receipt ("receipt #3") pins the search to that id. Semantic
+    # similarity alone can't match a bare id, so without this an id-specific question
+    # would retrieve whatever is merely closest in content — the wrong receipt. Resolved
+    # before the query so the scope can be pushed into SQL rather than filtered after.
+    if scope is None:
+        refs = _parse_receipt_refs(query)
+        if refs:
+            with _connect() as con:
+                placeholders = ",".join("?" * len(refs))
+                found = {
+                    r[0] for r in con.execute(
+                        f"SELECT receipt_id FROM receipt_docs WHERE receipt_id IN ({placeholders})",
+                        list(refs),
+                    )
+                }
+            if found:
+                scope = found
+
+    # Hard filter, pushed into SQL: out-of-scope rows are never read, so a
+    # single-receipt query cannot surface another receipt and a scoped search does
+    # not pay to load the whole ledger.
+    where, params = "", []
+    if scope is not None:
+        where = f"WHERE d.receipt_id IN ({','.join('?' * len(scope))})"
+        params = sorted(scope)
+
+    # Scoring phase reads ONLY (id, embedding). Pulling doc text and receipt metadata
+    # for every candidate was the dominant cost on a large ledger — at 5k receipts
+    # that is megabytes of strings materialised into Python dicts to rank them and
+    # then discard all but k. The surviving k rows are hydrated in a second query.
     with _connect() as con:
-        con.row_factory = sqlite3.Row
-        rows = con.execute(
-            """
-            SELECT d.receipt_id, d.doc, d.embedding,
-                   r.vendor_name, r.receipt_date, r.total_amount, r.currency, r.source_file
-            FROM receipt_docs d JOIN receipts r ON r.id = d.receipt_id
-            """
+        vector_rows = con.execute(
+            f"SELECT d.receipt_id, d.embedding FROM receipt_docs d {where}",
+            params,
         ).fetchall()
 
-    # If the question explicitly names a receipt ("receipt #3", "receipt 2"),
-    # resolve it to that receipt's id and pin the search there. Semantic similarity
-    # alone can't match a bare id, so without this an id-specific question would
-    # retrieve whatever is merely closest in content — the wrong receipt.
-    if scope is None:
-        refs = {i for i in _parse_receipt_refs(query) if any(r["receipt_id"] == i for r in rows)}
-        if refs:
-            scope = refs
-
-    # Hard filter: out-of-scope receipts are removed before any scoring, so a
-    # single-receipt query can only ever surface that receipt.
-    candidates = [dict(r) for r in rows if scope is None or r["receipt_id"] in scope]
-    if not candidates:
+    if not vector_rows:
         return []
 
-    qvec = _embed(_QUERY_PREFIX + query)
-    scored: list[tuple[float, dict]] = []
+    scored_ids: list[tuple[float, int]] = []
     used_vectors = False
+    qvec = _embed(_QUERY_PREFIX + query)
     if qvec is not None and np is not None:
         q = np.asarray(qvec, dtype=np.float32)
-        for c in candidates:
-            if c["embedding"] is None:
+        qnorm = float(np.linalg.norm(q))
+        # One matrix product instead of a Python loop of per-row dot products, and
+        # the query norm computed once rather than per row. Vectors of a different
+        # dimension (written by a previous embedding model) are skipped rather than
+        # compared, which would raise.
+        ids, mats = [], []
+        for rid, blob in vector_rows:
+            if blob is None:
                 continue
-            vec = np.frombuffer(c["embedding"], dtype=np.float32)
-            # Guard against a stale vector written by a different embedding model
-            # (different dimension) — comparing mismatched shapes would crash.
+            vec = np.frombuffer(blob, dtype=np.float32)
             if vec.shape[0] != q.shape[0]:
                 continue
-            scored.append((_cosine(q, vec), c))
-        used_vectors = len(scored) > 0
+            ids.append(rid)
+            mats.append(vec)
+        if ids and qnorm:
+            matrix = np.vstack(mats)
+            norms = np.linalg.norm(matrix, axis=1) * qnorm
+            with np.errstate(divide="ignore", invalid="ignore"):
+                sims = np.where(norms > 0, (matrix @ q) / norms, 0.0)
+            scored_ids = list(zip((float(s) for s in sims), ids))
+        used_vectors = len(scored_ids) > 0
 
-    if not scored:
-        # keyword fallback: overlap of query terms with the document text
+    if used_vectors:
+        # Relevance filter (whole-ledger searches only): drop non-matches so RAG can
+        # honestly say "not found" instead of returning arbitrary receipts. When the
+        # caller scoped to specific receipts, keep them all — the user chose those.
+        if scope is None:
+            scored_ids = [(s, i) for s, i in scored_ids if s >= _VEC_MIN_SCORE]
+        scored_ids.sort(key=lambda x: x[0], reverse=True)
+        top = scored_ids[:k]
+    else:
+        # Keyword fallback needs the document text, so it reads docs for the
+        # candidate set. Only reached when embeddings are unavailable.
+        with _connect() as con:
+            doc_rows = con.execute(
+                f"SELECT d.receipt_id, d.doc FROM receipt_docs d {where}", params
+            ).fetchall()
         terms = [t for t in re.split(r"\W+", query.lower()) if len(t) > 2]
-        for c in candidates:
-            doc_l = (c["doc"] or "").lower()
-            score = sum(doc_l.count(t) for t in terms)
-            scored.append((float(score), c))
+        keyword_scored = [
+            (float(sum((doc or "").lower().count(t) for t in terms)), rid)
+            for rid, doc in doc_rows
+        ]
+        if scope is None:
+            keyword_scored = [(s, i) for s, i in keyword_scored if s > 0]
+        keyword_scored.sort(key=lambda x: x[0], reverse=True)
+        top = keyword_scored[:k]
 
-    # Relevance filter (whole-ledger searches only): drop non-matches so RAG can
-    # honestly say "not found" instead of returning arbitrary receipts. When the
-    # caller scoped to specific receipts, keep them all — the user chose those.
-    if scope is None:
-        if used_vectors:
-            scored = [(s, c) for s, c in scored if s >= _VEC_MIN_SCORE]
-        else:
-            scored = [(s, c) for s, c in scored if s > 0]
+    if not top:
+        return []
 
-    scored.sort(key=lambda x: x[0], reverse=True)
+    # Hydrate only the winners.
+    top_ids = [i for _s, i in top]
+    with _connect() as con:
+        con.row_factory = sqlite3.Row
+        detail = {
+            r["receipt_id"]: r
+            for r in con.execute(
+                f"""
+                SELECT d.receipt_id, d.doc,
+                       r.vendor_name, r.receipt_date, r.total_amount, r.currency,
+                       r.source_file
+                FROM receipt_docs d JOIN receipts r ON r.id = d.receipt_id
+                WHERE d.receipt_id IN ({','.join('?' * len(top_ids))})
+                """,
+                top_ids,
+            )
+        }
+
     results = []
-    for score, c in scored[:k]:
+    for score, rid in top:
+        row = detail.get(rid)
+        if row is None:
+            continue
         results.append(
             {
-                "receipt_id": c["receipt_id"],
-                "doc": c["doc"],
+                "receipt_id": row["receipt_id"],
+                "doc": row["doc"],
                 "score": round(score, 4),
-                "vendor_name": c["vendor_name"],
-                "receipt_date": c["receipt_date"],
-                "total_amount": c["total_amount"],
-                "currency": c["currency"],
-                "source_file": c["source_file"],
+                "vendor_name": row["vendor_name"],
+                "receipt_date": row["receipt_date"],
+                "total_amount": row["total_amount"],
+                "currency": row["currency"],
+                "source_file": row["source_file"],
             }
         )
     return results
