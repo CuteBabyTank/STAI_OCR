@@ -1,8 +1,15 @@
 # Snag evaluation
 
 Implements the workstreams in `docs/Snag_Agentic_Evaluation_Task_Breakdown.md` that are
-not blocked on receipt data. Start with [`REQUIREMENTS_AUDIT.md`](REQUIREMENTS_AUDIT.md)
-— it records what the repository actually contains and which blockers gate the rest.
+not blocked on receipt data.
+
+- **[`IMPLEMENTATION_STATUS.md`](IMPLEMENTATION_STATUS.md)** — start here. Evidence-based
+  status of every W0–W8 task at HEAD, the prioritized gap table, proof-point alignment, and
+  Cowork readiness.
+- **[`IMPLEMENTATION_BACKLOG.md`](IMPLEMENTATION_BACKLOG.md)** — the verified-gaps backlog
+  derived from it.
+- [`REQUIREMENTS_AUDIT.md`](REQUIREMENTS_AUDIT.md) — the original W0 repository audit and
+  the blockers that gate the rest.
 
 > **Nothing in this directory is a measured evaluation result.** No accuracy figure, pass
 > rate, latency, or cost has been produced. What exists is the *instrumentation*: fixtures,
@@ -32,21 +39,35 @@ Evaluation-only dependencies (test runner, notebook runtime, EDA) install from
 
 ## Layout
 
+Test counts below are collected counts at HEAD `41b8fa1`, not estimates.
+
 ```
 evaluation/
+├── IMPLEMENTATION_STATUS.md   Audit of every W0–W8 task + gap table (start here)
+├── IMPLEMENTATION_BACKLOG.md  Verified-gaps backlog (P0–P3)
 ├── REQUIREMENTS_AUDIT.md      W0 — repository audit, blockers, open questions
 ├── CONFIGURATION.md           W0 — tested-configuration card + per-run capture template
+├── PERFORMANCE.md             W6 — what was changed, what was measured (no live latency)
+├── requirements-eval.txt      Evaluation-only deps (pytest, jupyterlab, pandas, matplotlib)
 ├── trajectory.py              W3 — trajectory collection, comparison, metrics
+├── bench_retrieval.py         W6 — retrieval microbenchmark (synthetic, no model)
 ├── datasets/
-│   └── trajectory_cases.json  W3 — 7 pilot ReAct cases
+│   └── trajectory_cases.json  W3 — 7 pilot ReAct cases (1 of 10 proposed case families)
 ├── fixtures/
 │   └── seed_finance.py        W1 — deterministic finance + receipt fixture builder
-└── tests/
+└── tests/                     244 tests
     ├── conftest.py            DB isolation wiring (read this before adding tests)
-    ├── test_w2b_finance.py    W2-B/W2-E — 39 finance component tests
-    ├── test_w2d_sql_react.py  W2-D — 62 SQL / scope / ReAct-parsing tests
-    └── test_w3_trajectory.py  W3 — 37 tests of the harness itself
+    ├── test_w2a_preprocess.py W2-A — 15 image-preprocessing tests
+    ├── test_w2b_finance.py    W2-B/W2-E — 52 finance component tests
+    ├── test_w2c_quick_python.py W2-C — 31 Python Quick Chat parser tests
+    ├── test_w2d_sql_react.py  W2-D — 65 SQL / scope / ReAct-parsing tests
+    ├── test_w3_trajectory.py  W3 — 37 tests of the harness itself
+    ├── test_w5_retrieval.py   W5 — 19 retrieval-mechanism tests (synthetic vectors)
+    └── test_w6_performance.py W6 — 25 structural tests (no timing assertions)
 ```
+
+Plus `web-next/app/lib/parseQuick.test.ts` (78 tests, vitest) and the pre-existing
+`test_extraction.py` (10) at the repo root. **332 tests total, all passing.**
 
 ---
 
@@ -56,15 +77,15 @@ evaluation/
 |---|---|
 | W0 audit | **Done** — `REQUIREMENTS_AUDIT.md`, `CONFIGURATION.md`. Transcript-dependent items remain open for the team. |
 | W1 dataset | **Partial** — finance + receipt fixtures done. Receipt *ground truth* blocked on B1 (one image, no labels). |
-| W2-A extraction | **Partial** — guardrails, review reasons, and the 10 pre-existing post-processing tests. Field/line-item accuracy blocked on B1. |
-| W2-B finance | **Done** — balances, net worth, transfer rules, templates, recurring, installments, goals/debts/receivables, history consistency. |
-| W2-C Quick Chat | **Done** — 64 tests against `parseQuick.ts`, the parser the shipped UI calls. |
+| W2-A extraction | **Partial (4 of 14 checklist items)** — guardrails, review reasons, image preprocessing, and the 10 pre-existing post-processing tests. **`extraction.reconcile` has zero tests**; PDF expansion, batch isolation, and field confidence are uncovered. Field/line-item accuracy blocked on B1. |
+| W2-B finance | **Partial (11 of 13 checklist items)** — balances, net worth, transfer rules, templates, recurring, installments, goals/debts/receivables, history. **Budget aggregation and carry-forward has zero tests**; "statistics" consistency is uncovered. |
+| W2-C Quick Chat | **Done for both parsers** — 78 tests against `parseQuick.ts` (the parser the shipped UI calls) + 31 Python mirrors. No *differential* test between the two exists. |
 | W2-D SQL/ReAct | **Done for the model-free half** — validator, scope sandbox, response parsing, tool dispatch. Routing/execution accuracy needs a live model (W5). |
 | W2-E posting & backup | **Done** — posting, idempotency, linkage, backup completeness, restore round trip. |
-| W3 trajectory | **Harness done and self-tested.** Awaiting a live run against a reachable Ollama. |
-| W4 E2E | Not started — depends on W1 receipt ground truth. |
-| W5 SQL/RAG accuracy | Not started — needs a model and relevant-receipt-ID labels. |
-| W6 performance | Not started. |
+| W3 trajectory | **Harness done and self-tested (37 tests), never executed.** `collect_trajectory`/`run_cases` need a reachable Ollama; every event evaluated so far is synthetic. Cases exist for 1 of 5 pipelines. |
+| W4 E2E | Not started — depends on W1 receipt ground truth. `E2E-MAN`/`E2E-QCK`/`E2E-BAK` are runnable without a model. |
+| W5 SQL/RAG accuracy | **Partial** — 19 retrieval-*mechanism* tests (synthetic vectors, stubbed `_embed`) incl. scope isolation. **No relevance ground truth, no SQL question set, no answer evaluation** — every W5 metric is uncomputed. |
+| W6 performance | **Partial, structural only** — round-trip counts and generation defaults verified against a stubbed model; retrieval/index microbenchmarks measured. **No real request latency, no live-model timing, no repeated runs, no cost worksheet.** See `PERFORMANCE.md`. |
 | W7 EDA | Not started — needs results to analyze. |
 | W8 notebook | **Unblocked** — `jupyterlab` now installs from `requirements-eval.txt`. Notebook not yet written (needs results). |
 

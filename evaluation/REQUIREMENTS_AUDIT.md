@@ -10,6 +10,15 @@ traceable to a file and line. Nothing here is a measured evaluation result.
 > *inventory facts about the current working tree*, not evaluation outcomes. No pass
 > rate, accuracy figure, threshold, or sample size is proposed or implied here.
 
+> **Re-verified 2026-07-26 at HEAD `41b8fa1` (two commits later).** Findings hold, with
+> three updates: (a) **every line-number citation below has drifted** — `core.py` is now
+> 3167 lines and `finance.py` 1602, so `agent_stream` is at ~2997 (not 2856),
+> `_MAX_AGENT_STEPS` at 2760 (not 2617), `parse_quick_text` at 1554 (not 1456). Symbol
+> names remain correct and are authoritative. (b) **§4.4 is resolved** —
+> `MLFLOW_TRACKING_URI` is now set in `core.py` and defaults to the repo's `mlflow.db`.
+> (c) The §4.3 `MLFLOW_ENABLED=0` clarify-path leak is confirmed fixed. Full re-audit,
+> including what has been built since: [`IMPLEMENTATION_STATUS.md`](IMPLEMENTATION_STATUS.md).
+
 ---
 
 ## 1. Verdict on the breakdown document's own assumptions

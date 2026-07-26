@@ -12,9 +12,15 @@ specifies**, at the audited commit. It is not yet a record of an executed evalua
 
 ## Code identity
 
+> **Line numbers in this file have drifted.** It was first written against `9ac15ec`;
+> `core.py` and `finance.py` have grown since. Symbol names (`agent_stream`,
+> `_MAX_AGENT_STEPS`, `parse_quick_text`, …) are stable and authoritative — treat any line
+> number here as approximate. Re-pin the commit below as the first step of any evaluation
+> run. See `IMPLEMENTATION_STATUS.md` §1.4.
+
 | Field | Value |
 |---|---|
-| Commit | `9ac15ec9634ad3b42cb26e3da625a9722233dbaa` |
+| Commit | `41b8fa1b7b15a8c2aaaffd5e78fc9b9e6a9c5160` (re-verified 2026-07-26; first written at `9ac15ec`) |
 | Branch | `main` |
 | Working tree | clean at audit time |
 | Python | 3.12.13 (`.venv`) |
@@ -75,7 +81,7 @@ Consumed by libraries, **not** by application code:
 | Variable | Set in code? | Compose value | Note |
 |---|---|---|---|
 | `OLLAMA_HOST` | No — read by the `ollama` client | `http://103.231.240.155:11434` | **Remote by default.** Not offline. |
-| `MLFLOW_TRACKING_URI` | No — read by `mlflow` | `sqlite:////app/mlflow.db` | **Unset locally** → local runs go to `./mlruns`, not the repo's `mlflow.db`. Must be set explicitly for every evaluation run. |
+| `MLFLOW_TRACKING_URI` | **Yes** — `core.py` calls `mlflow.set_tracking_uri()` | `sqlite:////app/mlflow.db` | Defaults to the repo's `mlflow.db`, matching the container; the env var still wins. Previously unset in code, which sent local `uvicorn` runs to `./mlruns` while the container logged to `mlflow.db`. Fixed — still worth recording per run. |
 
 **Dead variable — do not record as meaningful:** `VISION_MAX_DIM` (`core.py:82`) and
 `VISION_NUM_CTX` (`core.py:83`) are read into `_VISION_MAX_DIM` / `_VISION_NUM_CTX`, and
@@ -84,10 +90,12 @@ Consumed by libraries, **not** by application code:
 by `preprocess_image` via `OCR_MAX_IMAGE_DIM`. Recording `VISION_MAX_DIM=0` as "no
 downscaling" would misstate the tested configuration.
 
-**`MLFLOW_ENABLED=0` caveat:** the clarify early-return path in `agent_stream`
-(`core.py:2897–2900`) calls `mlflow.log_metric` directly rather than the guarded
-`_mlog_metric`, so a stray run is still created for clarification-path questions even when
-tracing is disabled or sampled out.
+**`MLFLOW_ENABLED=0` — resolved.** The clarify early-return path in `agent_stream` used to
+call `mlflow.log_metric` directly rather than the guarded `_mlog_metric`, creating (and
+leaking) a stray run for clarification-path questions even with tracing disabled — which
+would have contaminated exactly the W3 clarification metrics. Verified fixed at
+`41b8fa1`: the only direct `mlflow.log_metric` call remaining is inside `_mlog_metric`
+itself.
 
 ---
 
