@@ -9,6 +9,14 @@ env/
 ledger.db
 ledger.db-journal
 
+# Evaluation fixture databases are build artifacts, not ground truth. The versioned
+# artifact is evaluation/fixtures/seed_finance.py; regenerate with:
+#   python evaluation/fixtures/seed_finance.py
+evaluation/fixtures/*.db
+evaluation/fixtures/*.db-journal
+evaluation/fixtures/*.db-wal
+evaluation/fixtures/*.db-shm
+
 # MLflow tracking
 mlflow.db
 mlruns/

@@ -354,7 +354,7 @@ The extraction pipeline is built to ingest large drops of images or multi-hundre
 | `OCR_MAX_IMAGE_DIM` | `1600` | Longest-edge downscale target (px); `0` disables |
 | `OCR_JPEG_QUALITY` | `88` | Re-encode quality after preprocessing |
 | `OCR_CONCURRENCY` | `3` | Parallel vision calls per batch (match `OLLAMA_NUM_PARALLEL`) |
-| `OCR_NUM_CTX` / `OCR_NUM_PREDICT` | `8192` / `1024` | Ollama context / max output tokens |
+| `OCR_NUM_CTX` / `OCR_NUM_PREDICT` | `8192` / `4096` | Ollama context / max output tokens |
 | `OLLAMA_KEEP_ALIVE` | `30m` | Keep the model resident between requests |
 | `OCR_PDF_RENDER_SCALE` | `2.0` | PDF rasterization scale (~144 DPI) |
 | `OCR_MAX_IMAGE_BYTES` | `26214400` | Hard upload ceiling (25 MB) |

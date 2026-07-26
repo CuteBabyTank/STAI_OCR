@@ -1,0 +1,83 @@
+{
+  "dataset": "snag-trajectory-cases",
+  "version": "0.1.0",
+  "status": "PILOT — proposed by the team, not an instructor requirement",
+  "notes": [
+    "Sample size is deliberately small. Per the breakdown's sample-size rule, the",
+    "final count is decided after a pilot run exposes instrumentation problems, not",
+    "chosen up front. These cases exist to prove the harness works end to end.",
+    "max_tool_calls is set from core._MAX_AGENT_STEPS = 3 (the real code constant),",
+    "not copied from a lecture example.",
+    "Cases marked requires_ledger_fixture depend on evaluation/fixtures/seed_finance.py.",
+    "expected_answer_contains is intentionally empty on every case: filling it in",
+    "requires a frozen ledger AND a recorded run, and inventing expected strings",
+    "before measuring would be fabricating ground truth."
+  ],
+  "cases": [
+    {
+      "case_id": "RCT-001",
+      "input": "How much did I spend in total?",
+      "expected_tools": ["sql_ledger"],
+      "allowed_tools": ["sql_ledger"],
+      "required_events": ["start", "action", "observation", "final"],
+      "prohibited_events": ["clarify", "error"],
+      "max_tool_calls": 3,
+      "notes": "Aggregate numeric question -> SQL route. The clearest routing signal."
+    },
+    {
+      "case_id": "RCT-002",
+      "input": "What is my largest single expense?",
+      "expected_tools": ["sql_ledger"],
+      "allowed_tools": ["sql_ledger"],
+      "required_events": ["start", "action", "observation", "final"],
+      "prohibited_events": ["clarify", "error"],
+      "max_tool_calls": 3,
+      "notes": "Ordering/aggregate question -> SQL route."
+    },
+    {
+      "case_id": "RCT-003",
+      "input": "Which receipt has cooking oil on it?",
+      "expected_tools": ["search_receipts"],
+      "allowed_tools": ["search_receipts"],
+      "required_events": ["start", "action", "observation", "final"],
+      "prohibited_events": ["clarify", "error"],
+      "max_tool_calls": 3,
+      "notes": "Line-item content question -> retrieval route."
+    },
+    {
+      "case_id": "RCT-004",
+      "input": "What did I buy at SM Supermarket?",
+      "expected_tools": ["search_receipts"],
+      "allowed_tools": ["search_receipts"],
+      "required_events": ["start", "action", "observation", "final"],
+      "prohibited_events": ["clarify", "error"],
+      "max_tool_calls": 3,
+      "notes": "Vendor-scoped content question -> retrieval route."
+    },
+    {
+      "case_id": "RCT-005",
+      "input": "What was on my recent receipt?",
+      "required_events": ["start", "clarify"],
+      "prohibited_events": ["error"],
+      "max_tool_calls": 0,
+      "notes": "Ambiguous 'recent receipt' with >1 receipt in the ledger must trigger the pre-loop clarification and call NO tool. This is the deterministic disambiguation path (core._RECENT_RECEIPT_RE), so it should pass without a model reaching the loop."
+    },
+    {
+      "case_id": "RCT-006",
+      "input": "What is the capital of France?",
+      "required_events": ["start"],
+      "prohibited_events": ["error"],
+      "max_tool_calls": 3,
+      "notes": "Out-of-scope question. The agent must terminate cleanly rather than loop or crash; whether it answers or declines is recorded, not asserted, until the team agrees the desired behaviour."
+    },
+    {
+      "case_id": "RCT-007",
+      "input": "How much did I spend at 7-Eleven?",
+      "allowed_tools": ["sql_ledger", "search_receipts"],
+      "required_events": ["start", "action", "observation", "final"],
+      "prohibited_events": ["error"],
+      "max_tool_calls": 3,
+      "notes": "Genuinely answerable either way (vendor + amount). Route is recorded, not asserted — this measures loop/termination behaviour, not routing."
+    }
+  ]
+}

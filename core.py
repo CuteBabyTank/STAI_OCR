@@ -77,29 +77,12 @@ def _chat(**kwargs):
                 continue
             raise
 
-# Vision input controls. Defaults preserve original behaviour (no downscale, 8192
-# context); a constrained deployment sets these via env to fit CPU/RAM limits.
-_VISION_MAX_DIM = int(os.environ.get("VISION_MAX_DIM", "0"))     # 0 = no downscaling
-_VISION_NUM_CTX = int(os.environ.get("VISION_NUM_CTX", "8192"))
-
-
-def _downscale_image(image_bytes: bytes, max_dim: int) -> bytes:
-    """Shrink an image so its longest side is <= max_dim, re-encoded as JPEG.
-    Best-effort: on any failure the original bytes are returned unchanged."""
-    try:
-        import io as _io
-        from PIL import Image
-        img = Image.open(_io.BytesIO(image_bytes))
-        w, h = img.size
-        if max(w, h) <= max_dim:
-            return image_bytes
-        scale = max_dim / float(max(w, h))
-        resized = img.convert("RGB").resize((max(1, int(w * scale)), max(1, int(h * scale))))
-        buf = _io.BytesIO()
-        resized.save(buf, format="JPEG", quality=88)
-        return buf.getvalue()
-    except Exception:  # noqa: BLE001 - never let preprocessing break extraction
-        return image_bytes
+# NOTE: vision input controls live further down as OCR_MAX_IMAGE_DIM / OCR_NUM_CTX /
+# OCR_NUM_PREDICT, applied by preprocess_image() and _run_vision_model(). An earlier
+# `VISION_MAX_DIM` / `VISION_NUM_CTX` pair plus a `_downscale_image()` helper used to
+# sit here; nothing ever called them, so setting VISION_MAX_DIM silently did nothing
+# while OCR_MAX_IMAGE_DIM did the actual resizing. They were removed rather than wired
+# up, so the tested configuration can be read off the env honestly.
 
 try:
     from PIL import Image, ImageOps
@@ -2896,10 +2879,15 @@ def agent_stream(question: str, model: str = AGENT_MODEL,
                     f"could mean any of them — which one? {listing}"
                 )
                 steps.append({"clarify": clarification})
-                mlflow.log_metric("num_steps", 0)
-                mlflow.log_metric("clarified", 1)
-                mlflow.log_metric("latency_seconds", time.time() - t0)
-                mlflow.log_metric("error", 0)
+                # Use the guarded helpers, not mlflow.log_metric directly: an unguarded
+                # call auto-starts a run even when MLFLOW_ENABLED=0 or the call was
+                # sampled out, and the `finally` below (which keys off _traced) would
+                # then never close it. That leaked a stray open run for every
+                # clarification-path question and skewed clarification metrics.
+                _mlog_metric("num_steps", 0)
+                _mlog_metric("clarified", 1)
+                _mlog_metric("latency_seconds", time.time() - t0)
+                _mlog_metric("error", 0)
                 yield {"type": "clarify", "question": clarification, "steps": steps}
                 return
 
