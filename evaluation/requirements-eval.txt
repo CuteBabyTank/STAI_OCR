@@ -1,0 +1,35 @@
+# Evaluation-only dependencies.
+#
+# Deliberately NOT in the root requirements.txt: that file builds the API container
+# (see Dockerfile), and nothing here is needed to serve a request. Keeping them
+# separate stops a notebook runtime and a test framework from shipping to production.
+#
+# Install:
+#   ./.venv/bin/pip install -r evaluation/requirements-eval.txt
+
+# Test runner. pytest was already present in the venv but unpinned anywhere, so a
+# fresh clone could not reproduce a test run.
+pytest>=8.3
+
+# W8 notebook runtime (audit blocker B4). jupyterlab pulls the notebook server,
+# kernel and front end.
+jupyterlab>=4.3
+ipykernel>=6.29
+
+# W7 EDA and result tables.
+pandas>=2.2
+matplotlib>=3.9
+
+# Lower bounds rather than exact pins, so installing this file never downgrades a
+# working environment. Exact versions belong in the per-run record instead: the
+# capture template in CONFIGURATION.md is where a reported figure gets tied to the
+# versions that produced it.
+
+# Deliberately NOT pinned here:
+#   ragas   — the breakdown (§2, §W5) does not establish it as required, and it pulls
+#             a large dependency tree plus an LLM-judge backend. Context precision /
+#             recall can be computed directly against relevant-receipt-ID labels with
+#             numpy, which is already a runtime dependency.
+#   sqlglot — only needed for structural SQL comparison, which the breakdown lists as
+#             supplementary. SQL execution accuracy is the primary metric.
+# Add either if and when the team decides it is needed.

@@ -1365,10 +1365,12 @@ _BACKUP_TABLES = [
     "recurring", "installment_plans", "goals", "debts", "receivables", "settings",
 ]
 
+BACKUP_FORMAT = "stai-ledger-backup/1"
+
 
 def export_backup() -> dict:
     init_finance_schema()
-    out: dict = {"format": "stai-ledger-backup/1", "exported_at": _now(), "data": {}}
+    out: dict = {"format": BACKUP_FORMAT, "exported_at": _now(), "data": {}}
     with _connect() as con:
         con.row_factory = sqlite3.Row
         for t in _BACKUP_TABLES:
@@ -1377,13 +1379,70 @@ def export_backup() -> dict:
     return out
 
 
+def _validate_backup(payload) -> dict:
+    """Check a backup payload before it is allowed anywhere near the ledger.
+
+    This runs BEFORE any DELETE. Previously `import_backup` did
+    `data = (payload or {}).get("data", {})`, so a malformed payload silently
+    yielded `{}` and, with replace=True, wiped all twelve finance tables and
+    inserted nothing — reported as a success. Validating up front turns that into
+    a refusal.
+
+    A backup of an genuinely empty ledger is still valid and restorable: emptiness
+    is not the thing being rejected, an unrecognized *shape* is.
+    """
+    if not isinstance(payload, dict):
+        raise FinanceError("Backup must be a JSON object.")
+
+    fmt = payload.get("format")
+    if fmt != BACKUP_FORMAT:
+        raise FinanceError(
+            f"Unrecognized backup format {fmt!r}; expected {BACKUP_FORMAT!r}."
+        )
+
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        raise FinanceError("Backup is missing its 'data' object.")
+
+    unknown = sorted(set(data) - set(_BACKUP_TABLES))
+    if unknown:
+        raise FinanceError(f"Backup contains unknown table(s): {unknown}")
+
+    for table, rows in data.items():
+        if not isinstance(rows, list):
+            raise FinanceError(f"Backup table {table!r} must be a list of rows.")
+        for row in rows:
+            if not isinstance(row, dict):
+                raise FinanceError(f"Backup table {table!r} contains a non-object row.")
+    return data
+
+
 def import_backup(payload: dict, replace: bool = True) -> dict:
     """Restore a backup into the ledger. With replace=True the finance tables are
-    cleared first (the imported session becomes the state)."""
+    cleared first (the imported session becomes the state).
+
+    The payload is fully validated before anything is deleted, and the whole
+    restore runs in one transaction — so a bad backup leaves the existing ledger
+    exactly as it was, rather than half-erased.
+    """
     init_finance_schema()
-    data = (payload or {}).get("data", {})
+    data = _validate_backup(payload)
     counts = {}
     with _connect() as con:
+        # Column names cannot be parameterized, so they are interpolated into the
+        # INSERT. Check every one against the real schema first: unvalidated keys
+        # from an uploaded file would otherwise be a SQL injection vector as well
+        # as a crash.
+        table_columns = {
+            t: {r[1] for r in con.execute(f"PRAGMA table_info({t})")}
+            for t in _BACKUP_TABLES
+        }
+        for table, rows in data.items():
+            for row in rows:
+                bad = sorted(set(row) - table_columns[table])
+                if bad:
+                    raise FinanceError(f"Backup table {table!r} has unknown column(s): {bad}")
+
         if replace:
             for t in _BACKUP_TABLES:
                 con.execute(f"DELETE FROM {t}")
@@ -1392,9 +1451,12 @@ def import_backup(payload: dict, replace: bool = True) -> dict:
             counts[t] = len(rows)
             for row in rows:
                 keys = list(row.keys())
+                if not keys:
+                    continue
                 ph = ",".join("?" for _ in keys)
+                cols = ",".join(f'"{k}"' for k in keys)
                 con.execute(
-                    f"INSERT INTO {t} ({','.join(keys)}) VALUES ({ph})",
+                    f"INSERT INTO {t} ({cols}) VALUES ({ph})",
                     [row[k] for k in keys],
                 )
         con.commit()
@@ -1408,11 +1470,21 @@ import re as _re
 
 _INCOME_WORDS = _re.compile(r"\b(salary|income|paid|received|refund|bonus|deposit|gift)\b", _re.I)
 _TRANSFER_WORDS = _re.compile(r"\b(transfer|move|send to|moved)\b", _re.I)
-_MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]
+_MONTHS_FULL = [
+    "january", "february", "march", "april", "may", "june",
+    "july", "august", "september", "october", "november", "december",
+]
+
+
+# The trailing \b is load-bearing. Without it the optional [km] suffix matched the
+# first letter of the FOLLOWING word: "250 milk" parsed as 250 x 1,000,000 = ₱250M,
+# "300 movie tickets" as ₱300M, "250 kilo rice" as ₱250,000. With \b, a suffix must
+# end a word, so "1.2k lunch" and "2m bonus" still work while "250 milk" is ₱250.
+_AMOUNT_RE = _re.compile(r"(?:₱|php|\$)?\s*([\d,]+(?:\.\d+)?)\s*([km])?\b", _re.I)
 
 
 def _parse_amount(text: str):
-    m = _re.search(r"(?:₱|php|\$)?\s*([\d,]+(?:\.\d+)?)\s*([km])?", text, _re.I)
+    m = _AMOUNT_RE.search(text)
     if not m:
         return None
     try:
@@ -1436,20 +1508,46 @@ def _parse_date(text: str):
         return (today + timedelta(days=1)).isoformat()
     if "today" in t:
         return today.isoformat()
-    m = _re.search(r"\b([a-z]{3,9})\s+(\d{1,2})\b", t) or _re.search(r"\b(\d{1,2})\s+([a-z]{3,9})\b", t)
-    if m:
-        a, b = m.group(1), m.group(2)
-        mon_tok = a if not a.isdigit() else b
-        day_tok = b if not a.isdigit() else a
-        mi = next((i for i, mm in enumerate(_MONTHS) if mon_tok.startswith(mm)), -1)
-        if mi >= 0 and day_tok.isdigit():
-            day = int(day_tok)
-            if 1 <= day <= 31:
-                year = today.year
-                cand = date(year, mi + 1, min(day, 28))
-                if (cand - today).days > 183:
-                    cand = date(year - 1, mi + 1, min(day, 28))
-                return cand.isoformat()
+    # Collect month/day candidates from BOTH orderings and take the first that
+    # resolves to a real month, ordered by position in the text.
+    #
+    # These two patterns used to be joined with `or`, so if the "mon d" pattern
+    # matched anything the "d mon" pattern was never tried: in "250 lunch 1 apr"
+    # the first pattern matched the note word plus the day ("lunch 1"), the month
+    # lookup failed, and the function fell through to today's date. Mirrors the
+    # same fix in web-next/app/lib/parseQuick.ts.
+    candidates: list[tuple[int, str, str]] = []
+    for m in _re.finditer(r"\b([a-z]{3,9})\s+(\d{1,2})\b", t):
+        candidates.append((m.start(), m.group(1), m.group(2)))
+    for m in _re.finditer(r"\b(\d{1,2})\s+([a-z]{3,9})\b", t):
+        candidates.append((m.start(), m.group(2), m.group(1)))
+    candidates.sort(key=lambda c: c[0])
+
+    for _pos, mon_tok, day_tok in candidates:
+        # The token must be a prefix of a real month name, not the other way round:
+        # a note word like "marketing" starts with "mar" but is not March.
+        mi = next(
+            (i for i, mm in enumerate(_MONTHS_FULL)
+             if len(mon_tok) >= 3 and mm.startswith(mon_tok)),
+            -1,
+        )
+        if mi < 0 or not day_tok.isdigit():
+            continue
+        day = int(day_tok)
+        year = today.year
+        # Build the real date rather than clamping to day 28, which silently turned
+        # "apr 30" into April 28. An impossible day (e.g. "feb 30") is skipped so a
+        # later candidate can still match.
+        try:
+            cand = date(year, mi + 1, day)
+        except ValueError:
+            continue
+        if (cand - today).days > 183:
+            try:
+                cand = date(year - 1, mi + 1, day)
+            except ValueError:
+                continue
+        return cand.isoformat()
     return today.isoformat()
 
 
@@ -1487,7 +1585,8 @@ def parse_quick_text(text: str) -> dict:
     if kind == "transfer":
         to_account_id = next((a["id"] for a in debit if a["id"] != account_id), None)
 
-    note = _re.sub(r"(?:₱|php|\$)?\s*[\d,]+(?:\.\d+)?\s*[km]?", "", raw, count=1, flags=_re.I)
+    # Same \b as _AMOUNT_RE: without it "250 milk" stripped "250 m" and left "ilk".
+    note = _re.sub(r"(?:₱|php|\$)?\s*[\d,]+(?:\.\d+)?\s*[km]?\b", "", raw, count=1, flags=_re.I)
     note = _re.sub(r"^\s*[+\-]\s*", "", note)
     note = _re.sub(r"\b(yesterday|today|tomorrow)\b", "", note, flags=_re.I).strip()
 

@@ -20,7 +20,18 @@ function toLocal(d: Date) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+const MONTHS_FULL = [
+  "january", "february", "march", "april", "may", "june",
+  "july", "august", "september", "october", "november", "december",
+];
+
+// Month index for a token, or -1. The token must be a prefix of a real month name
+// ("apr"/"april"/"sept" all resolve), which is stricter than the reverse test: a
+// note word like "marketing" is NOT March, though it does start with "mar".
+function monthIndex(token: string): number {
+  if (token.length < 3) return -1;
+  return MONTHS_FULL.findIndex((m) => m.startsWith(token));
+}
 
 // Resolve a relative/absolute date phrase to a Date, defaulting to now.
 function parseDate(text: string, ref: Date): Date {
@@ -36,13 +47,26 @@ function parseDate(text: string, ref: Date): Date {
     d.setDate(d.getDate() + 1);
     return d;
   }
-  // "apr 1", "april 1", "1 apr"
-  const m = t.match(/\b([a-z]{3,9})\s+(\d{1,2})\b/) || t.match(/\b(\d{1,2})\s+([a-z]{3,9})\b/);
-  if (m) {
-    const a = m[1], b = m[2];
-    const monTok = isNaN(Number(a)) ? a : b;
-    const dayTok = isNaN(Number(a)) ? b : a;
-    const mi = MONTHS.findIndex((mm) => monTok.startsWith(mm));
+
+  // "apr 1", "april 1", "1 apr". Both orderings are collected and the first one
+  // that resolves to a real month wins, ordered by position in the text.
+  //
+  // These two patterns used to be joined with `||`, which meant that if the "mon d"
+  // pattern matched *anything* the "d mon" pattern was never tried. In "250 lunch
+  // 1 apr" the first pattern matched the note word plus the day ("lunch 1"), the
+  // month lookup failed, and the function fell through to the reference date —
+  // silently dating the transaction today instead of 1 April.
+  const candidates: { index: number; monTok: string; dayTok: string }[] = [];
+  for (const m of t.matchAll(/\b([a-z]{3,9})\s+(\d{1,2})\b/g)) {
+    candidates.push({ index: m.index ?? 0, monTok: m[1], dayTok: m[2] });
+  }
+  for (const m of t.matchAll(/\b(\d{1,2})\s+([a-z]{3,9})\b/g)) {
+    candidates.push({ index: m.index ?? 0, monTok: m[2], dayTok: m[1] });
+  }
+  candidates.sort((a, b) => a.index - b.index);
+
+  for (const { monTok, dayTok } of candidates) {
+    const mi = monthIndex(monTok);
     const day = Number(dayTok);
     if (mi >= 0 && day >= 1 && day <= 31) {
       const d = new Date(ref.getFullYear(), mi, day, ref.getHours(), ref.getMinutes());
@@ -55,8 +79,15 @@ function parseDate(text: string, ref: Date): Date {
 }
 
 // "1.2k" -> 1200, "₱3,400.50" -> 3400.5, "2m" -> 2_000_000.
+//
+// The trailing \b is load-bearing. Without it the optional [km] suffix matched the
+// first letter of the FOLLOWING word: "250 milk" parsed as 250 x 1,000,000 = ₱250M,
+// "300 movie tickets" as ₱300M, "250 kilo rice" as ₱250,000. With \b a suffix must
+// end a word, so "1.2k lunch" and "2m bonus" still work while "250 milk" is ₱250.
+const AMOUNT_RE = /(?:₱|php|\$)?\s*([\d,]+(?:\.\d+)?)\s*([km])?\b/i;
+
 function parseAmount(text: string): number | null {
-  const m = text.match(/(?:₱|php|\$)?\s*([\d,]+(?:\.\d+)?)\s*([km])?/i);
+  const m = text.match(AMOUNT_RE);
   if (!m) return null;
   let n = parseFloat(m[1].replace(/,/g, ""));
   if (isNaN(n)) return null;
@@ -115,7 +146,8 @@ export function parseQuick(
 
   // Note: strip the amount token and standalone keywords for a cleaner label.
   const note = text
-    .replace(/(?:₱|php|\$)?\s*[\d,]+(?:\.\d+)?\s*[km]?/i, "")
+    // Same \b as AMOUNT_RE: without it "250 milk" stripped "250 m" and left "ilk".
+    .replace(/(?:₱|php|\$)?\s*[\d,]+(?:\.\d+)?\s*[km]?\b/i, "")
     .replace(/^\s*[+\-]\s*/, "")
     .replace(/\b(yesterday|today|tomorrow)\b/gi, "")
     .trim();

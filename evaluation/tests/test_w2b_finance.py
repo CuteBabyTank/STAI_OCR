@@ -460,37 +460,71 @@ def test_restore_preserves_receipt_transaction_linkage(
     assert len(linked) == 1, "receipt linkage was lost or duplicated across restore"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "KNOWN DEFECT (audit finding D1, unfixed): finance.import_backup does not "
-        "validate its payload. `data = (payload or {}).get('data', {})` yields {} for "
-        "any malformed input, then replace=True DELETEs all 12 finance tables and "
-        "inserts nothing — total silent data loss, reported as a success. Reproduced "
-        "with {'not':'a backup'}, {} and None. Reachable from POST /backup/import, "
-        "which has no auth layer in front of it. Remove this marker when fixed."
-    ),
-)
 def test_malformed_backup_is_handled_visibly(finance_fixture, finance):
     """Explicit W2-E item: 'Malformed backup behavior is tested'.
 
-    Either raise or reject — what is not acceptable is silently wiping the ledger.
-    This is expected-to-fail against the current code and documents the defect;
-    strict=True means it turns into a hard failure the moment the bug is fixed,
-    which is the signal to delete the marker.
+    Regression guard for defect D1: a malformed payload used to silently wipe all
+    twelve finance tables and report success. It must now be refused, and the
+    existing ledger must be untouched.
     """
     before = len(finance.list_transactions())
-    try:
+    with pytest.raises(finance.FinanceError):
         finance.import_backup({"not": "a backup"}, replace=True)
-    except Exception:
-        pass  # raising is a visible, acceptable outcome
     assert len(finance.list_transactions()) == before, (
         "a malformed backup destroyed existing data"
     )
 
 
-def test_empty_backup_payload_does_not_wipe_the_ledger(finance_fixture, finance):
-    """Companion to the xfail above, kept separate so the blast radius is recorded:
-    an empty dict and None hit the same unguarded path. Marked xfail for the same
-    defect D1."""
-    pytest.xfail("same defect as test_malformed_backup_is_handled_visibly (D1)")
+@pytest.mark.parametrize(
+    "payload",
+    [
+        None,
+        {},
+        {"not": "a backup"},
+        "a string",
+        [],
+        {"format": "some-other-tool/2", "data": {}},
+        {"format": "stai-ledger-backup/1"},                       # no data key
+        {"format": "stai-ledger-backup/1", "data": None},
+        {"format": "stai-ledger-backup/1", "data": []},
+        {"format": "stai-ledger-backup/1", "data": {"receipts": []}},   # unknown table
+        {"format": "stai-ledger-backup/1", "data": {"accounts": "nope"}},
+        {"format": "stai-ledger-backup/1", "data": {"accounts": ["nope"]}},
+    ],
+)
+def test_no_malformed_payload_can_destroy_the_ledger(finance_fixture, finance, payload):
+    """The full blast radius of D1. Every one of these previously wiped the ledger
+    (or would have); each must now be refused with the data intact."""
+    before_txns = len(finance.list_transactions())
+    before_accounts = len(finance.list_accounts(include_archived=True))
+
+    with pytest.raises(finance.FinanceError):
+        finance.import_backup(payload, replace=True)
+
+    assert len(finance.list_transactions()) == before_txns
+    assert len(finance.list_accounts(include_archived=True)) == before_accounts
+
+
+def test_backup_with_an_injected_column_name_is_refused(finance_fixture, finance):
+    """Column names cannot be parameterized and are interpolated into the INSERT,
+    so an uploaded file could otherwise smuggle SQL through a key. Validated
+    against the real schema."""
+    backup = finance.export_backup()
+    backup["data"]["accounts"][0]["name) VALUES (1); DROP TABLE accounts;--"] = "x"
+
+    with pytest.raises(finance.FinanceError, match="unknown column"):
+        finance.import_backup(backup, replace=True)
+
+    assert finance.list_accounts(include_archived=True), "accounts table was harmed"
+
+
+def test_a_genuinely_empty_backup_still_restores(finance_fixture, finance):
+    """Emptiness is not what gets rejected — an unrecognized shape is. A valid
+    backup of an empty ledger must still be restorable, or a user could never
+    reset their data."""
+    empty = {"format": finance.BACKUP_FORMAT, "data": {t: [] for t in finance._BACKUP_TABLES}}
+
+    finance.import_backup(empty, replace=True)
+
+    assert finance.list_transactions() == []
+    assert finance.list_accounts(include_archived=True) == []

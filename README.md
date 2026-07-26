@@ -32,13 +32,20 @@ Dockerfile               API container (backend)
 docker-compose.yml       web + api + ollama + mlflow, wired together
 ```
 
-**Three models, all local via Ollama:**
+**Three models, all local via Ollama.** These are the defaults in `core.py` /
+`extraction.py`; each is overridable by env var:
 
-| Model              | Role                                          |
-| ------------------ | --------------------------------------------- |
-| `qwen2.5vl:7b`     | vision/OCR — reads the receipt image          |
-| `llama3.2:3b`      | text — SQL agent, RAG answerer, ReAct planner |
-| `nomic-embed-text` | embeddings — powers semantic search (RAG)     |
+| Model              | Role                                          | Env var        |
+| ------------------ | --------------------------------------------- | -------------- |
+| `qwen2.5vl:7b`     | vision/OCR — reads the receipt image          | `VISION_MODEL` |
+| `qwen2.5:latest`   | text — SQL agent, RAG answerer, ReAct planner | `AGENT_MODEL`  |
+| `nomic-embed-text` | embeddings — powers semantic search (RAG)     | `EMBED_MODEL`  |
+
+> **`docker-compose.yml` overrides the first two** to `gemma4:e4b` / `gemma4:12b`,
+> because the container targets the shared class Ollama endpoint rather than a local
+> model. So the model actually in use depends on how you launched the app. Never cite
+> a default from this table when recording an evaluation run — read the effective
+> value from `GET /health` instead. See `evaluation/CONFIGURATION.md`.
 
 ### Data flow
 
@@ -93,7 +100,7 @@ docker-compose.yml       web + api + ollama + mlflow, wired together
 
   Natural-language question
            │
-  ┌────────▼─────────┐   llama3.2:3b reasons in a Thought → Action →
+  ┌────────▼─────────┐   qwen2.5 reasons in a Thought → Action →
   │  ReAct planner    │   Observation loop and picks a tool. Reasoning
   │  (streamed)       │   is streamed token-by-token to the UI.
   └───┬───────────┬──┘
@@ -214,21 +221,25 @@ pip install -r requirements.txt
 brew install ollama
 
 # 3. Pull the models
-#    qwen2.5vl:7b      — vision/OCR model that reads receipt images   (~6.0 GB, one-time)
-#    llama3.2:3b      — text model: SQL agent, RAG answerer, ReAct    (~2 GB,   one-time)
+#    qwen2.5vl:7b     — vision/OCR model that reads receipt images    (~6.0 GB, one-time)
+#    qwen2.5:latest   — text model: SQL agent, RAG answerer, ReAct    (~4.7 GB, one-time)
 #    nomic-embed-text — embedding model for semantic search (RAG)     (~275 MB, one-time)
 ollama pull qwen2.5vl:7b
-ollama pull llama3.2:3b
+ollama pull qwen2.5:latest
 ollama pull nomic-embed-text
 ```
 
 > The app still runs without `nomic-embed-text` — semantic search transparently
 > falls back to keyword matching — but retrieval quality is much better with it.
 
-> **Note:** `llama3.2:3b` is text-only and cannot read images, and
-> `llama3.2-vision` needs a newer Ollama engine than some builds ship. This app
-> uses `qwen2.5vl:7b` for OCR, which is tuned for document/invoice extraction with
-> structured JSON output, and `llama3.2:3b` only for the text-only SQL agent.
+> **Note:** the text model cannot read images, and `llama3.2-vision` needs a newer
+> Ollama engine than some builds ship. This app uses `qwen2.5vl:7b` for OCR, which is
+> tuned for document/invoice extraction with structured JSON output, and the text
+> model only for the SQL agent / RAG / ReAct planner.
+>
+> `qwen2.5:latest` routes tools and summarizes numbers far more reliably than a 3B
+> model, which mis-routed tools, looped, and garbled amounts. On a constrained host
+> set `AGENT_MODEL=llama3.2:3b` for a smaller/faster (and measurably worse) agent.
 
 ---
 
@@ -264,7 +275,7 @@ docker compose up --build
 
 This brings up four containers:
 
-- `ollama` — pulls `qwen2.5vl:7b`, `llama3.2:3b`, and `nomic-embed-text` automatically on first start
+- `ollama` — pulls `qwen2.5vl:7b`, `qwen2.5:latest`, and `nomic-embed-text` automatically on first start
 - `web` — the **Aperture** UI (Next.js) at <http://localhost:8502> — a clean white
   dashboard with KPI stat tiles, a cashflow chart, a top-vendors breakdown, a
   budgets card with per-category monthly limits, an income panel, a slide-over

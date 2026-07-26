@@ -290,35 +290,45 @@ unassigned finance lane (breakdown §6).
 
 ## 10. Blockers, in priority order
 
-| # | Blocker | Blocks | Why it is blocking |
+| # | Blocker | Blocks | Status |
 |---|---|---|---|
-| B1 | **One receipt image; zero verified labels** | W1, W2-A, W4, W5, W7 | No answer key can be built. Nothing downstream is measurable. Largest single blocker. |
-| B2 | **Finance schema has never been created; no fixture** | W2-B, W2-E, W4, W3 receipt-to-finance | The entire finance lane has no data and no schema in `ledger.db`. |
-| B3 | **Ground-truth data would live in gitignored files** | W1, W11 "versioned" | `ledger.db`/`mlflow.db` are ignored; fixtures need an un-ignored home. |
-| B4 | **No notebook runtime** | W8 | `jupyter` not installed; W8 is a critical-priority deliverable. |
-| B5 | **`receipt_docs` (5) < `receipts` (6)** | W5 retrieval recall | A known-missing embedding silently caps recall. |
-| B6 | **Config defects §4.1–§4.4** | W0 freeze, W6 | The tested configuration cannot be accurately recorded from the compose file as written. |
-| B7 | **Quick Chat scope undecided (§9)** | W2-C | Two parsers; the tested one is not the shipped one. |
+| B1 | **One receipt image; zero verified labels** | W1, W2-A, W4, W5, W7 | **OPEN — largest blocker.** No answer key can be built without receipt images and human labels. Not resolvable in code. |
+| B2 | **Finance schema had never been created; no fixture** | W2-B, W2-E, W4 | ✅ **RESOLVED** — `fixtures/seed_finance.py` builds a deterministic 6-account / 5-transaction / 2-receipt ledger with hand-computed expected balances. |
+| B3 | **Ground-truth data would live in gitignored files** | W1, §11 "versioned" | ✅ **RESOLVED** — the versioned artifact is the seeder script, not a binary `.db`. Generated fixtures are gitignored as build artifacts. |
+| B4 | **No notebook runtime** | W8 | ✅ **RESOLVED** — `jupyterlab` + `ipykernel` in `requirements-eval.txt`, kept out of the API container. |
+| B5 | **`receipt_docs` (5) < `receipts` (6)** | W5 retrieval recall | **OPEN** — in the dev `ledger.db` only. The evaluation fixture is built clean, so it does not affect the harness; still must be resolved or recorded before measuring recall on real data. |
+| B6 | **Config defects §4.1–§4.4** | W0 freeze, W6 | ✅ **RESOLVED** — all four fixed (§4). |
+| B7 | **Quick Chat scope undecided (§9)** | W2-C | ✅ **RESOLVED** — team chose the shipped TypeScript parser. vitest stood up in `web-next`; both parsers now tested, and the shared defect D2 fixed in both. |
 
-None of B1–B7 were introduced by this audit. **No application code was modified.**
+None of B1–B7 were introduced by this audit.
 
 ---
 
 ## 10b. Application defects surfaced by the new tests
 
-Found after the audit, while implementing W2-B and W2-C. Both are **pre-existing
-application bugs, not regressions**, and both were left **unfixed** — fixing them changes
-application behaviour and is the team's call. Each is recorded as an expected-to-fail test
-so the suite stays green while the defect stays visible, and flips to a hard failure once
-fixed. Full write-ups in [`README.md`](README.md).
+Found after the audit, while implementing W2-B and W2-C. All are **pre-existing
+application bugs, not regressions**. All are now **fixed with regression tests**; there
+are no remaining xfails in either suite. Full write-ups in [`README.md`](README.md).
 
-| ID | Defect | Severity | Test |
+| ID | Defect | Severity | Status |
 |---|---|---|---|
-| **D1** | `finance.import_backup` deletes all 12 finance tables when given a malformed payload (`{"not":"a backup"}`, `{}`, `None`) and reports success. Reachable from `POST /backup/import`, which has no auth in front of it. | **High — silent data loss** | `test_w2b_finance.py::test_malformed_backup_is_handled_visibly` (xfail strict) |
-| **D2** | `parseQuick` silently dates `"250 lunch 1 apr"` as *today*. `parseDate` short-circuits on the `"mon d"` regex, which matches the note word plus the day number, so the `"d mon"` branch never runs. Confidence still reports `"high"`. | **Medium — silent wrong data** | `parseQuick.test.ts` (`it.fails`) + a companion test recording actual behaviour |
+| **D1** | `finance.import_backup` deleted all 12 finance tables when given a malformed payload (`{"not":"a backup"}`, `{}`, `None`) and reported success. Reachable from `POST /backup/import`, which has no auth in front of it. Column names from the payload were also interpolated unvalidated into the `INSERT`. | **High — silent data loss** | ✅ Fixed — payload validated before any `DELETE`; column names checked against `PRAGMA table_info` |
+| **D2** | Quick Chat silently dated `"250 lunch 1 apr"` as *today*. `parseDate` short-circuited on the `"mon d"` regex, which matched the note word plus the day number, so the `"d mon"` branch never ran. Confidence still reported `"high"`. **Present in both the TypeScript and Python parsers.** | **Medium — silent wrong data** | ✅ Fixed in both |
+| **D2b** | `finance._parse_date` did `min(day, 28)`, silently turning `"apr 30"` into April 28. Found while fixing D2. | **Medium — silent wrong data** | ✅ Fixed — builds the real date, skips impossible ones |
+| **D2c** | The month test was inverted (`token.startsWith(month)`), so `"marketing 5"` parsed as March 5. | **Low** | ✅ Fixed — now `month.startsWith(token)`; also accepts `"sept"` |
+| **D4** | Quick Chat's amount regex ended `([km])?` with no word boundary, so the shorthand suffix matched the first letter of the *next* word: `"250 milk"` → ₱250,000,000, `"300 movie tickets"` → ₱300,000,000, `"250 kilo rice"` → ₱250,000, `"80 kape"` → ₱80,000. The note-stripping regex had the same flaw (`"250 milk"` → note `"ilk"`). **Both parsers.** Found by driving the real `POST /parse` endpoint, not by unit tests. | **High — silent wrong data on ordinary input** | ✅ Fixed — `\b` anchors all four regexes |
+| **D3** | `core._normalize_scope` let `int(float('inf'))` escape as `OverflowError` → unhandled 500 instead of `GuardrailError`. Not reachable from the API (pydantic types `receipt_ids` as `list[int]`). | **Low — latent** | ✅ Fixed |
 
-Both map onto the breakdown's W7 failure taxonomy: D1 is "Backup/restore loss or
-relationship corruption"; D2 is "Quick Chat parse error".
+These map onto the breakdown's W7 failure taxonomy: D1 is "Backup/restore loss or
+relationship corruption"; D2/D2b/D2c/D4 are "Quick Chat parse error"; D3 is
+"Configuration/environment failure".
+
+**Method note worth carrying into W4.** D4 was the most severe Quick Chat defect and the
+unit tests missed it — every existing case happened to use a note starting with a safe
+letter. It surfaced only when the real `POST /parse` endpoint was driven with ordinary
+phrases. This is direct evidence for the breakdown's insistence on end-to-end evaluation
+as a separate layer: component tests confirm the rules you thought to check, and a
+plausible-looking parse can hide a 1,000,000× error.
 
 ---
 

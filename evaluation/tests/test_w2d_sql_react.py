@@ -130,25 +130,18 @@ def test_empty_scope_is_none(core):
     assert core._normalize_scope(None) is None
 
 
-@pytest.mark.parametrize("bad", [["abc"], [0], [-1], [None], [{"id": 1}]])
+@pytest.mark.parametrize(
+    "bad",
+    [["abc"], [0], [-1], [None], [{"id": 1}], [float("inf")], [float("-inf")], [float("nan")]],
+)
 def test_scope_normalization_rejects_invalid_ids(core, bad):
+    """Every hostile shape must surface as a GuardrailError, not an unhandled 500.
+
+    The float cases used to escape as OverflowError/ValueError from `int()`, which
+    the except clause did not fully cover.
+    """
     with pytest.raises(core.GuardrailError, match="Invalid receipt id"):
         core._normalize_scope(bad)
-
-
-def test_scope_normalization_lets_infinity_escape_as_overflowerror(core):
-    """Documents a boundary, deliberately NOT marked xfail.
-
-    `_normalize_scope` catches (TypeError, ValueError) but `int(float('inf'))`
-    raises OverflowError, which escapes as an unhandled 500 rather than a
-    GuardrailError. Assessed as latent, not exploitable: the only external entry
-    points are `AskRequest.receipt_ids` / `SearchRequest.receipt_ids`, both typed
-    `list[int] | None`, so pydantic rejects a non-integer before this is reached —
-    and `inf` is not expressible in JSON at all. Recorded so the assessment is
-    revisited if an untyped caller is ever added.
-    """
-    with pytest.raises(OverflowError):
-        core._normalize_scope([float("inf")])
 
 
 # --------------------------------------------------------------------------- #

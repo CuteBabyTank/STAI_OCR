@@ -68,6 +68,25 @@ describe("amount parsing", () => {
   it("treats k as case-insensitive", () => {
     expect(parse("5K rent")?.amount).toBe(5000);
   });
+
+  // Regression guards for defect D4. The optional [km] suffix was not word-bounded,
+  // so it matched the first letter of the FOLLOWING word — inflating everyday
+  // entries by 1,000x or 1,000,000x with no warning.
+  it.each([
+    ["250 milk", 250],
+    ["300 movie tickets", 300],
+    ["250 kilo rice", 250],
+    ["500 marketing 5", 500],
+    ["120 mango shake", 120],
+    ["80 kape", 80],
+  ])("does not read the next word's first letter as a k/m suffix in %s", (text, expected) => {
+    expect(parse(text)?.amount).toBe(expected);
+  });
+
+  it("still expands a suffix attached to the number", () => {
+    expect(parse("1.2k lunch")?.amount).toBe(1200);
+    expect(parse("2m bonus")?.amount).toBe(2_000_000);
+  });
 });
 
 describe("invalid input", () => {
@@ -158,34 +177,37 @@ describe("relative date parsing", () => {
     expect(parse("250 1 apr")?.occurredAt).toBe("2026-04-01T14:30");
   });
 
-  /**
-   * KNOWN DEFECT (audit finding D2, unfixed).
-   *
-   * parseDate tries `/\b([a-z]{3,9})\s+(\d{1,2})\b/` FIRST and only falls back to
-   * the "d mon" pattern via `||` if that one finds nothing. With a note word before
-   * the day ("250 lunch 1 apr"), the first pattern matches "lunch 1", the month
-   * lookup returns -1, the `mi >= 0` guard fails, and the function returns the
-   * reference date — the second pattern is never tried.
-   *
-   * Effect: the transaction is silently dated TODAY instead of the date the user
-   * typed. No warning, and confidence still reports "high". The source comment on
-   * parseDate advertises "1 apr" as a supported form.
-   *
-   * Reproduced with: "250 lunch 1 apr", "250 dinner 5 may", "1000 groceries 3 mar",
-   * "500 taxi 2 feb". The "mon d" form ("250 lunch apr 1") is unaffected.
-   *
-   * `it.fails` = expected-to-fail. It flips to a hard failure once fixed, which is
-   * the signal to convert it back to a normal `it`.
-   */
-  it.fails("parses 'd mon' when a note word precedes the day (KNOWN DEFECT D2)", () => {
-    expect(parse("250 lunch 1 apr")?.occurredAt).toBe("2026-04-01T14:30");
+  // Regression guard for defect D2. These all used to be silently dated TODAY:
+  // parseDate joined its two patterns with `||`, so a note word before the day
+  // ("lunch 1") matched the first pattern, failed the month lookup, and the
+  // "d mon" pattern was never tried.
+  it.each([
+    ["250 lunch 1 apr", "2026-04-01T14:30"],
+    ["250 dinner 5 may", "2026-05-05T14:30"],
+    ["1000 groceries 3 mar", "2026-03-03T14:30"],
+    ["500 taxi 2 feb", "2026-02-02T14:30"],
+  ])("parses 'd mon' in %s even with a note word before the day", (text, expected) => {
+    expect(parse(text)?.occurredAt).toBe(expected);
   });
 
-  it("silently returns the reference date for 'd mon' after a note word (D2 actual)", () => {
-    // Records the observed behaviour so the blast radius is measurable, and so a
-    // future fix shows up as a change here too.
-    expect(parse("250 lunch 1 apr")?.occurredAt).toBe("2026-06-10T14:30");
-    expect(parse("1000 groceries 3 mar")?.occurredAt).toBe("2026-06-10T14:30");
+  it("still parses 'mon d' after a note word", () => {
+    expect(parse("250 lunch apr 1")?.occurredAt).toBe("2026-04-01T14:30");
+  });
+
+  it("does not mistake a note word starting with a month prefix for a month", () => {
+    // "marketing" starts with "mar" but is not March. The month token must be a
+    // prefix of a real month name, not the other way round.
+    expect(parse("500 marketing 5")?.occurredAt).toBe("2026-06-10T14:30");
+  });
+
+  it("accepts a four-letter month abbreviation", () => {
+    // Sept 3 is ~85 days after the Jun 10 reference — under the 183-day threshold,
+    // so it stays in the current year (unlike the dec 25 case above).
+    expect(parse("250 lunch sept 3")?.occurredAt).toBe("2026-09-03T14:30");
+  });
+
+  it("takes the earliest resolvable date when the text has several candidates", () => {
+    expect(parse("250 lunch apr 1 and may 2")?.occurredAt).toBe("2026-04-01T14:30");
   });
 
   it("parses a full month name", () => {
@@ -287,6 +309,13 @@ describe("note extraction", () => {
 
   it("strips a currency symbol with the amount", () => {
     expect(parse("₱500 dinner")?.note).toBe("dinner");
+  });
+
+  it("does not eat the first letter of the note (defect D4)", () => {
+    // The note-stripping regex had the same unbounded [km]? — "250 milk" stripped
+    // "250 m" and left "ilk".
+    expect(parse("250 milk")?.note).toBe("milk");
+    expect(parse("300 movie tickets")?.note).toBe("movie tickets");
   });
 });
 

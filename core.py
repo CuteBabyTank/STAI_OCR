@@ -423,6 +423,15 @@ AGENT_MODEL = os.environ.get("AGENT_MODEL", "qwen2.5:latest")
 EMBED_MODEL = os.environ.get("EMBED_MODEL", "nomic-embed-text")
 
 if MLFLOW_ENABLED:
+    # Pin the tracking store explicitly. Only docker-compose used to set
+    # MLFLOW_TRACKING_URI, so a local `uvicorn api:app` run silently logged to a
+    # ./mlruns file store instead of the repo's mlflow.db — the same code produced
+    # traces in two different places depending on how it was launched, which makes
+    # a recorded evaluation run impossible to reproduce. Defaulting to the repo's
+    # mlflow.db matches what the container already does; the env var still wins.
+    mlflow.set_tracking_uri(
+        os.getenv("MLFLOW_TRACKING_URI", f"sqlite:///{Path(__file__).parent / 'mlflow.db'}")
+    )
     mlflow.set_experiment("stai_ocr_receipts")
 
 
@@ -1989,7 +1998,9 @@ def _normalize_scope(receipt_ids) -> list[int] | None:
     for r in receipt_ids:
         try:
             v = int(r)
-        except (TypeError, ValueError):
+        # OverflowError covers float('inf'), which int() rejects with neither
+        # TypeError nor ValueError and which would otherwise escape as a 500.
+        except (TypeError, ValueError, OverflowError):
             raise GuardrailError(f"Invalid receipt id in scope: {r!r}")
         if v <= 0:
             raise GuardrailError(f"Invalid receipt id in scope: {r!r}")
