@@ -308,25 +308,51 @@ harness itself) appears here as work to redo.
 
 ---
 
-## Scope decision required before P0-7 — not an engineering task
+## Scope decision — RESOLVED: the statement side was built
 
-`IMPLEMENTATION_STATUS.md` §5 establishes that the repository implements **receipt-internal
-arithmetic reconciliation** only. Bank/credit-statement ingestion, statement transaction
-extraction, receipt-to-statement matching, missing/unmatched-receipt detection, posting-date
-comparison, merchant-name normalization, duplicate-receipt detection, refunds (currently
-rejected outright by `create_transaction`), and discrepancy-report generation **do not
-exist**.
+`IMPLEMENTATION_STATUS.md` §5 recorded that the repository implemented only
+**receipt-internal arithmetic** reconciliation, while the consultation proof point names
+**receipt-to-statement** reconciliation. Two options were put to the team: narrow the proof
+point, or build the statement side.
 
-The consultation proof point names the second kind of reconciliation. Two options, and this
-is the team's call, not the implementer's:
+**Decision taken: build it.** `reconciliation.py` now provides statement ingestion,
+transaction extraction, receipt-to-statement matching, missing/unmatched-receipt detection,
+amount-discrepancy detection, posting-date handling, merchant-name normalization, duplicate
+detection, refund handling, and discrepancy-report generation — with 104 tests and 6 API
+routes. All 13 proof-point capabilities are now present (refunds partially: the *ledger*
+still cannot represent one).
 
-1. **Narrow the proof point** to receipt-internal extraction, verification, and review
-   flagging — everything in this backlog then applies unchanged, and the Cowork comparison
-   is scoped to receipt-level extraction accuracy.
-2. **Build the statement side first** — statement ingestion, a matching engine, and a
-   discrepancy report — then evaluate it. This is **product work, not evaluation work**,
-   and it is substantially larger than the entire P0 tier above.
+**What this changes for the backlog:** the proof point is now answerable *in principle*.
+It is not answered. Two new items follow, and both are gated on the same **B1** blocker as
+everything else.
 
-Evaluating option 2's capability before it exists is not possible, and describing
-receipt-internal reconciliation as statement reconciliation would be false. **Resolve this
-before investing in receipt labelling**, because the answer changes what needs labelling.
+### P0-11 · Measure matching accuracy against a labelled statement
+
+| | |
+|---|---|
+| **Priority** | P0 — the capability exists; its accuracy is unknown |
+| **Files** | new `evaluation/datasets/statement_cases.json`, new `evaluation/fixtures/statements/` |
+| **Artifacts** | A real (anonymized) bank/card export + the receipts covering it, with each charge↔receipt pairing labelled by hand |
+| **Dependency** | **B1** plus a real statement export |
+| **Definition of done** | Matching precision and recall reported with denominators; false-pair rate reported separately from miss rate; the settlement window, discrepancy band and merchant-similarity floor **re-derived from the data** instead of remaining reasoned defaults |
+| **Live model** | No — matching is deterministic |
+| **Labeling** | **Yes** — the pairings are the ground truth |
+| **Difficulty** | M |
+| **Risks** | Anonymizing a real statement without destroying the merchant-name variation that makes the test meaningful. Do not tune thresholds on the same data used to report accuracy. |
+
+### P1-8 · Refunds in the ledger
+
+| | |
+|---|---|
+| **Priority** | P1 |
+| **Files** | `finance.py` (`create_transaction`), schema |
+| **Artifacts** | A representable refund/credit transaction linked to the original expense |
+| **Dependency** | None technically; needs a semantics decision (negative expense? separate kind? link to the original?) |
+| **Definition of done** | A statement credit can be posted to the ledger and reconciled; balances and budgets treat it correctly |
+| **Live model** | No · **Labeling** No · **Difficulty** M |
+| **Risks** | `test_non_positive_amounts_are_rejected` currently passes and encodes the present rule — changing it is a deliberate behaviour change, not a bug fix. |
+
+---
+
+## Original scope note (retained for the record)
+

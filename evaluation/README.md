@@ -27,6 +27,9 @@ not blocked on receipt data.
 | Quick Chat (TypeScript) | `cd web-next && npm test` |
 | Rebuild the finance fixture | `./.venv/bin/python evaluation/fixtures/seed_finance.py` |
 | Retrieval microbenchmark | `./.venv/bin/python evaluation/bench_retrieval.py` |
+| Tested-configuration capture | `./.venv/bin/python -m evaluation.report config` |
+| Validate trajectory cases (offline) | `./.venv/bin/python -m evaluation.trajectory --dry-run` |
+| Trajectory run (needs Ollama) | `./.venv/bin/python -m evaluation.trajectory` |
 
 Performance work is written up separately in [`PERFORMANCE.md`](PERFORMANCE.md) — what was
 changed, what was measured, and what was deliberately left alone.
@@ -38,8 +41,6 @@ Evaluation-only dependencies (test runner, notebook runtime, EDA) install from
 ---
 
 ## Layout
-
-Test counts below are collected counts at HEAD `41b8fa1`, not estimates.
 
 ```
 evaluation/
@@ -72,6 +73,8 @@ evaluation/
     ├── test_w2d_sql_react.py        W2-D — SQL / scope / ReAct parsing
     ├── test_w2d_agent_paths.py      W2-D/W3 — loop guard, step budget, clarification
     ├── test_w2e_persistence.py      W2-A/W2-E — receipt save, linkage, posting fidelity
+    ├── test_w2f_reconciliation.py   W2-F — receipt-to-STATEMENT reconciliation
+    ├── test_w2f_reconciliation_api.py  W2-F — the same, over the real HTTP routes
     ├── test_w3_trajectory.py        W3 — the harness itself
     ├── test_w5_retrieval.py         W5 — retrieval mechanism (synthetic vectors)
     ├── test_w6_performance.py       W6 — structural only (no timing assertions)
@@ -97,6 +100,7 @@ duplicated here after they went stale once.
 | W2-C Quick Chat | **Done** — `parseQuick.ts` (the parser the shipped UI calls) + the Python mirror, **plus a shared corpus proving the two agree** (`datasets/quickchat_corpus.json`, read by both suites). |
 | W2-D SQL/ReAct | **Done for the model-free half** — validator, scope sandbox, response parsing, tool dispatch, **and the real agent control paths** (loop guard, step budget, clarification, error containment) driven through `agent_stream`. Routing/execution *accuracy* needs a live model (W5). |
 | W2-E posting & backup | **Done** — posting, idempotency, linkage, backup completeness, restore round trip. |
+| W2-F receipt-to-statement | **Built and tested (104 tests), accuracy unmeasured.** `reconciliation.py` — CSV statement ingestion, merchant normalization, two-pass one-to-one matching, duplicate/refund/discrepancy detection, report generation, 6 API routes. Matching *accuracy* needs a real bank export + labelled receipts (B1). |
 | W3 trajectory | **Harness done, self-tested, and CLI-wired — still never executed.** `python -m evaluation.trajectory --dry-run` validates the cases offline; a real run needs a reachable Ollama. Every event evaluated so far is synthetic. Cases exist for 1 of 5 pipelines. |
 | W4 E2E | Not started — depends on W1 receipt ground truth. `E2E-MAN`/`E2E-QCK`/`E2E-BAK` are runnable without a model. |
 | W5 SQL/RAG accuracy | **Partial** — 19 retrieval-*mechanism* tests (synthetic vectors, stubbed `_embed`) incl. scope isolation. **No relevance ground truth, no SQL question set, no answer evaluation** — every W5 metric is uncomputed. |

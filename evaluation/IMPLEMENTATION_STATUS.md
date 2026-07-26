@@ -32,18 +32,18 @@ Tests executed — **all pass, nothing broken**:
 
 | Suite | Command | At audit | Now |
 |---|---|---|---|
-| Evaluation (Python) | `./.venv/bin/python -m pytest evaluation/tests -q` | 244 | **554** |
+| Evaluation (Python) | `./.venv/bin/python -m pytest evaluation/tests -q` | 244 | **658** |
 | Pre-existing extraction | `./.venv/bin/python -m pytest test_extraction.py -q` | 10 | **10** |
 | Quick Chat (TypeScript) | `cd web-next && npx vitest run` | 78 | **160** (2 files) |
 | Retrieval microbenchmark | `./.venv/bin/python evaluation/bench_retrieval.py` | ran | ran |
 | Fixture seeder | `./.venv/bin/python evaluation/fixtures/seed_finance.py` | ran | ran |
 | Trajectory runner | `./.venv/bin/python -m evaluation.trajectory --dry-run` | — | ran |
 | Configuration capture | `./.venv/bin/python -m evaluation.report config` | — | ran |
-| **Total** | | **332** | **724 tests, 0 failures, 0 skips, 0 xfails** |
+| **Total** | | **332** | **828 tests, 0 failures, 0 skips, 0 xfails** |
 
-The headline is unchanged in kind, only in degree: **the component layer is now
-near-complete and the harness is wired end to end, but the evaluation itself still has not
-been run.** Every metric in the breakdown's own metric tables remains uncomputed, and the
+The headline: **the component layer is near-complete, the harness is wired end to end, the
+missing product capability the proof point named has been built — and the evaluation itself
+still has not been run.** Every metric in the breakdown's own metric tables remains uncomputed, and the
 system has still never been executed against a model as part of an evaluation. What
 changed is that the remaining gaps are now almost entirely gated on two external inputs —
 a reachable Ollama endpoint and labelled receipts — rather than on unwritten code.
@@ -66,6 +66,7 @@ Two pre-existing product defects surfaced in the process (**D5**, **D6** — §9
 | Machine-readable results | ❌ no directory, no writer | ✅ implemented + 32 tests | `evaluation/report.py`, `results/` |
 | Trajectory runner (live) | ⏸ no entry point | ⏸ CLI wired, **still unexecuted** | `python -m evaluation.trajectory` — blocked only on an endpoint |
 | Docs drifting from code | ❌ caused 3 stale claims | ✅ 15 tests | `test_docs_match_code.py` |
+| **Receipt-to-statement reconciliation** | ❌ **absent from the product** — 11 of 13 proof-point capabilities missing | ✅ built, 104 tests | `reconciliation.py` + 6 API routes. See §5 |
 
 **Deliberately not done**, and why:
 
@@ -75,9 +76,12 @@ Two pre-existing product defects surfaced in the process (**D5**, **D6** — §9
   the live trajectory run** — all require a reachable Ollama; both endpoints were
   unreachable throughout.
 - **E2E runner, EDA, notebook** — depend on the above producing results first.
-- **Bank/credit-statement reconciliation** (§5) — this is *product* work, not evaluation
-  work, and it is a scope decision for the team. Building it unasked would be a far
-  larger change than this entire pass.
+- **Measuring** the reconciliation that was built — matching precision/recall needs a real
+  bank export and labelled receipts (**B1**). The capability exists; its accuracy does not.
+- **A UI for statements** — backend and API only; `web-next` is untouched.
+- **Refunds in the ledger** — `finance.create_transaction` still rejects non-positive
+  amounts. Statement-side credits are handled; making the ledger represent a refund is a
+  separate schema and semantics change.
 
 ---
 
@@ -532,33 +536,52 @@ the first.**
 | Evidence | Returns a warning when `abs(items_sum − total) > max(1.0, total × 0.02)`, allowing for a discount; feeds `flagged` / `needs_review` | Grep across all `.py`/`.ts`/`.tsx`/`.md` for bank-statement, card-statement, and discrepancy terms returns only this same function, unrelated *balance adjustment* UI copy, and the planning docs |
 | Tested? | **No** — zero tests (§3.3 W2-A #10) | n/a |
 
-**Claiming the second because the first exists would be false.** Item-by-item:
+**Claiming the second because the first exists would be false.** That was the state at
+audit. `reconciliation.py` has since been built to close it; the table below now records
+both.
 
-| Capability the proof point implies | Present? | Evidence |
-|---|---|---|
-| Bank-statement ingestion | ❌ No | No statement parser, no upload path, no route. `api.py` has no statement endpoint. |
-| Credit-card-statement ingestion | ❌ No | Same. |
-| Statement transaction extraction | ❌ No | The OCR prompt (`extraction.py`) targets a receipt schema — vendor, TIN, items, VAT, total. No statement schema exists. |
-| Receipt-to-statement matching | ❌ No | No matching function, no candidate scoring, no match table. |
-| Missing-receipt detection (charge with no receipt) | ❌ No | Requires a statement side. |
-| Unmatched-receipt detection (receipt with no charge) | ❌ No | Same. |
-| Amount discrepancy detection | 🟡 **Within a receipt only** | `reconcile()` compares items↔total. It cannot compare a receipt to a charge. |
-| Date vs posting-date differences | ❌ No | Only `receipt_date` is stored. There is no posting-date concept; `transactions.occurred_at` is the user's date, not a bank posting date. |
-| Merchant-name variation handling | ❌ No | `vendor_name` is stored verbatim. No normalization, no fuzzy matching, no alias table. |
-| Duplicate detection | ❌ No | Two `_dedupe_items` behaviours exist for *line items within one receipt*. There is **no duplicate-receipt detection**; the breakdown's own W1 list includes "duplicate receipt attempt" as an untested case. |
-| Refund / negative transactions | ❌ No | `finance.create_transaction` rejects non-positive amounts (`test_non_positive_amounts_are_rejected` ✅). Refunds are **architecturally excluded** today. |
-| Unsupported / hallucinated-total handling | 🟡 Partial | `needs_disambiguation` flags a missing total ✅; `reconcile` flags an unsupported total but is **untested**. Rate never measured. |
-| Human-review flags | ✅ Yes | `receipts.flagged` column; `needs_review` + `review_reasons` in the extract response; 3 tests incl. a false-review guard. **Recall and false-review rate are unmeasured.** |
-| Discrepancy-report generation | ❌ No | No report generator, no export, no UI surface. |
+| Capability the proof point implies | At audit | Now | Evidence |
+|---|---|---|---|
+| Bank-statement ingestion | ❌ | ✅ | `parse_statement_csv` / `import_statement` — signed-amount **and** debit/credit layouts, flexible header aliases, BOM-tolerant over HTTP |
+| Credit-card-statement ingestion | ❌ | ✅ | Same path; `kind` distinguishes them. `charges_are_negative` flips issuers that export charges as positive |
+| Statement transaction extraction | ❌ | ✅ | Rows normalized to `(posted_date, transaction_date, description, merchant, signed amount)`. Unreadable rows are **kept** with an error, never dropped |
+| Receipt-to-statement matching | ❌ | ✅ | `match_statement` — two-pass, one-to-one assignment, ranked by amount → merchant → date |
+| Missing-receipt detection (charge, no receipt) | ❌ | ✅ | `missing_receipt` bucket + `unexplained_total` |
+| Unmatched-receipt detection (receipt, no charge) | ❌ | ✅ | `unmatched_receipts` bucket |
+| Amount discrepancy detection | 🟡 within a receipt only | ✅ | Second matching pass pairs same-purchase rows whose amounts differ, so ₱500 vs ₱550 is **one** overcharge rather than two unrelated problems |
+| Date vs posting-date differences | ❌ | ✅ | Settlement window (`max_posting_lag_days`, default 5, **proposed by the team**); outside it → `date_outside_window`, not a silent match |
+| Merchant-name variations | ❌ | ✅ | `normalize_merchant` strips channel/network noise, branch and reference numbers, city and corporate suffixes; `merchant_similarity` uses containment, since a descriptor is normally a superset of the vendor name |
+| Duplicate detection | ❌ | ✅ | `find_duplicate_charges` and `find_duplicate_receipts`. One-to-one matching is what keeps a double billing visible — one receipt cannot explain two charges |
+| Refund / negative transactions | ❌ architecturally excluded | ✅ **on the statement side** | Credits are parsed, reported in `refunds`, and never matched to a receipt. **`finance.create_transaction` still rejects non-positive amounts**, so refunds remain unrepresentable in the *ledger* — unchanged and still a gap |
+| Unsupported / hallucinated-total handling | 🟡 | ✅ | `extraction.reconcile` now has 34 tests; kept deliberately separate from this module |
+| Human-review flags | ✅ | ✅ | `needs_review` on the report; nothing is auto-corrected |
+| Discrepancy-report generation | ❌ | ✅ | `discrepancy_report` + `format_discrepancy_report`; `POST /statements/{id}/report` and `GET .../report.txt` |
 
-**Conclusion for Phase 3:** the repository supports **receipt-internal arithmetic
-reconciliation with human-review flagging**, and nothing else on this list. The
-consultation proof point as written is **not currently answerable** — not because the
-evaluation is incomplete, but because roughly half the capability it describes
-(the statement side) does not exist in the product. This is the single most consequential
-finding in this audit, and it is a **scope decision for the team, not an evaluation gap**:
-either narrow the proof point to receipt-internal verification, or build statement
-ingestion and matching as a feature before evaluating it.
+**Coverage: 13 of 13 present, 1 partially** (refunds, ledger side). 104 tests
+(`test_w2f_reconciliation.py` 80, `test_w2f_reconciliation_api.py` 24).
+
+### 5.1 What this does and does not establish
+
+It is a **capability**, not a measurement. Specifically:
+
+- **No accuracy has been measured.** Matching precision/recall against a labelled
+  statement is unknown, because no real bank export and no labelled receipt set exists
+  (**B1**). Every test above asserts *designed behaviour on constructed data*.
+- **Every threshold is reasoned, not measured** — settlement window, discrepancy band,
+  merchant-similarity floor. All are documented parameters overridable per call and per
+  HTTP request, labelled *proposed by the team*, because there is no data to tune against.
+- **CSV only.** PDF statements would need the vision model. `parse_statement_csv` is the
+  seam a PDF path would feed.
+- **No UI.** Backend and API only; `web-next` is untouched.
+- **Deterministic by design** — no model, so it is reproducible, auditable, and evaluable
+  without an endpoint. A user disputing a match can be shown exactly why two rows paired.
+
+**Conclusion for Phase 3:** the repository now supports **both** kinds of reconciliation,
+and keeps them distinct — `test_statement_reconciliation_does_not_touch_receipt_internal_arithmetic`
+asserts that an internally inconsistent receipt can still match its charge exactly, with
+both facts remaining visible. The proof point is now *answerable in principle*. It is not
+yet *answered*: answering it requires a labelled receipt set and a real statement to
+measure matching accuracy against.
 
 ---
 

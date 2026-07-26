@@ -14,6 +14,8 @@ Endpoints:
     POST /agent           {"question": "..."} -> ReAct agent (routes SQL vs RAG) + trace
     POST /agent/stream     same as /agent but streams the reasoning as SSE
     GET  /health           liveness check + effective config
+    POST /statements       upload a bank/credit-card statement CSV
+    POST /statements/{id}/report  receipt-to-statement discrepancy report
 """
 
 from __future__ import annotations
@@ -22,8 +24,20 @@ import json
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import StreamingResponse
+from fastapi.responses import PlainTextResponse, StreamingResponse
 from pydantic import BaseModel
+
+from reconciliation import (
+    ReconciliationError,
+    delete_statement,
+    discrepancy_report,
+    format_discrepancy_report,
+    get_statement,
+    import_statement,
+    list_statements,
+    match_statement,
+    statement_lines,
+)
 
 from core import (
     DEFAULT_MODEL,
@@ -874,3 +888,112 @@ def agent_stream_endpoint(req: AskRequest):
             "X-Accel-Buffering": "no",
         },
     )
+
+
+# --------------------------------------------------------------------------- #
+# Statement reconciliation (receipt-to-bank/credit-statement)
+# --------------------------------------------------------------------------- #
+# Distinct from the receipt-internal arithmetic check that runs during extraction.
+# That one asks "does this receipt add up?"; these ask "was it actually charged,
+# once, for this amount?". Deterministic — no model is involved.
+class MatchRequest(BaseModel):
+    receipt_ids: list[int] | None = None
+    max_posting_lag_days: int | None = None
+    amount_tolerance: float | None = None
+    min_merchant_similarity: float | None = None
+
+
+def _match_overrides(req: "MatchRequest") -> dict:
+    """Only pass through the thresholds the caller actually set, so the documented
+    defaults in reconciliation.py remain the single source of truth."""
+    names = ("max_posting_lag_days", "amount_tolerance", "min_merchant_similarity")
+    return {name: getattr(req, name) for name in names if getattr(req, name) is not None}
+
+
+@app.post("/statements")
+async def import_statement_endpoint(
+    file: UploadFile = File(...),
+    account_id: int | None = None,
+    kind: str = "credit_card",
+    currency: str = "PHP",
+    charges_are_negative: bool = True,
+):
+    """Upload a bank or credit-card statement CSV.
+
+    `charges_are_negative` describes the *uploaded file's* convention; the stored rows
+    are always normalized to negative-is-money-out.
+    """
+    raw = await file.read()
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = raw.decode("latin-1")
+
+    try:
+        return await run_in_threadpool(
+            import_statement, text, file.filename or "statement.csv",
+            account_id=account_id, kind=kind, currency=currency,
+            charges_are_negative=charges_are_negative,
+        )
+    except ReconciliationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/statements")
+def list_statements_endpoint():
+    return {"statements": list_statements()}
+
+
+@app.get("/statements/{statement_id}")
+def get_statement_endpoint(statement_id: int):
+    statement = get_statement(statement_id)
+    if statement is None:
+        raise HTTPException(status_code=404, detail="Statement not found")
+    return {**statement, "lines": statement_lines(statement_id)}
+
+
+@app.delete("/statements/{statement_id}")
+def delete_statement_endpoint(statement_id: int):
+    if not delete_statement(statement_id):
+        raise HTTPException(status_code=404, detail="Statement not found")
+    return {"deleted": statement_id}
+
+
+@app.post("/statements/{statement_id}/match")
+async def match_statement_endpoint(statement_id: int, req: MatchRequest | None = None):
+    """Match this statement's charges against saved receipts."""
+    req = req or MatchRequest()
+    try:
+        return await run_in_threadpool(
+            lambda: match_statement(statement_id, receipt_ids=req.receipt_ids,
+                                    **_match_overrides(req))
+        )
+    except ReconciliationError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/statements/{statement_id}/report")
+async def statement_report_endpoint(statement_id: int, req: MatchRequest | None = None):
+    """The discrepancy report: what the bank says that the receipts do not.
+
+    Every charge lands in exactly one bucket (`accounted_for` asserts it), and nothing
+    here is auto-corrected — duplicates and discrepancies are flagged for human review.
+    """
+    req = req or MatchRequest()
+    try:
+        return await run_in_threadpool(
+            lambda: discrepancy_report(statement_id, receipt_ids=req.receipt_ids,
+                                       **_match_overrides(req))
+        )
+    except ReconciliationError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get("/statements/{statement_id}/report.txt")
+def statement_report_text_endpoint(statement_id: int):
+    """The same report rendered for a human reviewer."""
+    try:
+        report = discrepancy_report(statement_id)
+    except ReconciliationError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return PlainTextResponse(format_discrepancy_report(report))

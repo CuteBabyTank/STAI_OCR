@@ -178,6 +178,12 @@ Fill in owners before the presentation — each member owns and can walk through
 - Automatic clean-up: removes `2 @ price` notation from item names, de-duplicates
   repeated line items, and fixes mis-assigned Total / Cash / Change
 - Reconciliation check flags receipts where line items don't add up to the total
+- **Statement reconciliation** — upload a bank or credit-card CSV and match it
+  against your receipts: missing receipts, unmatched receipts, amount discrepancies,
+  duplicate charges and refunds, in one discrepancy report. Deterministic (no model),
+  so every match can be explained. This is *separate* from the per-receipt arithmetic
+  check above: one asks "does this receipt add up?", the other "was it actually
+  charged, once, for this amount?"
 - **Measured OCR confidence** — every field gets a real confidence score computed
   from the vision model's token-level logprobs (not a self-reported number), shown
   as color-coded badges on every receipt and a per-field breakdown on expand
@@ -317,6 +323,24 @@ First start will take a while while the models download (~7.8 GB total).
 | `DELETE` | `/income/{income_id}` | Delete an income entry                                                                                                                                                               |
 | `GET`    | `/budgets`            | List per-category monthly budgets                                                                                                                                                    |
 | `PUT`    | `/budgets`            | Create/update a budget — `{"category", "monthly_limit", "currency"?}`                                                                                                                |
+
+**Statement reconciliation**
+
+| Method   | Path                             | Description                                                                 |
+| -------- | -------------------------------- | --------------------------------------------------------------------------- |
+| `POST`   | `/statements`                    | Multipart CSV upload of a bank / credit-card statement. Handles a signed `amount` column or separate `debit`/`credit` columns; `?charges_are_negative=false` for issuers that export charges as positive |
+| `GET`    | `/statements`                    | List imported statements                                                    |
+| `GET`    | `/statements/{id}`               | One statement with all its parsed lines                                     |
+| `DELETE` | `/statements/{id}`               | Delete a statement, its lines and its matches                               |
+| `POST`   | `/statements/{id}/match`         | Match charges against saved receipts. Optional body: `receipt_ids`, `max_posting_lag_days`, `amount_tolerance`, `min_merchant_similarity` |
+| `POST`   | `/statements/{id}/report`        | Full discrepancy report as JSON                                             |
+| `GET`    | `/statements/{id}/report.txt`    | The same report rendered for a human reviewer                               |
+
+Matching is one-to-one: a charge is explained by at most one receipt and vice versa, so a
+duplicate billing stays visible instead of being absorbed. Nothing is auto-corrected —
+discrepancies and duplicates are flagged for review. Thresholds (a 5-day settlement window,
+the discrepancy band, the merchant-similarity floor) are documented defaults **proposed by
+the team**, overridable per request; they are reasoned, not tuned against measured data.
 
 **Agents**
 
