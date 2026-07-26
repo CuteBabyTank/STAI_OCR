@@ -455,3 +455,91 @@ def run_cases(cases: list[TrajectoryCase], model: str | None = None) -> Iterator
     for case in cases:
         trajectory = collect_trajectory(case.input, case.receipt_ids, model)
         yield evaluate_case(case, trajectory)
+
+
+# --------------------------------------------------------------------------- #
+# CLI — the entry point that turns a live run into a stored artifact
+# --------------------------------------------------------------------------- #
+def main(argv: list[str] | None = None) -> int:
+    """Run the case file against a live model and write the results to disk.
+
+    Every raw trajectory is kept, including failed and errored ones: a failure that
+    disappears from the results biases every metric computed from them.
+    """
+    import argparse
+
+    from evaluation import report
+
+    parser = argparse.ArgumentParser(
+        prog="python -m evaluation.trajectory",
+        description="Collect and evaluate ReAct trajectories against a case file.",
+    )
+    parser.add_argument("--cases", default=str(Path(__file__).parent / "datasets"
+                                               / "trajectory_cases.json"))
+    parser.add_argument("--model", default=None,
+                        help="Override the agent model; defaults to core.AGENT_MODEL.")
+    parser.add_argument("--name", default="trajectory",
+                        help="Result file name stem.")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="Validate the case file and print the plan without "
+                             "calling a model.")
+    args = parser.parse_args(argv)
+
+    cases = load_cases(args.cases)
+    print(f"Loaded {len(cases)} cases from {args.cases}")
+
+    if args.dry_run:
+        for case in cases:
+            print(f"  {case.case_id}: {case.input!r} -> expected {case.expected_tools}")
+        print("\nDry run — no model was called and no results were written.")
+        return 0
+
+    identifier = report.run_id("trajectory")
+    config = report.capture_configuration()
+    for gap in report.configuration_gaps(config):
+        print(f"  configuration gap: {gap}")
+
+    results, errors = [], 0
+    for case in cases:
+        try:
+            trajectory = collect_trajectory(case.input, case.receipt_ids, args.model)
+        except Exception as exc:  # noqa: BLE001 — a collection failure is a result
+            errors += 1
+            print(f"  {case.case_id}: COLLECTION FAILED — {exc}")
+            results.append({"case_id": case.case_id, "passed": False,
+                            "checks": {"collected": False},
+                            "error": str(exc)[:500]})
+            continue
+        outcome = evaluate_case(case, trajectory)
+        results.append({
+            **outcome.to_dict(),
+            "checks": {c.name: c.passed for c in outcome.checks},
+            "check_details": [{"name": c.name, "passed": c.passed, "detail": c.detail}
+                              for c in outcome.checks],
+        })
+        print(f"  {case.case_id}: {'PASS' if outcome.passed else 'FAIL'}"
+              + ("" if outcome.passed
+                 else " — " + ", ".join(c.name for c in outcome.failures)))
+
+    summary = report.summarize(results)
+    payload = {
+        "summary": summary,
+        "collection_errors": errors,
+        "taxonomy": {name: [r["case_id"] for r in results
+                            if not (r.get("checks") or {}).get(name, True)]
+                     for name in {n for r in results for n in (r.get("checks") or {})}},
+        "cases": results,
+    }
+    path = report.write_result(args.name, payload, kind="raw",
+                               config=config, identifier=identifier)
+
+    pass_rate = summary["pass_rate"]
+    rate_text = "n/a (no cases)" if pass_rate is None else f"{pass_rate:.0%}"
+    print(f"\n{summary['passed']}/{summary['cases']} cases passed ({rate_text})")
+    print(f"Results written to {path}")
+    print("\nThis is a PILOT case set. Its rates are not a final evaluation result.")
+    return 0
+
+
+if __name__ == "__main__":  # pragma: no cover
+    raise SystemExit(main())

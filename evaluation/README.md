@@ -49,25 +49,40 @@ evaluation/
 ├── CONFIGURATION.md           W0 — tested-configuration card + per-run capture template
 ├── PERFORMANCE.md             W6 — what was changed, what was measured (no live latency)
 ├── requirements-eval.txt      Evaluation-only deps (pytest, jupyterlab, pandas, matplotlib)
-├── trajectory.py              W3 — trajectory collection, comparison, metrics
+├── trajectory.py              W3 — trajectory collection, comparison, metrics + runner CLI
+├── report.py                  Configuration capture + machine-readable result writer
 ├── bench_retrieval.py         W6 — retrieval microbenchmark (synthetic, no model)
 ├── datasets/
-│   └── trajectory_cases.json  W3 — 7 pilot ReAct cases (1 of 10 proposed case families)
+│   ├── trajectory_cases.json  W3 — 7 pilot ReAct cases (1 of 10 proposed case families)
+│   └── quickchat_corpus.json  W2-C — shared corpus read by BOTH parser suites
 ├── fixtures/
 │   └── seed_finance.py        W1 — deterministic finance + receipt fixture builder
-└── tests/                     244 tests
-    ├── conftest.py            DB isolation wiring (read this before adding tests)
-    ├── test_w2a_preprocess.py W2-A — 15 image-preprocessing tests
-    ├── test_w2b_finance.py    W2-B/W2-E — 52 finance component tests
-    ├── test_w2c_quick_python.py W2-C — 31 Python Quick Chat parser tests
-    ├── test_w2d_sql_react.py  W2-D — 65 SQL / scope / ReAct-parsing tests
-    ├── test_w3_trajectory.py  W3 — 37 tests of the harness itself
-    ├── test_w5_retrieval.py   W5 — 19 retrieval-mechanism tests (synthetic vectors)
-    └── test_w6_performance.py W6 — 25 structural tests (no timing assertions)
+├── results/                   Run artifacts (empty until a run is executed)
+└── tests/
+    ├── conftest.py                  DB isolation wiring (read this before adding tests)
+    ├── test_w2a_preprocess.py       W2-A — image preprocessing
+    ├── test_w2a_reconcile.py        W2-A — receipt arithmetic reconciliation + tolerance
+    ├── test_w2a_coercion.py         W2-A — JSON / numeric coercion, description cleanup
+    ├── test_w2a_confidence.py       W2-A — field confidence + value-equality gating
+    ├── test_w2a_pdf_batch.py        W2-A — PDF page expansion, batch failure isolation
+    ├── test_w2b_finance.py          W2-B/W2-E — finance components
+    ├── test_w2b_budgets.py          W2-B — budget aggregation, periods, carry-forward
+    ├── test_w2c_quick_python.py     W2-C — Python Quick Chat parser
+    ├── test_w2c_parser_agreement.py W2-C — the two parsers must agree (shared corpus)
+    ├── test_w2d_sql_react.py        W2-D — SQL / scope / ReAct parsing
+    ├── test_w2d_agent_paths.py      W2-D/W3 — loop guard, step budget, clarification
+    ├── test_w2e_persistence.py      W2-A/W2-E — receipt save, linkage, posting fidelity
+    ├── test_w3_trajectory.py        W3 — the harness itself
+    ├── test_w5_retrieval.py         W5 — retrieval mechanism (synthetic vectors)
+    ├── test_w6_performance.py       W6 — structural only (no timing assertions)
+    ├── test_report.py               Result writer + configuration capture
+    └── test_docs_match_code.py      Guard against docs drifting from the code
 ```
 
-Plus `web-next/app/lib/parseQuick.test.ts` (78 tests, vitest) and the pre-existing
-`test_extraction.py` (10) at the repo root. **332 tests total, all passing.**
+Plus `web-next/app/lib/parseQuick.test.ts` and `parseQuick.corpus.test.ts` (vitest) and
+the pre-existing `test_extraction.py` at the repo root. Run the suites for current counts
+— `test_docs_match_code.py` keeps this layout honest, but counts are deliberately not
+duplicated here after they went stale once.
 
 ---
 
@@ -77,12 +92,12 @@ Plus `web-next/app/lib/parseQuick.test.ts` (78 tests, vitest) and the pre-existi
 |---|---|
 | W0 audit | **Done** — `REQUIREMENTS_AUDIT.md`, `CONFIGURATION.md`. Transcript-dependent items remain open for the team. |
 | W1 dataset | **Partial** — finance + receipt fixtures done. Receipt *ground truth* blocked on B1 (one image, no labels). |
-| W2-A extraction | **Partial (4 of 14 checklist items)** — guardrails, review reasons, image preprocessing, and the 10 pre-existing post-processing tests. **`extraction.reconcile` has zero tests**; PDF expansion, batch isolation, and field confidence are uncovered. Field/line-item accuracy blocked on B1. |
-| W2-B finance | **Partial (11 of 13 checklist items)** — balances, net worth, transfer rules, templates, recurring, installments, goals/debts/receivables, history. **Budget aggregation and carry-forward has zero tests**; "statistics" consistency is uncovered. |
-| W2-C Quick Chat | **Done for both parsers** — 78 tests against `parseQuick.ts` (the parser the shipped UI calls) + 31 Python mirrors. No *differential* test between the two exists. |
-| W2-D SQL/ReAct | **Done for the model-free half** — validator, scope sandbox, response parsing, tool dispatch. Routing/execution accuracy needs a live model (W5). |
+| W2-A extraction | **Partial (12 of 14 checklist items)** — guardrails, review reasons, preprocessing, reconciliation + tolerance, JSON/numeric coercion, field confidence + gating, PDF page expansion, batch failure isolation, save/linkage. The 2 remaining (header-field and line-item **accuracy**) are blocked on B1. |
+| W2-B finance | **Partial (11 of 13)** — balances, net worth, transfer rules, templates, recurring, installments, goals/debts/receivables, history, **and budget aggregation**. Remaining: "statistics" consistency untested, and budget **carry-forward does not exist** (defect D5). |
+| W2-C Quick Chat | **Done** — `parseQuick.ts` (the parser the shipped UI calls) + the Python mirror, **plus a shared corpus proving the two agree** (`datasets/quickchat_corpus.json`, read by both suites). |
+| W2-D SQL/ReAct | **Done for the model-free half** — validator, scope sandbox, response parsing, tool dispatch, **and the real agent control paths** (loop guard, step budget, clarification, error containment) driven through `agent_stream`. Routing/execution *accuracy* needs a live model (W5). |
 | W2-E posting & backup | **Done** — posting, idempotency, linkage, backup completeness, restore round trip. |
-| W3 trajectory | **Harness done and self-tested (37 tests), never executed.** `collect_trajectory`/`run_cases` need a reachable Ollama; every event evaluated so far is synthetic. Cases exist for 1 of 5 pipelines. |
+| W3 trajectory | **Harness done, self-tested, and CLI-wired — still never executed.** `python -m evaluation.trajectory --dry-run` validates the cases offline; a real run needs a reachable Ollama. Every event evaluated so far is synthetic. Cases exist for 1 of 5 pipelines. |
 | W4 E2E | Not started — depends on W1 receipt ground truth. `E2E-MAN`/`E2E-QCK`/`E2E-BAK` are runnable without a model. |
 | W5 SQL/RAG accuracy | **Partial** — 19 retrieval-*mechanism* tests (synthetic vectors, stubbed `_embed`) incl. scope isolation. **No relevance ground truth, no SQL question set, no answer evaluation** — every W5 metric is uncomputed. |
 | W6 performance | **Partial, structural only** — round-trip counts and generation defaults verified against a stubbed model; retrieval/index microbenchmarks measured. **No real request latency, no live-model timing, no repeated runs, no cost worksheet.** See `PERFORMANCE.md`. |
@@ -92,6 +107,40 @@ Plus `web-next/app/lib/parseQuick.test.ts` (78 tests, vitest) and the pre-existi
 ---
 
 ## Defects found and fixed
+
+### D6 — `_num` fabricated numbers from containers ✅ FIXED
+
+**Severity: medium (silent wrong data).** `extraction._num` fell through to its string
+path for any non-scalar: `str([1, 2])` → strip non-digits → **12.0**; `{"amount": 1}` →
+**1.0**. Neither figure appears on the receipt. It is reachable because `_num` runs on the
+**unvalidated** model dict — `core.py`'s post-processing chain executes before pydantic —
+so the fabricated number would pass schema validation looking legitimate and feed
+reconciliation and the ledger. Same family as D4: an input no existing test happened to try.
+
+**Fix:** `_num` returns `None` for `list`/`tuple`/`set`/`dict`. A wrong shape is not a
+misformatted number. Tests in `test_w2a_coercion.py`.
+
+### D5 — Budget carry-forward is stored and never used ⚠️ NOT FIXED
+
+**Severity: medium (a user-facing control that does nothing).** `carry_forward` is a
+parameter, a column, an API field, a UI toggle and a TypeScript type — and **no computation
+in `finance.py` reads it**. Two identical plans, one with carry-forward on, resolve to the
+same limit.
+
+Deliberately **not** fixed: implementing it requires choosing semantics (roll over
+indefinitely? does overspend carry as debt? which boundary?), which is a product decision,
+not a defect repair. Characterized by test instead
+(`test_carry_forward_does_not_change_the_resolved_limit`), so the gap is measured and the
+test will fail the moment real carry-forward lands.
+
+### Known architectural limitation — posting loses currency
+
+`transactions` has no currency column, so `post_receipt_as_expense` carries a total across
+as a bare number: a USD receipt becomes indistinguishable from a PHP one. Single-currency
+by construction. Characterized by
+`test_a_posted_transaction_carries_no_currency_of_its_own` rather than dropped from the
+W2-E checklist.
+
 
 All were pre-existing application bugs surfaced by the new tests. Each now has a
 regression test; there are no remaining xfails in either suite.

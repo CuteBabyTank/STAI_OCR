@@ -8,39 +8,76 @@ verified" row names a file, a symbol, a command that was run, and the result obs
 **Scope:** required by `docs/FOLLOWup.md` Phases 1–4. Phase 5 lives in
 [`IMPLEMENTATION_BACKLOG.md`](IMPLEMENTATION_BACKLOG.md).
 
-> **No production behaviour was modified by this audit.** The only writes were this file,
-> the backlog file, and corrections to three stale statements in existing evaluation docs
-> (listed in §1.4). Application code is untouched.
-
 > **Nothing in this repository is a measured evaluation result.** No accuracy figure, pass
 > rate, receipt-level exact match, retrieval recall, or real request latency exists. What
 > exists is instrumentation plus two offline microbenchmarks.
+
+> **Production code changes.** The audit itself (Phases 1–4) modified no application code.
+> The subsequent remediation pass (§0.1) made **one** production change: a two-line guard in
+> `extraction._num` fixing defect **D6**, found by a new test. It is described in §9 and
+> carries regression tests. Everything else added is tests, evaluation tooling, or docs.
 
 ---
 
 ## 0. Executive summary
 
-| | Count | Share |
-|---|---|---|
-| Audit units (W0–W8 checklist items, metrics, and named deliverables) | **195** | 100% |
-| Implemented and verified | **46** | **23.6%** |
-| Partially implemented | **29** | 14.9% |
-| Missing / documented-but-not-implemented / blocked | **120** | 61.5% |
+| | At audit (`41b8fa1`) | After remediation | Share now |
+|---|---|---|---|
+| Audit units (W0–W8 checklist items, metrics, and named deliverables) | 195 | **195** | 100% |
+| Implemented and verified | 46 | **63** | **32.3%** |
+| Partially implemented | 29 | **24** | 12.3% |
+| Missing / documented-but-not-implemented / blocked | 120 | **108** | 55.4% |
 
-Tests executed during this audit — **all pass, nothing broken**:
+Tests executed — **all pass, nothing broken**:
 
-| Suite | Command | Result |
-|---|---|---|
-| Evaluation (Python) | `./.venv/bin/python -m pytest evaluation/tests -q` | **244 passed** in 2.38 s |
-| Pre-existing extraction | `./.venv/bin/python -m pytest test_extraction.py -q` | **10 passed** |
-| Quick Chat (TypeScript) | `cd web-next && npx vitest run` | **78 passed** (1 file) |
-| Retrieval microbenchmark | `./.venv/bin/python evaluation/bench_retrieval.py` | ran, reproduced |
-| Fixture seeder | `./.venv/bin/python evaluation/fixtures/seed_finance.py` | ran, self-verified |
-| **Total** | | **332 tests, 0 failures, 0 skips, 0 xfails** |
+| Suite | Command | At audit | Now |
+|---|---|---|---|
+| Evaluation (Python) | `./.venv/bin/python -m pytest evaluation/tests -q` | 244 | **554** |
+| Pre-existing extraction | `./.venv/bin/python -m pytest test_extraction.py -q` | 10 | **10** |
+| Quick Chat (TypeScript) | `cd web-next && npx vitest run` | 78 | **160** (2 files) |
+| Retrieval microbenchmark | `./.venv/bin/python evaluation/bench_retrieval.py` | ran | ran |
+| Fixture seeder | `./.venv/bin/python evaluation/fixtures/seed_finance.py` | ran | ran |
+| Trajectory runner | `./.venv/bin/python -m evaluation.trajectory --dry-run` | — | ran |
+| Configuration capture | `./.venv/bin/python -m evaluation.report config` | — | ran |
+| **Total** | | **332** | **724 tests, 0 failures, 0 skips, 0 xfails** |
 
-The headline: **the harness is real and the component layer is genuinely strong; the
-evaluation itself has not been run.** Every metric in the breakdown's own metric tables is
-uncomputed. The system has never been executed against a model as part of an evaluation.
+The headline is unchanged in kind, only in degree: **the component layer is now
+near-complete and the harness is wired end to end, but the evaluation itself still has not
+been run.** Every metric in the breakdown's own metric tables remains uncomputed, and the
+system has still never been executed against a model as part of an evaluation. What
+changed is that the remaining gaps are now almost entirely gated on two external inputs —
+a reachable Ollama endpoint and labelled receipts — rather than on unwritten code.
+
+### 0.1 What the remediation pass closed
+
+Everything below was gated on neither a model nor labelling, so it was implementable.
+Two pre-existing product defects surfaced in the process (**D5**, **D6** — §9).
+
+| Area | Was | Now | What closed it |
+|---|---|---|---|
+| Receipt reconciliation (`extraction.reconcile`) | ❌ zero tests | ✅ 34 tests | `test_w2a_reconcile.py` — tolerance floor, relative band, discount path, and the wiring into `needs_disambiguation` |
+| JSON / numeric coercion | 🟡 | ✅ 47 tests | `test_w2a_coercion.py` — found and fixed **D6** |
+| Field confidence + value-equality gating | ❌ zero tests | ✅ 23 tests | `test_w2a_confidence.py` |
+| PDF page expansion, batch failure isolation | ❌ zero tests | ✅ 24 tests | `test_w2a_pdf_batch.py` — synthesised PDFs, no fixture committed |
+| Receipt save / line-item linkage, posting fidelity | 🟡 indirect | ✅ 18 tests | `test_w2e_persistence.py` |
+| Budget aggregation | ❌ zero tests | ✅ 23 tests | `test_w2b_budgets.py` — found **D5** (carry-forward is inert) |
+| ReAct loop guard, step budget, clarification | 🟡 detectors only | ✅ 22 tests | `test_w2d_agent_paths.py` — drives the **real** `agent_stream` |
+| Two Quick Chat parsers agreeing | 🟡 tested separately | ✅ 72 + 82 tests | Shared corpus `datasets/quickchat_corpus.json` read by both suites |
+| Machine-readable results | ❌ no directory, no writer | ✅ implemented + 32 tests | `evaluation/report.py`, `results/` |
+| Trajectory runner (live) | ⏸ no entry point | ⏸ CLI wired, **still unexecuted** | `python -m evaluation.trajectory` — blocked only on an endpoint |
+| Docs drifting from code | ❌ caused 3 stale claims | ✅ 15 tests | `test_docs_match_code.py` |
+
+**Deliberately not done**, and why:
+
+- **Receipt accuracy metrics** (header/line-item/exact match/review recall) — blocked on
+  **B1**: one unlabelled image. Not resolvable in code.
+- **SQL execution accuracy, retrieval relevance, RAG answer evaluation, live latency,
+  the live trajectory run** — all require a reachable Ollama; both endpoints were
+  unreachable throughout.
+- **E2E runner, EDA, notebook** — depend on the above producing results first.
+- **Bank/credit-statement reconciliation** (§5) — this is *product* work, not evaluation
+  work, and it is a scope decision for the team. Building it unasked would be a far
+  larger change than this entire pass.
 
 ---
 
@@ -206,26 +243,26 @@ ground truth" is **not met for any accuracy metric**.
 
 ### 3.3 W2 — Layer 1 component evaluation (53 checklist + 10 metrics + 4 deliverables)
 
-#### W2-A Receipt extraction and safeguards (14) — 4 ✅ / 4 🟡 / 6 ❌
+#### W2-A Receipt extraction and safeguards (14) — 12 ✅ / 0 🟡 / 2 ❌ *(was 4 / 4 / 6)*
 
 | # | Item | Status | Evidence |
 |---|---|---|---|
-| 1 | Input validation: types, size, empty | ✅ Verified | `test_w2d_sql_react.py`: `test_empty_upload_is_rejected`, `test_oversized_upload_is_rejected`, `test_unsupported_content_type_is_rejected`, `test_supported_content_types_are_accepted` (parametrized png/jpeg/pdf). Executed, pass. *(Misfiled — these are W2-A items living in the W2-D file.)* |
-| 2 | Image preprocessing **and PDF page expansion** | 🟡 Partial | Preprocessing: 15 tests in `test_w2a_preprocess.py`, all pass. **PDF page expansion has zero tests** — `pypdfium2` rendering, `OCR_PDF_RENDER_SCALE`, and `OCR_PDF_MAX_PAGES` are entirely unexercised. No PDF fixture exists. |
-| 3 | JSON coercion and schema validation | 🟡 Partial | Schema: `test_schema_validation_rejects_junk_output` (1 test) covers `core.validate_output`. **`extraction._coerce_json` has no test** — the function that salvages model output wrapped in prose/fences. |
-| 4 | Header-field extraction | ❌ Missing 🔒 | Requires a live model **and** labelled receipts. No test, no metric. |
+| 1 | Input validation: types, size, empty | ✅ Verified | `test_w2d_sql_react.py`: `test_empty_upload_is_rejected`, `test_oversized_upload_is_rejected`, `test_unsupported_content_type_is_rejected`, `test_supported_content_types_are_accepted` (parametrized png/jpeg/pdf). *(Misfiled — W2-A items living in the W2-D file.)* |
+| 2 | Image preprocessing **and PDF page expansion** | ✅ Verified | Preprocessing: 15 tests (`test_w2a_preprocess.py`). PDF expansion: 12 tests (`test_w2a_pdf_batch.py`) — magic-byte detection, one image per page, pages preprocessed to the 1600 px ceiling, `PDF_MAX_PAGES` bound, `PDF_RENDER_SCALE` proven live (not dead config), corrupt PDF raises rather than returning zero pages. PDFs are synthesised with Pillow, so no binary fixture is committed. |
+| 3 | JSON coercion and schema validation | ✅ Verified | `test_w2a_coercion.py` (13 tests on `_coerce_json`): fenced, prose-wrapped both sides, nested objects, fence-beats-braces. Failure is **visible** — truncated/empty/malformed output raises rather than yielding `{}`, which would have saved a blank receipt that reconciles vacuously. Plus `test_schema_validation_rejects_junk_output`. |
+| 4 | Header-field extraction | ❌ Missing 🔒 | Requires a live model **and** labelled receipts (**B1**). |
 | 5 | Line-item extraction | ❌ Missing 🔒 | Same. |
-| 6 | Numeric-field coercion | ❌ Missing | `extraction._num` has no direct test. |
-| 7 | Summary-line remapping | ✅ Verified | `test_extraction.py` → `_remap_summary_lines`. 10 root tests pass. |
+| 6 | Numeric-field coercion | ✅ Verified | `test_w2a_coercion.py` — peso signs, thousands separators, whitespace, negatives; unreadable values become `None` **not 0.0**; booleans rejected. Found **D6**: containers were stringified into fabricated numbers (`[1, 2]` → `12.0`). |
+| 7 | Summary-line remapping | ✅ Verified | `test_extraction.py` → `_remap_summary_lines`. |
 | 8 | Duplicate-item handling | ✅ Verified | `test_extraction.py` → `_dedupe_items`. |
 | 9 | Payment-field repair | ✅ Verified | `test_extraction.py` → `_fix_payment_fields`. |
-| 10 | Reconciliation tolerance behaviour | ❌ Missing | **`extraction.reconcile` has zero tests.** Grepped: no test file references `reconcile` or `tolerance`. Its `tol = max(1.0, total * 0.02)` boundary — the thing that decides whether a receipt is flagged — is unverified. This is a notable gap given reconciliation is the project's central claim. |
-| 11 | Review / disambiguation reasons | 🟡 Partial | 3 tests on `core.needs_disambiguation` (missing total, missing line items, clean receipt not flagged). The reason vocabulary is otherwise unexercised, and reasons derived from `reconcile` are untested (see #10). |
-| 12 | Field-confidence availability and value-equality gating | ❌ Missing | The logprob machinery (`core._logprob_token_spans` and the value-equality gate) has **zero tests**. Grepped: no test references `confidence` or `logprob`. |
-| 13 | Receipt save and line-item linkage | 🟡 Partial | `core.save_receipt` is exercised by `seed_finance.py` (with `index=False`) and its output consumed by posting/linkage tests. **No test directly asserts that line items are written and linked** to the parent receipt. |
-| 14 | Per-page failure isolation in batch | ❌ Missing | No batch test exists. Grepped: `batch` appears in no test file. |
+| 10 | Reconciliation tolerance behaviour | ✅ Verified | `test_w2a_reconcile.py` (34 tests). The ₱1.00 absolute floor and the 2% relative band are asserted **on both sides of the boundary**, from the receipt semantics rather than by reading the constant back. Covers the discount allowance (both conventions), symmetry (extra items are as much a defect as missing ones), and the cases where reconciliation must stay silent (no items, no total, zero/negative total, unreadable amounts). |
+| 11 | Review / disambiguation reasons | ✅ Verified | The 3 `needs_disambiguation` tests plus the reconcile→review wiring: `test_an_unreconciled_receipt_is_sent_for_human_review` and `test_a_reconciling_receipt_is_not_sent_for_review` (false-review guard). |
+| 12 | Field-confidence availability and value-equality gating | ✅ Verified | `test_w2a_confidence.py` (23 tests). Span reconstruction is exact; a numeric field **changed by post-processing is left unscored** rather than inheriting a probability describing a different number; item confidence follows an item through de-duplication rather than by index; absent logprobs yield `None`, never a default that reads as certainty. |
+| 13 | Receipt save and line-item linkage | ✅ Verified | `test_w2e_persistence.py` — items written, linked to their own receipt, field values and printed order preserved, header round trip, review flag and source file persisted. |
+| 14 | Per-page failure isolation in batch | ✅ Verified | `test_w2a_pdf_batch.py` — one failing page of four leaves the other three succeeding and persisted; the failure reports its error and saves no partial row; an invalid file among valid ones does not stop them; progress reaches 100% even with failures; nothing is dropped under concurrency. |
 
-#### W2-B Personal-finance deterministic logic (13) — 11 ✅ / 1 🟡 / 1 ❌
+#### W2-B Personal-finance deterministic logic (13) — 11 ✅ / 2 🟡 / 0 ❌ *(was 11 / 1 / 1)*
 
 All verified rows are from `test_w2b_finance.py` (52 tests, executed, all pass) against the
 deterministic fixture with hand-computed expectations.
@@ -236,7 +273,7 @@ deterministic fixture with hand-computed expectations.
 | 2 | Net-worth calculation | ✅ | 4 tests incl. excluded/archived/hidden-liability variants |
 | 3 | Expense and income creation | ✅ | `finance.create_transaction` via validation suite + fixture |
 | 4 | Transfer validation and effects | ✅ | `test_transfer_to_same_account_is_rejected`, `..._to_non_debit_account_is_rejected`, fee debit test |
-| 5 | **Budget aggregation and carry-forward** | ❌ **Missing** | **Zero tests.** `finance.list_budget_plans` / `create_budget_plan` / `delete_budget_plan` are never called by any test; `budget_plans` appears once, only as a row count inside a backup assertion. No aggregation and no carry-forward logic is verified. `evaluation/README.md` marks W2-B "Done" — that claim is wrong. |
+| 5 | **Budget aggregation and carry-forward** | 🟡 Partial | **Aggregation ✅** — `test_w2b_budgets.py` (23 tests): expenses in-period counted, other categories and income excluded, out-of-period spending excluded, per-interval windows, deletion reverses the total, percent-of-income limits, over-100% not clamped, zero limit yields `None` instead of dividing by zero, and a backup/restore round trip. Assertions are written as **deltas against `date.today()`**, so they do not rot as the clock moves. **Carry-forward ❌ — it does not exist (defect D5).** The flag is accepted, persisted, sent by the UI and typed in `types.ts`, but no computation in `finance.py` ever reads it; two otherwise identical plans resolve to the same limit. Characterized by test so the gap is measured, not assumed working. |
 | 6 | Templates | ✅ | `test_using_a_template_creates_a_matching_transaction` |
 | 7 | Recurring schedule advancement | ✅ | 2 tests (date rolls forward one month; transaction created) |
 | 8 | Installment payments | ✅ | `test_installment_payment_increases_paid_amount` |
@@ -246,7 +283,7 @@ deterministic fixture with hand-computed expectations.
 | 12 | Upcoming-obligation aggregation | ✅ | `test_upcoming_returns_the_seeded_obligations` |
 | 13 | Transaction history / statistics consistency | 🟡 Partial | History verified (count, kind partition, account filter, delete-restores-balance). **"Statistics" is not covered** — no aggregate/statistics function is called by any test. |
 
-#### W2-C Rule-based Quick Chat (8) — 7 ✅ / 1 🟡
+#### W2-C Rule-based Quick Chat (8) — 8 ✅ / 0 🟡 *(was 7 / 1)*
 
 `parseQuick.test.ts` (78 tests, executed via `npx vitest run`, all pass) plus
 `test_w2c_quick_python.py` (31 tests, pass).
@@ -257,12 +294,12 @@ deterministic fixture with hand-computed expectations.
 | 5 | Account matching | ✅ | `describe("account matching")` |
 | 6 | Category matching | ✅ | `describe("category matching")` |
 | 7 | Missing / ambiguous field handling | ✅ | `describe("invalid input")`, `describe("note extraction")` |
-| 8 | Server/client parser consistency | 🟡 Partial | **Both parsers are tested; neither is tested *against the other*.** There is no shared corpus and no differential test. `test_w2c_quick_python.py` states outright that it mirrors selected regressions only. Divergence outside the D2/D4 cases would not be caught. |
+| 8 | Server/client parser consistency | ✅ Verified | **A shared corpus now drives both suites**: `datasets/quickchat_corpus.json` (15 accepted + 4 rejected cases) is read by `test_w2c_parser_agreement.py` (72 tests) and `web-next/app/lib/parseQuick.corpus.test.ts` (82 tests), so a divergence fails on exactly one side and is immediately localizable. Compared: kind, amount, note, resolved date — account/category ids are excluded on purpose, since the TS parser is *given* accounts while the Python one reads them from the database, so a mismatch there would reflect different inputs rather than different parsing. A Python-side test asserts the TS file still reads the corpus, so the two cannot silently decouple. **Result: the two parsers agree on every case**, and `_INCOME_WORDS` / `INCOME_WORDS` were verified to list identical keywords. |
 
 `test_quick_chat_uses_no_model` ✅ verifies the breakdown's §1.5 constraint that Quick Chat
 is deterministic — good, and correctly framed.
 
-#### W2-D SQL, RAG, ReAct tools (10) — 3 ✅ / 4 🟡 / 3 ❌
+#### W2-D SQL, RAG, ReAct tools (10) — 5 ✅ / 2 🟡 / 3 ❌ *(was 3 / 4 / 3)*
 
 | # | Item | Status | Evidence |
 |---|---|---|---|
@@ -274,16 +311,16 @@ is deterministic — good, and correctly framed.
 | 6 | Explicit receipt references remain scoped | ✅ | 5 scope-isolation tests incl. `test_explicit_scope_argument_beats_an_inline_reference` |
 | 7 | ReAct selects SQL for numeric/aggregate questions | ❌ Missing 🔒 | Requires a live model. Cases defined (`RCT-001..007`), never run. |
 | 8 | ReAct selects receipt search for receipt-content questions | ❌ Missing 🔒 | Same. |
-| 9 | Ambiguous recent-receipt questions trigger clarification | 🟡 Partial | The **detector** is verified (`test_recent_receipt_questions_are_detected_as_ambiguous`, `test_unambiguous_questions_do_not_trigger_clarification`). The end-to-end clarify emission through `agent_stream` is unexercised. |
-| 10 | Repeated tool calls and step limits handled | 🟡 Partial | `test_agent_step_budget_is_a_small_positive_integer` pins `_MAX_AGENT_STEPS = 3`; the harness detects loops in synthetic traces. The **real** guard (`repeats >= 2` → `_force_final`, `core.py:3107`) is never driven. |
+| 9 | Ambiguous recent-receipt questions trigger clarification | ✅ Verified | The detector tests, plus the **real path through `agent_stream`** (`test_w2d_agent_paths.py`): an ambiguous "my recent receipt" question emits `clarify` **before the model is called at all** (asserted by capturing the call list), the clarification names the candidate receipts, `clarify` is terminal, an explicit `receipt_ids` scope correctly suppresses it, and an unambiguous question does not clarify. |
+| 10 | Repeated tool calls and step limits handled | ✅ Verified | `test_w2d_agent_paths.py` drives the real guard with a scripted model that never stops: the repeated call is served from cache (exactly 1 `action`, 2 `observation` events), the repeat is marked in the step trail so a loop stays visible behind a healthy-looking answer, and the run force-finalizes with an answer instead of hanging or erroring. Separately, a model that never answers is bounded at exactly `_MAX_AGENT_STEPS` actions and terminates in `final`, not `error`. Distinct inputs to the same tool are correctly **not** treated as a loop. |
 
-#### W2-E Receipt posting and backup/restore (8) — 7 ✅ / 1 🟡
+#### W2-E Receipt posting and backup/restore (8) — 8 ✅ / 0 🟡 *(was 7 / 1)*
 
 | # | Item | Status | Evidence |
 |---|---|---|---|
 | 1 | Posting creates the expected finance transaction | ✅ | `test_posting_a_receipt_creates_one_linked_expense` |
 | 2 | Transaction links back to the correct `receipt_id` | ✅ | same + `test_restore_preserves_receipt_transaction_linkage` |
-| 3 | Amount, date, category, account, currency preserved | 🟡 Partial | Amount and account verified (`test_posting_reduces_the_account_balance_once`); **currency and category preservation are not separately asserted**. |
+| 3 | Amount, date, category, account, currency preserved | ✅ Verified / ➖ currency N/A | `test_w2e_persistence.py` asserts amount, receipt date (so it lands in the right budget period), target account, vendor→note, and category mapping through `_category_id_for_name` — including that an unmatched category leaves the transaction uncategorized rather than blocking the post. **Currency is architecturally N/A**: the `transactions` table has no currency column, so a USD receipt posts as a bare number indistinguishable from PHP. Characterized by `test_a_posted_transaction_carries_no_currency_of_its_own` and recorded as a limitation rather than dropped from the checklist. |
 | 4 | Duplicate posting behaviour | ✅ | `test_reposting_a_receipt_does_not_duplicate` |
 | 5 | Backup contains all intended finance records | ✅ | `test_backup_contains_every_intended_record_group` |
 | 6 | Restore recreates records and relationships | ✅ | `test_restore_recreates_records_and_relationships` |
@@ -314,11 +351,11 @@ concrete outcome of the evaluation work so far.
 | Deliverable | Status |
 |---|---|
 | Automated component tests | ✅ Verified — 332 tests, executed, all pass |
-| Machine-readable result file | ❌ Missing — **no `evaluation/results/` directory exists**; no run writes JSON/CSV |
+| Machine-readable result file | 🟡 Partial — **writer implemented and tested, no run has produced one.** `evaluation/report.py` (32 tests) writes `results/{raw,processed,failures}/` with the runtime configuration capture and its `configuration_gaps` attached to every file. `rate()` returns `None` for an empty denominator so an unmeasured metric can never be reported as 0% or 100%. The remaining gap is a live run, not code. |
 | Summary table by module and case category | 🟡 Partial — `evaluation/README.md` has one, with stale counts (§1.3) |
-| Failure log with case IDs | ❌ Missing |
+| Failure log with case IDs | 🟡 Partial — `report.summarize()` retains `failed_case_ids` and a per-check breakdown naming the cases that failed it; `trajectory.main()` writes a taxonomy block. No data yet — needs a run. |
 
-**W2 totals: 32 ✅ / 12 🟡 / 23 ❌ across 67 units.**
+**W2 totals: 45 ✅ / 7 🟡 / 15 ❌ across 67 units** *(was 32 / 12 / 23)*. The 15 remaining are the 10 uncomputed core metrics plus 5 checklist items, **all** gated on a live model or on B1 labelling.
 
 ### 3.4 W3 — Layer 2 trajectory evaluation (22 checks + 5 deliverables)
 
@@ -329,7 +366,10 @@ case against 8 independent checks without short-circuiting, aggregates metrics t
 **contract test against the real generator** (`test_agent_stream_event_contract`,
 `test_known_tools_match_the_real_dispatcher`) — so it cannot silently drift from `core`.
 
-**But `collect_trajectory()` and `run_cases()` have never been executed.** They require a
+**But `collect_trajectory()` and `run_cases()` have still never been executed.** A CLI entry
+point now exists (`python -m evaluation.trajectory`, verified via `--dry-run`, which loads and
+validates all 7 cases and prints the plan without calling a model) and it writes results
+through `report.write_result` with the configuration attached. Execution requires a
 reachable Ollama; both endpoints were unreachable during this audit. **⏸ Unexecuted.**
 There is no stored trajectory, no results file, and no visualization.
 
@@ -343,13 +383,13 @@ There is no stored trajectory, no results file, and no visualization.
 
 | Deliverable | Status |
 |---|---|
-| Trace collector / exporter | ✅ Implemented, 37 self-tests pass — but the **exporter half is missing**: nothing writes a trajectory to disk |
+| Trace collector / exporter | ✅ Verified — 37 self-tests, and the **exporter half now exists**: `trajectory.main()` writes every raw trajectory (including collection failures, which are recorded as results rather than dropped) to `results/raw/` |
 | Expected-trajectory case definitions | 🟡 Partial — 7 cases, 1 of 5 pipelines |
-| Actual-vs-expected trace comparison | ⏸ Unexecuted — `evaluate_case` is fully tested against **synthetic** events; never run on a real one |
+| Actual-vs-expected trace comparison | ⏸ Unexecuted — `evaluate_case` is fully tested against **synthetic** events and now reachable from the CLI; still never run on a real trajectory. **This is the single highest-value remaining action** and is blocked only on an endpoint |
 | One successful and one failed trajectory visualization | ❌ Missing |
-| Failure taxonomy | 🟡 Partial — `failure_taxonomy()` implemented and tested; no data to populate it |
+| Failure taxonomy | 🟡 Partial — `failure_taxonomy()` implemented and tested, and `trajectory.main()` emits a taxonomy block grouping case ids by failed check; no data to populate it |
 
-**W3 totals: 8 ✅ / 11 🟡 / 8 ❌ across 27 units.** The DoD criterion "evaluation uses real
+**W3 totals: 13 ✅ / 7 🟡 / 7 ❌/⏸ across 27 units** *(was 8 / 11 / 8)*. The DoD criterion "evaluation uses real
 observable events from Snag" is **not met** — every event evaluated so far is synthetic.
 
 ### 3.5 W4 — Layer 3 end-to-end evaluation (7 jobs + 9 metrics + 5 deliverables)
@@ -441,34 +481,36 @@ evidence · **P2** useful additional coverage · **P3** stretch/regression.
 
 | # | Item (as named in FOLLOWup) | Status | Priority | Blocker |
 |---|---|---|---|---|
-| 1 | Requirements and configuration audit | 🟡 Partial — exists, stale by 2 commits, no run frozen | **P0** | none (self-fixable) |
+| 1 | Requirements and configuration audit | 🟡 Partial — docs re-pinned and corrected; `report.capture_configuration()` + `configuration_gaps()` now capture and validate a run. **No run frozen yet** | **P0** | endpoint (digests) |
 | 2 | Versioned ground-truth dataset | 🟡 Partial — finance fixture ✅; 1 of 10 case families; no coverage matrix, no labeling guide | **P0** | B1 for receipts |
 | 3 | Receipt header-field accuracy | ❌ Missing | **P0** | **B1** + live model |
 | 4 | Receipt line-item accuracy | ❌ Missing | **P0** | **B1** + live model |
 | 5 | Receipt-level exact match | ❌ Missing | **P0** | **B1** + live model |
-| 6 | Hallucinated / unsupported-total detection | ❌ Missing — `extraction.reconcile` itself has **zero tests** | **P0** | none for the unit test; B1 for the rate |
+| 6 | Hallucinated / unsupported-total detection | 🟡 **Unit behaviour now verified** (34 tests incl. both tolerance boundaries and the review wiring). The detection *rate* on real receipts is still unmeasured | **P1** | **B1** for the rate |
 | 7 | Review-flag recall and false-review rate | ❌ Missing — 3 behavioural tests exist, no rate | **P0** | **B1** |
 | 8 | SQL execution correctness | ❌ Missing | **P0** | live model + expected-result labels |
 | 9 | Retrieval relevance ground truth | ❌ Missing | **P0** | manual labelling (cheap — ledger is small) |
 | 10 | RAG correctness, faithfulness, citations | ❌ Missing | **P0** | live model + #9 |
-| 11 | ReAct routing / observable trajectory evaluation | ⏸ Harness ready, never executed | **P0** | **live model only** — highest value per unit of work |
-| 12 | Loop, retry, clarification behaviour | 🟡 Detectors tested; real paths never driven | **P1** | live model (or a stubbed agent run) |
+| 11 | ReAct routing / observable trajectory evaluation | ⏸ Harness ready **and CLI wired**, never executed | **P0** | **live model only** — still the highest value per unit of work |
+| 12 | Loop, retry, clarification behaviour | ✅ **Verified** — the real `agent_stream` guards are driven end to end (22 tests). Rates on a real model remain a live-run question | — |
 | 13 | Receipt-to-finance posting | ✅ **Verified** | — | — |
-| 14 | Quick Chat deterministic parsing | ✅ **Verified** (109 tests; confirmed model-free) | — | — |
-| 15 | Core finance consistency | 🟡 11/13 verified; **budget aggregation untested**; statistics untested | **P1** | none |
+| 14 | Quick Chat deterministic parsing | ✅ **Verified** (185 tests; confirmed model-free; **both parsers now proven to agree** on a shared corpus) | — | — |
+| 15 | Core finance consistency | 🟡 **Budget aggregation now verified** (23 tests). Remaining: "statistics" consistency untested, and carry-forward **does not exist** (D5) | **P2** | none |
 | 16 | End-to-end user-job evaluation | ❌ Missing entirely | **P0** | live model; partly runnable without one (`E2E-MAN`, `E2E-QCK`, `E2E-BAK`) |
 | 17 | Correction-inclusive timing | ❌ Missing — no protocol, no sheet | **P1** | manual protocol + B1 |
 | 18 | Live-model latency | ❌ Missing | **P1** | **endpoint unreachable** |
-| 19 | Configuration and model capture | 🟡 Template exists, never filled | **P0** | none — must accompany the first real run |
-| 20 | Raw machine-readable result artifacts | ❌ Missing — no `results/` dir, nothing writes one | **P0** | none (self-fixable) |
+| 19 | Configuration and model capture | ✅ **Implemented** — resolved at runtime, attached to every result file, with gaps reported rather than silently absent. Must still accompany the first real run | — |
+| 20 | Raw machine-readable result artifacts | 🟡 **Writer implemented** (`evaluation/report.py`, 32 tests) with `results/{raw,processed,failures}/`. No run has produced a file | **P0** | endpoint |
 | 21 | Failure taxonomy and case studies | 🟡 Function exists, no data; D1–D4 mapped | **P1** | depends on results |
 | 22 | Evaluation notebook / report | ❌ Missing; runtime unblocked | **P0** | depends on results |
 
-**Reading of the table:** of the 22 named items, **2 are verified complete** (13, 14),
-**6 are partial**, and **14 are missing**. Eleven are P0. Of those eleven, **four are
-self-fixable today with no model and no labelling** (#1 refresh, #19 capture, #20 results
-writer, and the reconcile unit tests inside #6) — everything else waits on either a
-reachable endpoint or human labelling.
+**Reading of the table, after remediation:** of the 22 named items, **4 are verified
+complete** (12, 13, 14, 19 — up from 2), **7 are partial**, and **11 are missing**. Every
+self-fixable P0 identified in the original audit has been closed. **Of the P0 items that
+remain, not one is blocked on unwritten code**: they are blocked on a reachable Ollama
+endpoint (#11 trajectory run, #8 SQL accuracy, #10 RAG, #16 E2E, #20 producing a file) or
+on human receipt labelling (#3, #4, #5, #7, #2), or they depend on those producing results
+first (#22 notebook).
 
 ---
 
@@ -577,3 +619,59 @@ modified. Full test suite re-run green afterwards (§0).
 | `CONFIGURATION.md` | Re-pinned to commit `41b8fa1`; removed the false "`MLFLOW_TRACKING_URI` is not set in code" row and the stale `MLFLOW_ENABLED=0` clarify-path caveat (both fixed in `core.py`); added a staleness note directing readers to symbol names rather than line numbers |
 | `REQUIREMENTS_AUDIT.md` | Added a header note recording that it was audited at `9ac15ec`, that HEAD is `41b8fa1`, that its line citations have drifted, and that §4.4 and the §4.3 caveat are now resolved |
 | `README.md` | Corrected the three stale test counts (39→52, 62→65, 64→78+31); added the five missing files to the layout block; downgraded W2-B from "Done" to partial with the budget gap named; added `IMPLEMENTATION_STATUS.md` to the entry points |
+
+---
+
+## 9. Defects surfaced by the remediation pass
+
+Both are **pre-existing product defects**, not regressions, found by writing tests for code
+that previously had none. They join D1–D4 in `REQUIREMENTS_AUDIT.md` §10b.
+
+### D5 — Budget carry-forward is accepted, stored, and never used
+
+**Severity: medium (a user-facing control that silently does nothing).**
+`carry_forward` is a parameter of `finance.create_budget_plan`, a column in `budget_plans`,
+a field in the `POST /budgets` request model (`api.py`), a toggle in the budgets UI
+(`web-next/app/plan/budgets/page.tsx`) and a typed field in `types.ts`. **No computation in
+`finance.py` ever reads it.** `list_budget_plans` resolves a plan's limit from
+`limit_amount` or from percent-of-income and never consults the flag, so underspend in one
+period does not raise the next period's limit. Two otherwise identical plans — one with
+carry-forward on — resolve to exactly the same limit.
+
+**Not fixed.** Implementing carry-forward means choosing semantics (does unspent budget roll
+over indefinitely? does overspend roll forward as a debt? which period boundary?), and that
+is a product decision, not a defect repair. Characterized by test instead, so the gap is
+measured rather than assumed working:
+`test_carry_forward_does_not_change_the_resolved_limit` will fail the moment real
+carry-forward is implemented — which is the intended signal.
+
+### D6 — `_num` fabricated numbers from containers ✅ FIXED
+
+**Severity: medium (silent wrong data on malformed model output).**
+`extraction._num` fell through to a string path for any non-scalar value: `str([1, 2])` →
+strip everything but digits → `"12"` → **12.0**. `{"amount": 1}` became `1.0`. The figure
+appears nowhere on the receipt.
+
+Reachable: `_num` runs on the **unvalidated** model dict — `core.py`'s post-processing chain
+(`_fix_payment_fields(_dedupe_items(_remap_summary_lines(_clean_items(raw))))`) executes
+before pydantic validation, and `_fix_payment_fields` writes derived values back into the
+dict. A model emitting a nested object where an amount belongs would therefore produce a
+number that passed schema validation looking entirely legitimate, and would then feed
+reconciliation and the ledger.
+
+**Fix:** two lines in `extraction._num` returning `None` for `list`/`tuple`/`set`/`dict`,
+with a comment recording why. A wrong shape is not a misformatted number. Same family as
+D4 — an input the unit tests never happened to try.
+
+Tests: `test_a_list_does_not_become_a_fabricated_number`,
+`test_a_dict_does_not_become_a_fabricated_number`,
+`test_a_nested_amount_object_is_rejected_rather_than_flattened`. The 10 pre-existing
+`test_extraction.py` tests still pass unchanged.
+
+### Also recorded as an architectural limitation (not a defect)
+
+**Posting loses currency.** The `transactions` table has no currency column, so
+`post_receipt_as_expense` carries a receipt's total across as a bare number: a USD receipt
+becomes a transaction indistinguishable from a PHP one. The ledger is single-currency by
+construction. Characterized by `test_a_posted_transaction_carries_no_currency_of_its_own`
+so the W2-E checklist item is answered honestly rather than dropped.

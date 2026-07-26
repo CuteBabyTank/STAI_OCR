@@ -140,6 +140,13 @@ def _num(value) -> float | None:
         return None
     if isinstance(value, (int, float)):
         return float(value)
+    # A container is not a misformatted number, it is a wrong shape. Falling through
+    # to the string path would stringify it and strip the punctuation out, so
+    # `[1, 2]` became 12.0 and `{"amount": 1}` became 1.0 — a fabricated figure with
+    # no basis on the receipt. These run on the *unvalidated* model dict (core.py's
+    # post-processing chain), so the number would reach pydantic looking legitimate.
+    if isinstance(value, (list, tuple, set, dict)):
+        return None
     cleaned = re.sub(r"[^\d.\-]", "", str(value))
     try:
         return float(cleaned) if cleaned not in ("", "-", ".") else None
