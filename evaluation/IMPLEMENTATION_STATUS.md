@@ -740,3 +740,13 @@ Tests: `test_a_list_does_not_become_a_fabricated_number`,
 becomes a transaction indistinguishable from a PHP one. The ledger is single-currency by
 construction. Characterized by `test_a_posted_transaction_carries_no_currency_of_its_own`
 so the W2-E checklist item is answered honestly rather than dropped.
+
+# Stage 2 benchmark design status (2026-07-27)
+
+- Benchmark contract, dataset inventory, statement-format decision, common output
+  schema, coverage matrix, labeling guide, scoring specification, and Cowork
+  protocol are drafted for review.
+- No final Snag evaluation or Cowork comparison has been run under this Stage 2
+  design. Final cases, labels, and scoring rules must be reviewed and frozen
+  before Stage 3.
+- `RCT-006` remains retained pilot evidence; see `evaluation/RCT_006_CASE_REPORT.md`.

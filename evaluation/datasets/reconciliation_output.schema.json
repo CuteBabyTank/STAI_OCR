@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Reconciliation Evaluation Output",
+  "description": "Common observable output for an unrun, pilot, or final reconciliation case. This schema does not imply that an example is a measured result.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["case_id", "system_id", "result_state", "statement_transaction_id", "statement_date", "statement_posting_date", "statement_merchant", "statement_amount", "statement_currency", "matched_receipt_id", "receipt_date", "receipt_merchant", "receipt_amount", "match_status", "discrepancy_type", "requires_review", "confidence", "evidence", "explanation", "processing_time_seconds", "manual_corrections", "system_error"],
+  "properties": {
+    "case_id": { "type": "string", "minLength": 1 },
+    "system_id": { "type": "string", "minLength": 1 },
+    "result_state": { "type": "string", "enum": ["unrun", "completed", "technical_failure", "timeout", "invalid_output"] },
+    "statement_transaction_id": { "type": ["string", "null"] },
+    "statement_date": { "type": ["string", "null"], "format": "date" },
+    "statement_posting_date": { "type": ["string", "null"], "format": "date" },
+    "statement_merchant": { "type": ["string", "null"] },
+    "statement_amount": { "type": ["number", "null"] },
+    "statement_currency": { "type": ["string", "null"], "pattern": "^[A-Z]{3}$" },
+    "matched_receipt_id": { "type": ["string", "null"] },
+    "receipt_date": { "type": ["string", "null"], "format": "date" },
+    "receipt_merchant": { "type": ["string", "null"] },
+    "receipt_amount": { "type": ["number", "null"] },
+    "match_status": { "type": "string", "enum": ["exact_match", "merchant_variation_match", "date_lag_match", "amount_discrepancy", "missing_receipt", "unmatched_receipt", "cash_unmatched_receipt", "duplicate_receipt", "duplicate_statement_transaction", "refund_or_negative", "ambiguous_review", "no_valid_match", "not_scored", "system_error"] },
+    "discrepancy_type": { "type": ["string", "null"], "enum": [null, "none", "amount", "date", "merchant", "duplicate_receipt", "duplicate_statement_transaction", "missing_receipt", "cash_receipt", "refund", "unreadable_total", "incorrect_receipt_arithmetic", "ambiguous_match", "unsupported_total", "other"] },
+    "requires_review": { "type": ["boolean", "null"] },
+    "confidence": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+    "evidence": { "type": "array", "items": { "type": "string" } },
+    "explanation": { "type": ["string", "null"] },
+    "processing_time_seconds": { "type": ["number", "null"], "minimum": 0 },
+    "manual_corrections": { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["field", "reason", "actor_role", "time_seconds"], "properties": { "field": { "type": "string" }, "reason": { "type": "string" }, "actor_role": { "type": "string" }, "time_seconds": { "type": "number", "minimum": 0 } } } },
+    "system_error": { "type": ["string", "null"] }
+  }
+}
