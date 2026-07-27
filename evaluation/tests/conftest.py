@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -38,8 +39,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-# The one database this test session may touch. Set before core is ever imported.
-TEST_DB = REPO_ROOT / "evaluation" / "fixtures" / "_test_ledger.db"
+# The one database this test session may touch. Keep it outside the repository and
+# unique to this process so fixture rebuilds cannot inherit stale SQLite handles.
+TEST_DB = Path(tempfile.gettempdir()) / f"snag-evaluation-{os.getpid()}" / "ledger.db"
 os.environ["LEDGER_DB_PATH"] = str(TEST_DB)
 
 # Keep evaluation runs out of the developer's MLflow store. Tests assert on

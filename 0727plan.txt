@@ -1,0 +1,640 @@
+# Snag Capstone Evaluation — Complete Context and Repository-Audit Request
+
+I need you to take over the evaluation work for our Snag capstone. You have access to the current codebase.
+
+Do not modify the repository yet. First perform a comprehensive, evidence-based audit of what has actually been implemented.
+
+## 1. Project overview
+
+Snag is an integrated receipt-processing and personal-finance platform built for our STAI capstone.
+
+The documented system includes:
+
+### Receipt-processing capabilities
+
+* Image, batch, and PDF receipt processing
+* Receipt OCR and structured extraction
+* Header fields such as merchant, TIN, address, receipt number, date, tax, payment information, and total
+* Line-item extraction
+* Deterministic cleanup and payment-field reconciliation
+* Receipt arithmetic reconciliation
+* Confidence and review/disambiguation flags
+* Receipt and line-item persistence
+* Receipt embeddings and semantic search
+* Receipt-to-finance posting
+
+### Agent-related capabilities
+
+* Read-only natural-language-to-SQL questions
+* Receipt-grounded RAG questions
+* Receipt citations
+* ReAct-style routing between SQL and receipt search
+* Pre-loop disambiguation
+* Maximum-step and repeated-tool-call guards
+* MLflow traces for some OCR, SQL, RAG, or ReAct operations
+
+### Personal-finance capabilities
+
+* Accounts and balances
+* Expense, income, and transfer transactions
+* Rule-based Quick Chat transaction drafts
+* Categories, tags, and templates
+* Budgets
+* Recurring transactions and installments
+* Goals, debts, and receivables
+* History and statistics
+* JSON backup and restore
+
+These are documented capabilities, not automatically verified evaluation results.
+
+## 2. Important factual constraints
+
+Preserve the following cautions throughout the audit:
+
+1. Do not assume Snag uses LangGraph.
+2. Do not assume Snag consists of multiple independent agents.
+3. Do not introduce LangGraph solely to imitate lecture examples.
+4. The current system reportedly has no user-account/authentication layer.
+5. Do not add authentication requirements solely for evaluation.
+6. Quick Chat is a deterministic rule-based parser, not an LLM feature.
+7. SQL transaction execution or instructions such as “transfer ₱10,000 through an agent” are out of scope.
+8. Read-only SQL questions may remain in scope.
+9. The submitted Docker configuration reportedly points to a shared remote Ollama endpoint by default.
+10. Do not describe the default deployment as fully offline or on-device without verifying the actual configuration.
+11. JSON backup and restore is not equivalent to authenticated cloud synchronization.
+12. Historical development-model accuracy must not be attributed to the current deployment.
+13. “No API fee” does not mean zero hosting, compute, electricity, maintenance, or correction cost.
+14. Receipt-level exact match and field-level accuracy are different metrics.
+15. The fact that every tested receipt contained at least one error would imply 0% receipt-level exact match for that set, not necessarily 0% field-level accuracy.
+16. Do not invent sample sizes, repetitions, thresholds, savings, accuracy, or customer outcomes.
+17. Any new sample size or acceptance threshold must be labelled as proposed by the team.
+18. Do not erase failed, slow, or incomplete test cases from the results.
+
+## 3. Original implementation plan
+
+The plan reportedly implemented by a groupmate’s AI is:
+
+`Snag_Agentic_Evaluation_Task_Breakdown.md`
+
+It begins:
+
+> # Snag Agentic-Evaluation Task Breakdown
+>
+> Purpose: Practical handoff for planning and implementing Snag's evaluation work
+> Project: Snag / STAI_OCR integrated receipt-processing and personal-finance platform
+
+It contains the following workstreams:
+
+* W0 — Requirements and repository audit
+* W1 — Evaluation dataset and ground truth
+* W2 — Layer 1 component evaluations
+* W3 — Layer 2 trajectory evaluation
+* W4 — Layer 3 end-to-end evaluation
+* W5 — SQL, RAG, ReAct, and question evaluation
+* W6 — Performance and repeated-run consistency
+* W7 — EDA and failure analysis
+* W8 — Evaluation notebook and capstone evidence
+
+Find the actual Markdown file in the repository. Treat the complete file as the authoritative implementation checklist.
+
+Do not rely only on this summary.
+
+## 4. Context behind the original plan
+
+A July 23 evaluation lecture presented evaluation as a first-class capstone artifact.
+
+The lecture discussed:
+
+* Unit or component evaluation
+* Trajectory or observable-pipeline evaluation
+* End-to-end user-job evaluation
+* Gold-standard or ground-truth datasets
+* RAG retrieval and grounded-answer evaluation
+* Ragas
+* SQL structural evaluation, including sqlglot as an example
+* Dataset versioning
+* Notebooks
+* EDA
+* Repeated evaluation runs
+* Latency and token/cost tracking
+* Human evaluation
+* LLM-as-a-judge
+
+However, lecture demonstrations and NotebookLM recommendations must not automatically be treated as instructor requirements.
+
+Do not assume the following without direct evidence:
+
+* A minimum of 50 cases
+* Exactly 5 or 10 trajectory examples
+* Exactly 10 repetitions
+* Human review of exactly 10%
+* Ragas score above 0.80
+* 100% required accuracy
+* Ragas as the only allowed evaluation method
+* sqlglot as mandatory
+* LangGraph as mandatory
+* A required notebook format
+* A particular passing score
+
+Part of this audit is distinguishing actual requirements from examples and team proposals.
+
+## 5. Separate project-specific consultation
+
+A separate consultation established Snag’s project-specific proof point.
+
+The professor advised the team to:
+
+* Hone in on the intelligent use case
+* Avoid becoming distracted by ordinary finance-app features
+* Focus more on experiment design than whether Snag wins
+* Accept either a positive or negative result
+* Use ground truth and clearly explain experiment learnings
+* Include a retrospective
+* Compare against a strong benchmark rather than weaker products
+* Primarily compare against Claude Cowork
+* Optionally include a web-based LLM baseline
+* Keep Tarsi as Philippine market context
+* Keep SQL execution of financial transactions out of scope
+
+The proposed main personal use case was:
+
+> Cross-check receipts against bank and credit-card statements.
+
+The proposed secondary business use case was:
+
+> Compare an encoded expense sheet against a folder of receipts.
+
+Major concerns included:
+
+* Adding bank and credit-card statements to accounts
+* Ensuring OCR does not hallucinate receipt totals
+
+The intended comparison is therefore approximately:
+
+> How reliably can Snag extract, verify, and reconcile receipt-based financial information, and how does it compare with Claude Cowork on the same finance-verification task?
+
+Do not phrase the research question as assuming Snag will outperform Cowork.
+
+## 6. Known recent implementation progress
+
+The most recent commit known in the previous chat stated:
+
+> Add performance evaluation and benchmarks for retrieval and preprocessing
+
+Reported additions included:
+
+* `PERFORMANCE.md`
+* `bench_retrieval.py`
+* `test_w2a_preprocess.py`
+* `test_w5_retrieval.py`
+* `test_w6_performance.py`
+* README updates
+
+These additions appeared to cover parts of:
+
+* W2-A preprocessing
+* W5 retrieval
+* W6 model-independent performance invariants
+
+They did not, by themselves, prove completion of the entire W0–W8 plan.
+
+There may now be newer commits. Inspect the actual Git history and current HEAD.
+
+## 7. Mandatory repository inspection
+
+Before giving conclusions:
+
+1. Read any `AGENTS.md`, repository instructions, README files, and evaluation documentation.
+2. Run `git status`.
+3. Record the current branch and commit hash.
+4. Inspect recent Git history.
+5. Locate the original task breakdown.
+6. Locate all evaluation directories, tests, datasets, notebooks, reports, fixtures, and result files.
+7. Determine the actual testing framework.
+8. Determine the actual application architecture and routing implementation.
+9. Determine which models and endpoints are configured in:
+
+   * Code defaults
+   * README
+   * Docker Compose
+   * Environment examples
+   * Test configuration
+10. Identify mismatches among these configurations.
+11. Determine whether Ragas, sqlglot, MLflow, and related packages are installed and actually used.
+12. Determine which tests are model-independent and which require a live model.
+13. Determine whether available model endpoints are reachable.
+14. Preserve all existing user changes and avoid destructive Git operations.
+
+Do not interpret an unreachable model endpoint as proof that the underlying code is incorrect. Report environment blockers separately.
+
+## 8. W0–W8 implementation audit
+
+Create an implementation-status matrix for every task and deliverable in the original plan.
+
+Use these statuses:
+
+* Implemented and verified
+* Partially implemented
+* Documented but unverified
+* Test exists but was not successfully executed
+* Missing
+* Blocked by environment, data, or model access
+* Not applicable to the actual architecture
+* Superseded by an equivalent implementation
+
+For every item marked “Implemented and verified,” provide:
+
+* Exact file path
+* Relevant function, class, test, or notebook
+* What behavior it evaluates
+* Execution command
+* Whether you executed it
+* Actual result
+* Generated result artifact
+* Known limitations
+
+Do not infer completion from:
+
+* Commit messages
+* Test filenames
+* Documentation
+* Planned checklists
+* Placeholder fixtures
+* Skipped tests
+* Mock-only tests
+* Historical results
+
+A test merely existing is not the same as it passing.
+
+## 9. Specific areas that must be checked
+
+### W0 — Requirements and configuration
+
+Check for:
+
+* Requirements audit
+* Repository inventory
+* Frozen configuration
+* Commit hash
+* Model names
+* Ollama host
+* Embedding model
+* Environment variables
+* Reproduction commands
+* Documented architecture mismatches
+
+### W1 — Dataset and ground truth
+
+Check for:
+
+* Machine-readable test cases
+* Unique IDs
+* Tags/categories
+* Receipt images
+* Verified receipt labels
+* Verified line items
+* Finance fixtures
+* SQL expected results
+* Relevant receipt IDs for retrieval
+* Expected routes or observable events
+* Expected database states
+* Dataset changelog/version
+* Development versus final test separation
+* Independent label checking
+
+Check whether the “ground truth” was manually verified or copied from model output.
+
+### W2 — Component evaluation
+
+Check for actual tests of:
+
+* Input validation
+* Image preprocessing
+* PDF expansion
+* OCR schema validation
+* Header-field extraction
+* Line-item extraction
+* Numeric coercion
+* Receipt-total reconciliation
+* Unsupported or hallucinated totals
+* Review flags
+* Confidence behavior
+* Receipt saving and linkage
+* Batch failure isolation
+* Quick Chat parsing
+* Core finance calculations
+* SQL safety and execution
+* Retrieval relevance and scope isolation
+* ReAct routing
+* Duplicate receipt posting
+* Backup and restore
+
+Report receipt-level exact match, field accuracy, and line-item accuracy separately where data exists.
+
+### W3 — Trajectory evaluation
+
+Check whether trajectory evaluation uses observable evidence such as:
+
+* Tool calls
+* API events
+* MLflow traces
+* ReAct actions and observations
+* Database writes
+* Retrieved receipt IDs
+* SQL generation and execution
+* Review flags
+* Retry counts
+* Step counts
+* Controlled errors
+* Loop detection
+
+Do not require or expose hidden chain-of-thought.
+
+Check for both:
+
+* Successful trajectory evidence
+* Failed or recovered trajectory evidence
+
+### W4 — End-to-end evaluation
+
+Check whether complete user jobs are actually tested, including:
+
+* Digitize and verify a receipt
+* Post a receipt once to finance
+* Ask a grounded spending question
+* Record correction effort
+* Verify resulting database state
+* Verify dependent balances/views
+* Recover gracefully from failures
+
+Distinguish automated E2E tests from documented manual protocols.
+
+### W5 — SQL, RAG, and ReAct
+
+Check:
+
+* SQL execution accuracy, not just syntax or string similarity
+* Read-only enforcement
+* Empty-result behavior
+* Correct date, numeric, and category semantics
+* Retrieval context precision/recall or equivalent
+* Relevant receipt IDs
+* Scope leakage
+* Answer correctness
+* Faithfulness to evidence
+* Answer relevance
+* Citation correctness
+* Routing accuracy
+* Clarification behavior
+* Observation-to-final-answer consistency
+
+Ragas may supplement these checks but must not be treated as proof that the entire agent is correct.
+
+### W6 — Performance and consistency
+
+Determine whether reported measurements are:
+
+* Microbenchmarks
+* Structural invariants
+* Mocked tests
+* Live-model component latency
+* Real E2E latency
+* Batch throughput
+* Correction-inclusive user time
+
+Do not call a DB-load or retrieval microbenchmark an E2E speedup.
+
+Check for:
+
+* Latency units
+* Number of runs
+* Warm-up behavior
+* Environment metadata
+* Token counts, where available
+* Tool-call counts
+* Retry counts
+* Error counts
+* Compute or hosting assumptions
+* Raw performance results
+
+If model endpoints were unavailable, require an honest scope statement.
+
+### W7 — EDA and failure analysis
+
+Check for:
+
+* Dataset coverage charts
+* Module/category distribution
+* Difficulty/image-condition coverage
+* Failure taxonomy
+* Failure counts
+* Representative case IDs
+* Known limitations
+* No deletion of unsuccessful cases
+
+Avoid treating decorative plots as evaluation evidence.
+
+### W8 — Notebook and presentation evidence
+
+Check for:
+
+* Tested-configuration card
+* Dataset coverage table
+* Component result matrix
+* Successful trajectory
+* Failed or recovered trajectory
+* E2E result table
+* SQL/RAG result table
+* Failure distribution
+* Latency/resource evidence
+* Limitations
+* Evidence-backed conclusions
+* Retrospective
+
+Check whether the notebook can run from a clean state or whether it contains stale outputs.
+
+## 10. Consultation-alignment audit
+
+After auditing W0–W8, separately determine whether the implementation addresses the project-specific proof point.
+
+Check for:
+
+* Bank-statement ingestion
+* Credit-card-statement ingestion
+* Statement transaction extraction
+* Receipt-to-statement matching
+* Missing-receipt detection
+* Statement transaction without receipt
+* Cash receipt absent from statement
+* Unmatched receipt detection
+* Amount discrepancies
+* Merchant-name variations
+* Transaction-date versus posting-date differences
+* Duplicate receipt detection
+* Refund or negative transaction handling
+* Unsupported receipt-total handling
+* Human-review escalation
+* Discrepancy-report generation
+
+Clearly distinguish:
+
+* Receipt-internal arithmetic reconciliation
+* Receipt-to-bank/credit-statement reconciliation
+
+Do not claim the latter exists merely because receipt arithmetic is checked.
+
+## 11. Cowork benchmark readiness
+
+Claude Cowork does not require internal integration into Snag.
+
+Check whether evaluation artifacts define:
+
+* A fixed Cowork prompt
+* Identical files for both systems
+* The same task definition
+* A common output schema
+* Shared ground truth
+* Fixed retry rules
+* Fixed clarification rules
+* Raw output preservation
+* Product/model/date recording
+* Correction-inclusive timing
+* Accuracy scoring
+* Discrepancy-detection scoring
+* Severe financial error definition
+* Cost comparison
+* Build-versus-buy retrospective
+
+Cowork should generally be evaluated externally at the output/E2E level because its internal trajectory is unavailable.
+
+Tarsi should remain Philippine product/market context unless the team explicitly chooses it as another experimental system.
+
+## 12. Suggested central metrics
+
+Determine which of these are currently computable:
+
+* Receipt-level exact match
+* Field-level accuracy
+* Line-item accuracy
+* Unsupported-total or hallucinated-total rate
+* Review recall
+* False-review rate
+* Receipt-statement match precision
+* Receipt-statement match recall
+* Match F1
+* Discrepancy-detection precision
+* Discrepancy-detection recall
+* SQL execution accuracy
+* Retrieval precision/recall
+* Scope leakage
+* Answer correctness
+* Faithfulness
+* Citation accuracy
+* Routing accuracy
+* Loop or retry-exhaustion rate
+* Task-completion rate
+* Correction rate
+* Correction-inclusive minutes per verified receipt
+* Severe financial error count
+* E2E latency
+* Batch throughput
+* Resource or cost units
+
+Do not fabricate metrics when the required ground truth does not exist.
+
+## 13. Prioritization
+
+After the audit, classify remaining work as:
+
+### P0 — Proof-point critical
+
+Likely examples:
+
+* Ground-truth dataset
+* Receipt extraction scoring
+* Unsupported-total handling
+* Statement extraction
+* Receipt-statement matching
+* Discrepancy detection
+* E2E reconciliation
+* Cowork benchmark protocol
+
+### P1 — Essential capstone evidence
+
+Likely examples:
+
+* SQL/RAG/ReAct component tests
+* Observable trajectories
+* Configuration capture
+* Failure analysis
+* Raw results
+* Tested-configuration documentation
+
+### P2 — Supporting evaluation
+
+Likely examples:
+
+* Core finance consistency
+* Receipt posting
+* Quick Chat evaluation
+* Latency and resource analysis
+* Repeated runs
+
+### P3 — Stretch or regression work
+
+Likely examples:
+
+* Extensive evaluation of goals
+* Debts and receivables
+* Recurring transactions
+* Installments
+* Broad budget testing
+* Extensive backup/restore scenarios
+
+Do not delete existing P2/P3 tests. This classification concerns the priority of remaining work.
+
+## 14. Required deliverables from this audit
+
+Before implementing fixes, give me:
+
+1. Executive summary of the repository’s current evaluation readiness
+2. Current branch and commit hash
+3. Summary of relevant commits after the original plan was issued
+4. W0–W8 implementation-status matrix
+5. Exact tests executed and their results
+6. Tests that failed, skipped, or could not run
+7. Environment/model blockers
+8. Ground-truth dataset inventory
+9. Raw-results inventory
+10. Current metric coverage
+11. Consultation-alignment gap analysis
+12. Cowork benchmark-readiness analysis
+13. Highest-risk unsupported claims
+14. P0–P3 remaining backlog
+15. Five immediate next actions
+16. Questions requiring instructor confirmation
+17. Whether the project is ready for a final evaluation run
+
+Also recommend whether the next step should be:
+
+* Finish missing original W0–W8 work
+* Add the receipt-to-statement proof point
+* Prepare the Cowork experiment
+* Run the final evaluation
+* Repair evaluation infrastructure first
+
+## 15. Rules for conclusions
+
+Do not claim the plan is fully implemented unless every required workstream has verified evidence.
+
+Use wording such as:
+
+* “The test exists and passed”
+* “The test exists but could not run because…”
+* “The behavior is documented but not tested”
+* “The benchmark measures an isolated hot path, not E2E latency”
+* “No verified ground truth was found”
+* “This capability is outside the current repository”
+* “This result applies only to the recorded configuration and dataset”
+
+Do not modify code during this first audit. Present the findings and proposed next actions for approval.

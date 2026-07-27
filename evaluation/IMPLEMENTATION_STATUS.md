@@ -1,5 +1,47 @@
 # Snag Evaluation — Implementation Status Audit
 
+## Stage 1 re-verification — 2026-07-27
+
+This addendum records executed evidence after the original repository audit. It does not
+declare the original W0–W8 plan complete.
+
+- **Infrastructure repair:** the root `.venv` now has the dependencies declared in both
+  `requirements.txt` and `evaluation/requirements-eval.txt`; `web-next` was restored with
+  `npm ci`. No dependency manifest or lockfile changed.
+- **Fixture repair:** SQLite connections used as context managers now close on exit, and the
+  evaluation fixture uses a per-process temporary database. This fixes Windows fixture
+  rebuild locks without touching a developer's `ledger.db`.
+- **Executed suites:** preprocessing/extraction `72 passed`; persistence plus fixture
+  regressions `21 passed`; statement reconciliation/API `104 passed`; retrieval plus SQL
+  safety `84 passed`; performance invariants `25 passed`; PDF/parser-agreement `96 passed`;
+  web Vitest `160 passed`. All are component/structural or synthetic-fixture evidence, not
+  receipt or statement accuracy metrics.
+- **Trajectory evidence:** dry-run validated seven cases. A remote-model pilot retained all
+  seven trajectories in `results/raw/trajectory-20260727T020610Z_stage1-trajectory.json`:
+  six passed and `RCT-006` failed `final_supported_by_observation`. This is a single pilot,
+  not a final rate or benchmark result.
+- **Final regression verification:** complete Python suite `671 passed, 1 warning` in 120.80s;
+  complete web Vitest suite `160 passed` in 616ms. The warning is Pydantic's existing
+  `PromptModelConfig.model_name` protected-namespace warning and does not fail a test.
+- **Known execution caveat:** the first full Python attempt produced `652 passed, 19 failed`.
+  The failures were classified as missing declared `pypdfium2`, Windows default-encoding test
+  defects, and evidence-document drift after the live artifact was created. The focused fixes
+  above were rerun successfully; the final full-suite rerun is recorded in the Stage 1 log.
+
+### Current W0–W8 execution status
+
+| Workstream | Status after Stage 1 | Evidence boundary |
+|---|---|---|
+| W0 | Partially implemented | Runtime card and commands are recorded; final benchmark configuration remains unfrozen. |
+| W1 | Partially implemented | Deterministic fixtures/corpora execute; independently verified receipt and statement labels remain missing. |
+| W2 | Implemented and verified for covered component tests | Passing synthetic/component tests do not measure extraction or matching accuracy. |
+| W3 | Partially implemented | Dry-run plus one live seven-case synthetic pilot; no final trajectory dataset. |
+| W4 | Missing | No final E2E reconciliation evaluation. |
+| W5 | Partially implemented | Retrieval/SQL safety mechanisms execute; no labeled question-answer accuracy evaluation. |
+| W6 | Partially implemented | Structural invariants execute; no final repeated live latency/cost study. |
+| W7 | Missing | No final EDA or failure-distribution analysis. |
+| W8 | Partially implemented | Configuration and raw pilot evidence exist; no evaluation notebook/report. |
+
 **Audited commit:** `41b8fa1b7b15a8c2aaaffd5e78fc9b9e6a9c5160` (`main`, 2026-07-26 16:07 +0800)
 **Working tree at audit:** clean except untracked `docs/FOLLOWup.md`
 **Audit date:** 2026-07-26

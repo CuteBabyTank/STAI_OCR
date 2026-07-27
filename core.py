@@ -506,8 +506,20 @@ def _mlog_param(key: str, value) -> None:
 _SQLITE_BUSY_TIMEOUT_MS = _env_int("SQLITE_BUSY_TIMEOUT_MS", 30_000)
 
 
+class _ClosingConnection(sqlite3.Connection):
+    def __exit__(self, exc_type, exc_value, traceback):
+        try:
+            return super().__exit__(exc_type, exc_value, traceback)
+        finally:
+            self.close()
+
+
 def _connect(path: Path | str = DB_PATH) -> sqlite3.Connection:
-    con = sqlite3.connect(path, timeout=_SQLITE_BUSY_TIMEOUT_MS / 1000)
+    con = sqlite3.connect(
+        path,
+        timeout=_SQLITE_BUSY_TIMEOUT_MS / 1000,
+        factory=_ClosingConnection,
+    )
     try:
         con.execute("PRAGMA journal_mode=WAL")
         con.execute("PRAGMA synchronous=NORMAL")
@@ -1174,7 +1186,7 @@ def get_receipt_items(receipt_id: int) -> list[dict]:
 def get_receipt(receipt_id: int) -> dict | None:
     """Return one receipt's full header row (all columns), or None if not found."""
     init_db()
-    with sqlite3.connect(DB_PATH) as con:
+    with _connect() as con:
         con.row_factory = sqlite3.Row
         row = con.execute(
             "SELECT * FROM receipts WHERE id = ?", (receipt_id,)
@@ -1209,7 +1221,7 @@ def update_receipt(receipt_id: int, fields: dict) -> dict | None:
         else:
             v = None if value is None else str(value).strip()
             updates[key] = v or None
-    with sqlite3.connect(DB_PATH) as con:
+    with _connect() as con:
         if con.execute("SELECT id FROM receipts WHERE id = ?", (receipt_id,)).fetchone() is None:
             return None
         if updates:

@@ -28,7 +28,7 @@ from pathlib import Path
 import pytest
 
 CORPUS_PATH = Path(__file__).resolve().parents[1] / "datasets" / "quickchat_corpus.json"
-CORPUS = json.loads(CORPUS_PATH.read_text())
+CORPUS = json.loads(CORPUS_PATH.read_text(encoding="utf-8"))
 CASES = CORPUS["cases"]
 REJECTED = CORPUS["rejected_cases"]
 
@@ -46,7 +46,7 @@ def test_the_corpus_is_shared_with_the_typescript_suite():
     ts_test = (Path(__file__).resolve().parents[2] / "web-next" / "app" / "lib"
                / "parseQuick.corpus.test.ts")
     assert ts_test.exists(), "the TypeScript half of the agreement check is missing"
-    assert "quickchat_corpus.json" in ts_test.read_text()
+    assert "quickchat_corpus.json" in ts_test.read_text(encoding="utf-8")
 
 
 def test_case_ids_are_unique():

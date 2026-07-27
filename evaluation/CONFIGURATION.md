@@ -3,6 +3,25 @@
 Required by W0 ("Freeze an evaluation configuration"). This records **what the repository
 specifies**, at the audited commit. It is not yet a record of an executed evaluation run.
 
+## Stage 1 execution record — 2026-07-27, Asia/Manila
+
+| Field | Recorded value |
+|---|---|
+| Git base | `c816198f34bf0b3d281a76adb7bc662c4e50cb78` on `main` |
+| Source state | Dirty: Stage 1 fixture-lifecycle, UTF-8 reader, and evidence-document changes were present during execution; see `FOLLOWUP.md` and `results/raw/stage1-execution-log.md`. |
+| OS/runtime | Windows 11 Pro `10.0.26200` (64-bit), PowerShell; Python `3.11.9`; Node `v22.16.0`; npm `11.4.2` |
+| Python test/runtime packages | pytest `9.1.1`; ollama `0.6.2`; pypdfium2 `4.30.0`; FastAPI `0.112.2`; MLflow `3.14.0` |
+| Web test package | Vitest `2.1.9`, restored with `npm ci` from `web-next/package-lock.json` (lockfile v3) |
+| Live trajectory endpoint | `http://103.231.240.155:11434` — remote shared Ollama endpoint; the runner process was local, which is why the artifact's `deployment` field is `local`. |
+| Live trajectory models | vision `gemma4:e4b`; agent `gemma4:12b`; embedding `nomic-embed-text`; model digests were not supplied |
+| Live trajectory database | Temporary seeded SQLite ledger under `%TEMP%`; MLflow disabled for this pilot |
+| Docker defaults | Same remote endpoint, `gemma4:e4b`, `gemma4:12b`, and `nomic-embed-text` in `docker-compose.yml` |
+
+The live pilot used Docker-equivalent environment overrides. Code defaults remain
+`qwen2.5vl:7b` (vision), `qwen2.5:latest` (agent), and `nomic-embed-text` (embedding),
+while README and Docker defaults differ. The captured pilot therefore applies only to the
+record above and does not establish a final frozen benchmark configuration.
+
 > **This configuration has not been frozen for a run yet.** No evaluation run has been
 > executed. Fields marked **RECORD AT RUNTIME** must be captured from the live system at
 > the moment of each run and must never be back-filled from the defaults in this file —

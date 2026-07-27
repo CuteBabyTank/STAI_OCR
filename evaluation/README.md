@@ -11,10 +11,10 @@ not blocked on receipt data.
 - [`REQUIREMENTS_AUDIT.md`](REQUIREMENTS_AUDIT.md) — the original W0 repository audit and
   the blockers that gate the rest.
 
-> **Nothing in this directory is a measured evaluation result.** No accuracy figure, pass
-> rate, latency, or cost has been produced. What exists is the *instrumentation*: fixtures,
-> component tests, and the trajectory harness. Every threshold or sample size mentioned is
-> labelled as proposed by the team, per the breakdown's §2 rule.
+> **A single live trajectory pilot has been recorded.** Its raw artifact is retained under
+> `results/raw/`; it covers seven synthetic pilot cases on the recorded configuration and
+> is not a final accuracy, latency, or cost result. Receipt extraction and statement-matching
+> accuracy remain unmeasured because independently verified ground truth is still absent.
 
 ---
 
@@ -78,6 +78,7 @@ evaluation/
     ├── test_w3_trajectory.py        W3 — the harness itself
     ├── test_w5_retrieval.py         W5 — retrieval mechanism (synthetic vectors)
     ├── test_w6_performance.py       W6 — structural only (no timing assertions)
+    ├── test_fixture_isolation.py    Test infrastructure — SQLite fixture lifecycle
     ├── test_report.py               Result writer + configuration capture
     └── test_docs_match_code.py      Guard against docs drifting from the code
 ```

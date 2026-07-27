@@ -26,7 +26,7 @@ _NO_RESULTS_DISCLAIMER = "Nothing in this directory is a measured evaluation res
 
 
 def _read(name: str) -> str:
-    return (EVALUATION_DIR / name).read_text()
+    return (EVALUATION_DIR / name).read_text(encoding="utf-8")
 
 
 # --------------------------------------------------------------------------- #

@@ -1,0 +1,621 @@
+{
+  "run_id": "trajectory-20260727T020610Z",
+  "name": "stage1-trajectory",
+  "configuration": {
+    "utc_timestamp": "2026-07-27T02:06:13.386448+00:00",
+    "commit": "c816198f34bf0b3d281a76adb7bc662c4e50cb78",
+    "branch": "main",
+    "git_dirty": true,
+    "python": "3.11.9",
+    "platform": "win32",
+    "vision_model": "gemma4:e4b",
+    "agent_model": "gemma4:12b",
+    "embed_model": "nomic-embed-text",
+    "vision_model_digest": null,
+    "agent_model_digest": null,
+    "ollama_host": "http://103.231.240.155:11434",
+    "ledger_db_path": "C:\\Users\\goaar\\AppData\\Local\\Temp\\snag-stage1-trajectory-ledger.db",
+    "ledger_db_sha256": "cd01e67b00fcc763be32570304385bf8e76175ca8e5222b50b73de5d24867e67",
+    "mlflow_tracking_uri": null,
+    "mlflow_enabled": false,
+    "mlflow_sample_rate": 1.0,
+    "ocr_max_image_dim": 1600,
+    "ocr_num_ctx": 8192,
+    "ocr_num_predict": 4096,
+    "ocr_concurrency": 3,
+    "agent_num_ctx": 8192,
+    "max_agent_steps": 3,
+    "deployment": "local"
+  },
+  "configuration_gaps": [
+    "working tree is dirty \u2014 the commit does not describe what ran",
+    "model digests are unset \u2014 mutable tags cannot identify a model"
+  ],
+  "results": {
+    "summary": {
+      "cases": 7,
+      "passed": 6,
+      "failed": 1,
+      "pass_rate": 0.8571428571428571,
+      "checks": {
+        "required_events": {
+          "passed": 7,
+          "total": 7,
+          "failed_cases": [],
+          "rate": 1.0
+        },
+        "prohibited_events": {
+          "passed": 7,
+          "total": 7,
+          "failed_cases": [],
+          "rate": 1.0
+        },
+        "allowed_tools": {
+          "passed": 5,
+          "total": 5,
+          "failed_cases": [],
+          "rate": 1.0
+        },
+        "expected_tools": {
+          "passed": 4,
+          "total": 4,
+          "failed_cases": [],
+          "rate": 1.0
+        },
+        "max_tool_calls": {
+          "passed": 7,
+          "total": 7,
+          "failed_cases": [],
+          "rate": 1.0
+        },
+        "no_repeated_tool_calls": {
+          "passed": 7,
+          "total": 7,
+          "failed_cases": [],
+          "rate": 1.0
+        },
+        "reached_terminal_state": {
+          "passed": 7,
+          "total": 7,
+          "failed_cases": [],
+          "rate": 1.0
+        },
+        "final_supported_by_observation": {
+          "passed": 5,
+          "total": 6,
+          "failed_cases": [
+            "RCT-006"
+          ],
+          "rate": 0.8333333333333334
+        }
+      },
+      "failed_case_ids": [
+        "RCT-006"
+      ]
+    },
+    "collection_errors": 0,
+    "taxonomy": {
+      "max_tool_calls": [],
+      "expected_tools": [],
+      "final_supported_by_observation": [
+        "RCT-006"
+      ],
+      "no_repeated_tool_calls": [],
+      "required_events": [],
+      "reached_terminal_state": [],
+      "allowed_tools": [],
+      "prohibited_events": []
+    },
+    "cases": [
+      {
+        "case_id": "RCT-001",
+        "passed": true,
+        "checks": {
+          "required_events": true,
+          "prohibited_events": true,
+          "allowed_tools": true,
+          "expected_tools": true,
+          "max_tool_calls": true,
+          "no_repeated_tool_calls": true,
+          "reached_terminal_state": true,
+          "final_supported_by_observation": true
+        },
+        "trajectory": {
+          "event_types": [
+            "start",
+            "action",
+            "observation",
+            "observation",
+            "final"
+          ],
+          "tools_called": [
+            "sql_ledger"
+          ],
+          "tool_calls": [
+            [
+              "sql_ledger",
+              "what is my total spend across all receipts?"
+            ]
+          ],
+          "terminal_event": "final",
+          "final_answer": "You spent a total of \u20b11,585.00.",
+          "clarification": null,
+          "error": null,
+          "repeated_tool_calls": 0,
+          "token_count": 151
+        },
+        "check_details": [
+          {
+            "name": "required_events",
+            "passed": true,
+            "detail": "all present"
+          },
+          {
+            "name": "prohibited_events",
+            "passed": true,
+            "detail": "none present"
+          },
+          {
+            "name": "allowed_tools",
+            "passed": true,
+            "detail": "within allowlist"
+          },
+          {
+            "name": "expected_tools",
+            "passed": true,
+            "detail": "matched"
+          },
+          {
+            "name": "max_tool_calls",
+            "passed": true,
+            "detail": "1 <= 3"
+          },
+          {
+            "name": "no_repeated_tool_calls",
+            "passed": true,
+            "detail": "no repeats"
+          },
+          {
+            "name": "reached_terminal_state",
+            "passed": true,
+            "detail": "terminal=final"
+          },
+          {
+            "name": "final_supported_by_observation",
+            "passed": true,
+            "detail": "has observations"
+          }
+        ]
+      },
+      {
+        "case_id": "RCT-002",
+        "passed": true,
+        "checks": {
+          "required_events": true,
+          "prohibited_events": true,
+          "allowed_tools": true,
+          "expected_tools": true,
+          "max_tool_calls": true,
+          "no_repeated_tool_calls": true,
+          "reached_terminal_state": true,
+          "final_supported_by_observation": true
+        },
+        "trajectory": {
+          "event_types": [
+            "start",
+            "action",
+            "observation",
+            "action",
+            "observation",
+            "final"
+          ],
+          "tools_called": [
+            "sql_ledger",
+            "sql_ledger"
+          ],
+          "tool_calls": [
+            [
+              "sql_ledger",
+              "what is my largest single expense?"
+            ],
+            [
+              "sql_ledger",
+              "what is the highest amount on any single receipt?"
+            ]
+          ],
+          "terminal_event": "final",
+          "final_answer": "Your largest single expense was \u20b11,500.00.",
+          "clarification": null,
+          "error": null,
+          "repeated_tool_calls": 0,
+          "token_count": 160
+        },
+        "check_details": [
+          {
+            "name": "required_events",
+            "passed": true,
+            "detail": "all present"
+          },
+          {
+            "name": "prohibited_events",
+            "passed": true,
+            "detail": "none present"
+          },
+          {
+            "name": "allowed_tools",
+            "passed": true,
+            "detail": "within allowlist"
+          },
+          {
+            "name": "expected_tools",
+            "passed": true,
+            "detail": "matched"
+          },
+          {
+            "name": "max_tool_calls",
+            "passed": true,
+            "detail": "2 <= 3"
+          },
+          {
+            "name": "no_repeated_tool_calls",
+            "passed": true,
+            "detail": "no repeats"
+          },
+          {
+            "name": "reached_terminal_state",
+            "passed": true,
+            "detail": "terminal=final"
+          },
+          {
+            "name": "final_supported_by_observation",
+            "passed": true,
+            "detail": "has observations"
+          }
+        ]
+      },
+      {
+        "case_id": "RCT-003",
+        "passed": true,
+        "checks": {
+          "required_events": true,
+          "prohibited_events": true,
+          "allowed_tools": true,
+          "expected_tools": true,
+          "max_tool_calls": true,
+          "no_repeated_tool_calls": true,
+          "reached_terminal_state": true,
+          "final_supported_by_observation": true
+        },
+        "trajectory": {
+          "event_types": [
+            "start",
+            "action",
+            "observation",
+            "observation",
+            "final"
+          ],
+          "tools_called": [
+            "search_receipts"
+          ],
+          "tool_calls": [
+            [
+              "search_receipts",
+              "cooking oil"
+            ]
+          ],
+          "terminal_event": "final",
+          "final_answer": "I'm not sure how to answer that.",
+          "clarification": null,
+          "error": null,
+          "repeated_tool_calls": 0,
+          "token_count": 86
+        },
+        "check_details": [
+          {
+            "name": "required_events",
+            "passed": true,
+            "detail": "all present"
+          },
+          {
+            "name": "prohibited_events",
+            "passed": true,
+            "detail": "none present"
+          },
+          {
+            "name": "allowed_tools",
+            "passed": true,
+            "detail": "within allowlist"
+          },
+          {
+            "name": "expected_tools",
+            "passed": true,
+            "detail": "matched"
+          },
+          {
+            "name": "max_tool_calls",
+            "passed": true,
+            "detail": "1 <= 3"
+          },
+          {
+            "name": "no_repeated_tool_calls",
+            "passed": true,
+            "detail": "no repeats"
+          },
+          {
+            "name": "reached_terminal_state",
+            "passed": true,
+            "detail": "terminal=final"
+          },
+          {
+            "name": "final_supported_by_observation",
+            "passed": true,
+            "detail": "has observations"
+          }
+        ]
+      },
+      {
+        "case_id": "RCT-004",
+        "passed": true,
+        "checks": {
+          "required_events": true,
+          "prohibited_events": true,
+          "allowed_tools": true,
+          "expected_tools": true,
+          "max_tool_calls": true,
+          "no_repeated_tool_calls": true,
+          "reached_terminal_state": true,
+          "final_supported_by_observation": true
+        },
+        "trajectory": {
+          "event_types": [
+            "start",
+            "action",
+            "observation",
+            "observation",
+            "final"
+          ],
+          "tools_called": [
+            "search_receipts"
+          ],
+          "tool_calls": [
+            [
+              "search_receipts",
+              "items bought at sm supermarket"
+            ]
+          ],
+          "terminal_event": "final",
+          "final_answer": "At SM Supermarket, you purchased Rice (5kg x1), Cooking oil (1L x2), and Chicken (1kg x1).",
+          "clarification": null,
+          "error": null,
+          "repeated_tool_calls": 0,
+          "token_count": 169
+        },
+        "check_details": [
+          {
+            "name": "required_events",
+            "passed": true,
+            "detail": "all present"
+          },
+          {
+            "name": "prohibited_events",
+            "passed": true,
+            "detail": "none present"
+          },
+          {
+            "name": "allowed_tools",
+            "passed": true,
+            "detail": "within allowlist"
+          },
+          {
+            "name": "expected_tools",
+            "passed": true,
+            "detail": "matched"
+          },
+          {
+            "name": "max_tool_calls",
+            "passed": true,
+            "detail": "1 <= 3"
+          },
+          {
+            "name": "no_repeated_tool_calls",
+            "passed": true,
+            "detail": "no repeats"
+          },
+          {
+            "name": "reached_terminal_state",
+            "passed": true,
+            "detail": "terminal=final"
+          },
+          {
+            "name": "final_supported_by_observation",
+            "passed": true,
+            "detail": "has observations"
+          }
+        ]
+      },
+      {
+        "case_id": "RCT-005",
+        "passed": true,
+        "checks": {
+          "required_events": true,
+          "prohibited_events": true,
+          "max_tool_calls": true,
+          "no_repeated_tool_calls": true,
+          "reached_terminal_state": true
+        },
+        "trajectory": {
+          "event_types": [
+            "start",
+            "clarify"
+          ],
+          "tools_called": [],
+          "tool_calls": [],
+          "terminal_event": "clarify",
+          "final_answer": null,
+          "clarification": "You recently added 2 receipts, so \"recent receipt\" could mean any of them \u2014 which one? #2 7-Eleven, 2026-06-11 \u2014 85.0; #1 SM Supermarket, 2026-06-10 \u2014 1500.0",
+          "error": null,
+          "repeated_tool_calls": 0,
+          "token_count": 0
+        },
+        "check_details": [
+          {
+            "name": "required_events",
+            "passed": true,
+            "detail": "all present"
+          },
+          {
+            "name": "prohibited_events",
+            "passed": true,
+            "detail": "none present"
+          },
+          {
+            "name": "max_tool_calls",
+            "passed": true,
+            "detail": "0 <= 0"
+          },
+          {
+            "name": "no_repeated_tool_calls",
+            "passed": true,
+            "detail": "no repeats"
+          },
+          {
+            "name": "reached_terminal_state",
+            "passed": true,
+            "detail": "terminal=clarify"
+          }
+        ]
+      },
+      {
+        "case_id": "RCT-006",
+        "passed": false,
+        "checks": {
+          "required_events": true,
+          "prohibited_events": true,
+          "max_tool_calls": true,
+          "no_repeated_tool_calls": true,
+          "reached_terminal_state": true,
+          "final_supported_by_observation": false
+        },
+        "trajectory": {
+          "event_types": [
+            "start",
+            "final"
+          ],
+          "tools_called": [],
+          "tool_calls": [],
+          "terminal_event": "final",
+          "final_answer": "I'm not sure how to answer that.",
+          "clarification": null,
+          "error": null,
+          "repeated_tool_calls": 0,
+          "token_count": 0
+        },
+        "check_details": [
+          {
+            "name": "required_events",
+            "passed": true,
+            "detail": "all present"
+          },
+          {
+            "name": "prohibited_events",
+            "passed": true,
+            "detail": "none present"
+          },
+          {
+            "name": "max_tool_calls",
+            "passed": true,
+            "detail": "0 <= 3"
+          },
+          {
+            "name": "no_repeated_tool_calls",
+            "passed": true,
+            "detail": "no repeats"
+          },
+          {
+            "name": "reached_terminal_state",
+            "passed": true,
+            "detail": "terminal=final"
+          },
+          {
+            "name": "final_supported_by_observation",
+            "passed": false,
+            "detail": "final answer produced without any tool observation"
+          }
+        ]
+      },
+      {
+        "case_id": "RCT-007",
+        "passed": true,
+        "checks": {
+          "required_events": true,
+          "prohibited_events": true,
+          "allowed_tools": true,
+          "max_tool_calls": true,
+          "no_repeated_tool_calls": true,
+          "reached_terminal_state": true,
+          "final_supported_by_observation": true
+        },
+        "trajectory": {
+          "event_types": [
+            "start",
+            "action",
+            "observation",
+            "final"
+          ],
+          "tools_called": [
+            "sql_ledger"
+          ],
+          "tool_calls": [
+            [
+              "sql_ledger",
+              "total amount spent at 7-eleven"
+            ]
+          ],
+          "terminal_event": "final",
+          "final_answer": "You spent a total of \u20b185.00 at 7-Eleven.",
+          "clarification": null,
+          "error": null,
+          "repeated_tool_calls": 0,
+          "token_count": 96
+        },
+        "check_details": [
+          {
+            "name": "required_events",
+            "passed": true,
+            "detail": "all present"
+          },
+          {
+            "name": "prohibited_events",
+            "passed": true,
+            "detail": "none present"
+          },
+          {
+            "name": "allowed_tools",
+            "passed": true,
+            "detail": "within allowlist"
+          },
+          {
+            "name": "max_tool_calls",
+            "passed": true,
+            "detail": "1 <= 3"
+          },
+          {
+            "name": "no_repeated_tool_calls",
+            "passed": true,
+            "detail": "no repeats"
+          },
+          {
+            "name": "reached_terminal_state",
+            "passed": true,
+            "detail": "terminal=final"
+          },
+          {
+            "name": "final_supported_by_observation",
+            "passed": true,
+            "detail": "has observations"
+          }
+        ]
+      }
+    ]
+  }
+}

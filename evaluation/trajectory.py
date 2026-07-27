@@ -401,7 +401,7 @@ def load_cases(path: Path | str) -> list[TrajectoryCase]:
     Duplicate case IDs are rejected: silently overwriting a case would corrupt the
     denominator of every metric computed from the set.
     """
-    raw = json.loads(Path(path).read_text())
+    raw = json.loads(Path(path).read_text(encoding="utf-8"))
     cases = [TrajectoryCase.from_dict(d) for d in raw["cases"]]
 
     seen: set[str] = set()

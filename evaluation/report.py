@@ -170,7 +170,7 @@ def write_result(name: str, payload: dict[str, Any], kind: str = "raw",
 
 
 def read_result(path: Path | str) -> dict[str, Any]:
-    return json.loads(Path(path).read_text())
+    return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
 # --------------------------------------------------------------------------- #
