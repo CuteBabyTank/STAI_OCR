@@ -277,8 +277,12 @@ def test_unknown_tool_returns_an_observation_rather_than_raising(core):
 
 def test_agent_step_budget_is_a_small_positive_integer(core):
     """Records the real value so W3 cases stop copying a number from a lecture
-    example. If this changes, the trajectory expectations must be revisited."""
-    assert core._MAX_AGENT_STEPS == 3
+    example. If this changes, the trajectory expectations must be revisited.
+
+    Raised 3 -> 4 when `add_expense` landed: recording an expense can legitimately
+    need two tool calls (list_accounts to see the real names, then the write) plus
+    the turn that answers, and a refused account resolution needs one more."""
+    assert core._MAX_AGENT_STEPS == 4
 
 
 # --------------------------------------------------------------------------- #

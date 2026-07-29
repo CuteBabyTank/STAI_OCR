@@ -152,7 +152,9 @@ def stub_vision(core, monkeypatch):
                 items=[core.LineItem(description="Item", quantity=1,
                                      unit_price=100.0, amount=100.0)],
             )
-            return data, [], {"overall": 0.9}, {}
+            # (data, review_reasons, confidence, raw_response, audit) — the 5th
+            # element is the arithmetic audit added alongside `audit_extraction`.
+            return data, [], {"overall": 0.9}, {}, []
 
         monkeypatch.setattr(core, "_run_vision_model", fake_run)
         return seen

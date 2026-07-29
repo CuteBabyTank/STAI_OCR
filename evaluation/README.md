@@ -66,6 +66,8 @@ evaluation/
     ├── test_w2a_coercion.py         W2-A — JSON / numeric coercion, description cleanup
     ├── test_w2a_confidence.py       W2-A — field confidence + value-equality gating
     ├── test_w2a_pdf_batch.py        W2-A — PDF page expansion, batch failure isolation
+    ├── test_w2a_audit.py            W2-A — post-extraction arithmetic audit
+    │                                    (items vs SUBTOTAL, VAT, payment, line math)
     ├── test_w2b_finance.py          W2-B/W2-E — finance components
     ├── test_w2b_budgets.py          W2-B — budget aggregation, periods, carry-forward
     ├── test_w2c_quick_python.py     W2-C — Python Quick Chat parser
@@ -75,6 +77,18 @@ evaluation/
     ├── test_w2e_persistence.py      W2-A/W2-E — receipt save, linkage, posting fidelity
     ├── test_w2f_reconciliation.py   W2-F — receipt-to-STATEMENT reconciliation
     ├── test_w2f_reconciliation_api.py  W2-F — the same, over the real HTTP routes
+    ├── test_w2g_expense_tool.py     W2-G — the agent's WRITE tool + name resolvers
+    ├── test_w2g_expense_adversarial.py  W2-G — adversarial attacks on the same write
+    │                                    path (double-charge, wrong-account, clarify)
+    ├── test_w2h_finance_tools.py    W2-H — income, transfers, goals, debts,
+    │                                    receivables; create / edit / delete
+    ├── test_w2i_agent_security.py   W2-I — prompt injection through data,
+    │                                    fabrication, scope, tool-registry integrity
+    ├── test_w2j_history_window.py   W2-J — conversation window: budget, recency,
+    │                                    prompt placement, context arithmetic,
+    │                                    resuming a clarified request
+    ├── test_w2k_account_attribution.py  W2-K — a write may only land on an account
+    │                                    the USER named, not one the model invented
     ├── test_w3_trajectory.py        W3 — the harness itself
     ├── test_w5_retrieval.py         W5 — retrieval mechanism (synthetic vectors)
     ├── test_w6_performance.py       W6 — structural only (no timing assertions)

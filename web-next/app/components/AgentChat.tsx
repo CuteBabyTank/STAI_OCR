@@ -6,6 +6,7 @@
 // quick-add FAB can step aside while the chat panel is open. Extracted from the
 // scan page so every route gets the assistant, not just /scan.
 import { useEffect, useRef, useState } from "react";
+import { broadcastRefresh } from "../lib/useRefresh";
 
 // One step in the ReAct agent's reasoning trace, streamed live from the backend.
 interface ReasonStep {
@@ -48,6 +49,21 @@ function obsSummary(ev: any): string {
       .join(", ");
     return `searched receipts · ${hits.length} found · ${names}`;
   }
+  if (d.kind === "accounts") {
+    const n = (d.accounts || []).length;
+    return `looked up accounts · ${n} account${n === 1 ? "" : "s"}`;
+  }
+  // The one tool that writes: name the amount, the account and the transaction id,
+  // so a recorded expense is never a silent side effect of a chat message.
+  if (d.kind === "txn") {
+    const amt = Number(d.amount || 0).toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+    return `recorded expense #${d.transaction_id} · ${amt} on ${d.account}${
+      d.category ? ` · ${d.category}` : ""
+    }`;
+  }
   if (d.kind === "note") return "already had that result";
   return String(ev.text || "").slice(0, 120);
 }
@@ -79,15 +95,30 @@ const CHIPS = [
 export default function AgentChat({
   open,
   onOpenChange,
+  minimized = false,
+  onMinimizedChange,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
+  minimized?: boolean;
+  onMinimizedChange?: (v: boolean) => void;
 }) {
   const [seeded, setSeeded] = useState(false);
   const [msgs, setMsgs] = useState<ChatMsg[]>([]);
   const [typing, setTyping] = useState(false);
   const [chatText, setChatText] = useState("");
+  const [unread, setUnread] = useState(false);
   const chatBodyRef = useRef<HTMLDivElement>(null);
+  // The SSE handler closes over the state it was created with, so a `minimized`
+  // read from that closure would be whatever it was when the question was sent —
+  // exactly wrong, since minimizing usually happens WHILE the answer streams.
+  const minRef = useRef(minimized);
+  minRef.current = minimized;
+
+  // Restoring the panel means the user has seen whatever arrived.
+  useEffect(() => {
+    if (!minimized) setUnread(false);
+  }, [minimized]);
 
   // Seed the greeting the first time the panel opens.
   useEffect(() => {
@@ -113,12 +144,22 @@ export default function AgentChat({
     if (!q || typing) return;
     // Snapshot the conversation so far (before this question) so the agent can
     // resolve follow-ups like "what did each of those cost".
+    //
+    // Matches core._HISTORY_TURNS. This slice used to be the binding constraint:
+    // it capped at 10 regardless of what the server would accept, so raising the
+    // server-side window alone changed nothing. The server still budgets the block
+    // by characters and drops the oldest, so sending more than it can use is safe —
+    // it just lets the server make the trimming decision with full information.
     const history = msgs
       .filter((m) => m.text)
-      .slice(-10)
+      .slice(-30)
       .map((m) => ({
         role: m.who === "me" ? "user" : "assistant",
         text: m.text,
+        // Marks a bubble that was a question back to the user. The backend uses it
+        // to rejoin a short reply ("from Cash") with the request it answers —
+        // without the flag it would have to guess from punctuation.
+        clarify: !!m.clarify,
       }));
     // Append the user's message plus an empty bot bubble we fill in as events stream.
     setMsgs((m) => [
@@ -187,6 +228,16 @@ export default function AgentChat({
             ? `reasoned · ${nCalls} tool call${nCalls === 1 ? "" : "s"}`
             : undefined,
         }));
+        if (minRef.current) setUnread(true);
+        // The agent can WRITE (add_expense, record_activity, …). Every other view
+        // is already subscribed to "ledger:refresh" via useRefresh, so one
+        // broadcast puts the dashboard, wallet, debts and history back in sync
+        // without a reload. Without this the chat confirms a payment the page
+        // behind it still shows as not having happened.
+        //
+        // This matters most when minimized: the whole point of collapsing is to
+        // watch the page, so the page had better be current.
+        if ((ev.writes || []).length) broadcastRefresh();
       } else if (ev.type === "clarify") {
         // The agent is unsure and is asking the user a question instead of guessing.
         patchBot((b) => ({
@@ -198,6 +249,13 @@ export default function AgentChat({
             s.live ? { ...s, live: false } : s,
           ),
         }));
+        // A clarification is a question waiting on the user — the one thing they
+        // must not miss while the panel is parked.
+        if (minRef.current) setUnread(true);
+        // A clarification can still follow a completed write (the agent recorded
+        // something, then asked a follow-up). Those writes are real and the pages
+        // must reflect them, so this branch broadcasts too.
+        if ((ev.writes || []).length) broadcastRefresh();
       } else if (ev.type === "error") {
         patchBot((b) => ({
           ...b,
@@ -270,40 +328,95 @@ export default function AgentChat({
     <>
       <button
         className="robot-fab"
-        onClick={() => onOpenChange(!open)}
-        aria-label="Ask the assistant"
+        onClick={() => {
+          // From minimized, the robot restores rather than closes — a collapsed
+          // panel and a closed one look different, so the same button doing the
+          // same thing to both would feel broken.
+          if (open && minimized) onMinimizedChange?.(false);
+          else onOpenChange(!open);
+        }}
+        aria-label={
+          open && minimized ? "Expand the assistant" : "Ask the assistant"
+        }
       >
-        {!open && <span className="ping" />}
+        {(!open || (minimized && unread)) && <span className="ping" />}
         <span className="float">
           <RobotSVG />
         </span>
       </button>
 
       <div
-        className={"chat" + (open ? " open" : "")}
+        className={"chat" + (open ? " open" : "") + (minimized ? " min" : "")}
         role="dialog"
         aria-label="Finance assistant"
       >
-        <div className="chat-head">
+        {/* Collapsed, the whole header is the restore target — a 30px chevron is a
+            needlessly small hit area when the bar has nothing else to click. */}
+        <div
+          className="chat-head"
+          onClick={minimized ? () => onMinimizedChange?.(false) : undefined}
+        >
           <div className="chat-ava">
             <RobotSVG eye="var(--accent)" body="var(--accent-wash)" />
+            {minimized && unread && <span className="unread" />}
           </div>
           <div>
             <div className="ct">Finance Assistant</div>
             <div className="cs">
-              <span className="live" />
-              ReAct agent · shows its reasoning
+              {minimized && unread ? (
+                <span className="new">New reply · click to open</span>
+              ) : minimized && typing ? (
+                <>
+                  <span className="live" />
+                  Working on it…
+                </>
+              ) : (
+                <>
+                  <span className="live" />
+                  ReAct agent · shows its reasoning
+                </>
+              )}
             </div>
           </div>
-          <button
-            className="close-x"
-            onClick={() => onOpenChange(false)}
-            aria-label="Close chat"
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-              <path d="M6 6l12 12M18 6 6 18" />
-            </svg>
-          </button>
+          <div className="head-actions">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onMinimizedChange?.(!minimized);
+              }}
+              aria-label={minimized ? "Expand chat" : "Minimize chat"}
+              aria-expanded={!minimized}
+              title={minimized ? "Expand" : "Minimize"}
+            >
+              <svg
+                className="chev"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M6 9l6 6 6-6" />
+              </svg>
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenChange(false);
+              }}
+              aria-label="Close chat"
+              title="Close"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeLinecap="round"
+              >
+                <path d="M6 6l12 12M18 6 6 18" />
+              </svg>
+            </button>
+          </div>
         </div>
         <div className="chat-body" ref={chatBodyRef}>
           {msgs.map((m, i) => {

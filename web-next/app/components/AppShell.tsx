@@ -24,6 +24,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   // panel is open — both live in the bottom-right corner and would otherwise
   // overlap the panel.
   const [chatOpen, setChatOpen] = useState(false);
+  // Minimized is a third state, not "closed": the conversation stays alive and
+  // the panel stays docked as a header bar. Held here rather than inside
+  // AgentChat because the quick-add FAB depends on it — a collapsed panel frees
+  // the corner, so hiding the FAB then would be hiding it for nothing.
+  const [chatMin, setChatMin] = useState(false);
 
   return (
     <div className="shell">
@@ -31,11 +36,22 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       {children}
       {showFab && (
         <Fab
-          hidden={chatOpen}
+          hidden={chatOpen && !chatMin}
           onChange={() => window.dispatchEvent(new Event("ledger:refresh"))}
         />
       )}
-      {showChat && <AgentChat open={chatOpen} onOpenChange={setChatOpen} />}
+      {showChat && (
+        <AgentChat
+          open={chatOpen}
+          onOpenChange={(v) => {
+            setChatOpen(v);
+            // Reopening should never land on a collapsed panel.
+            if (v) setChatMin(false);
+          }}
+          minimized={chatMin}
+          onMinimizedChange={setChatMin}
+        />
+      )}
     </div>
   );
 }

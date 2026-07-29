@@ -274,14 +274,51 @@ def test_failure_taxonomy_is_empty_when_everything_passes():
 # Case file loading and validation
 # --------------------------------------------------------------------------- #
 def test_the_shipped_case_file_loads_and_validates():
+    """Every case belongs to a declared family. `RCT-` is ReAct routing over
+    read-only tools; `ACT-` is the write path (`add_expense`), which needs its own
+    prefix because a failing ACT case can leave data behind and a failing RCT case
+    cannot. A new prefix must be added here deliberately, not by accident."""
     cases = load_cases(CASES_PATH)
     assert cases, "case file is empty"
-    assert all(c.case_id.startswith("RCT-") for c in cases)
+    families = {c.case_id.split("-")[0] for c in cases}
+    assert families == {"RCT", "ACT", "SEC"}, f"undeclared case family in {families}"
+
+
+def test_the_write_family_is_the_only_one_allowed_to_use_a_write_tool():
+    """Write tools mutate the ledger. If one ever appears in an `allowed_tools`
+    outside the ACT family, a routing or security case could silently start
+    writing — and a SEC case that writes is a failed guardrail passing as a run."""
+    from evaluation.trajectory import WRITE_TOOLS
+
+    for case in load_cases(CASES_PATH):
+        used = WRITE_TOOLS & set(case.allowed_tools or [])
+        if used:
+            assert case.case_id.startswith("ACT-"), f"{case.case_id} allows {used}"
+
+
+def test_the_security_family_permits_no_writes_at_all():
+    """The SEC cases exist to prove the agent does NOT act on an off-topic or
+    hostile input. Allowing a write tool would make them unfalsifiable."""
+    from evaluation.trajectory import WRITE_TOOLS
+
+    for case in load_cases(CASES_PATH):
+        if case.case_id.startswith("SEC-"):
+            assert not (WRITE_TOOLS & set(case.allowed_tools or [])), case.case_id
+
+
+def test_the_write_refusal_case_forbids_writing():
+    """ACT-003 is the safety case: an amount with no account named must end in a
+    question, not a charge. If `add_expense` were ever added to its allowed_tools the
+    case would pass while the agent guessed an account — the exact failure it exists
+    to catch."""
+    case = next(c for c in load_cases(CASES_PATH) if c.case_id == "ACT-003")
+    assert "add_expense" not in (case.allowed_tools or [])
+    assert "clarify" in case.required_events
 
 
 def test_shipped_cases_respect_the_real_step_budget():
     """Guards against the breakdown's own warning about copying max_tool_calls from
-    an unrelated example. core._MAX_AGENT_STEPS is 3."""
+    an unrelated example. The bound is read from the code, never hardcoded here."""
     import core
 
     for case in load_cases(CASES_PATH):
@@ -367,13 +404,32 @@ def test_agent_stream_event_contract(core):
 
 
 def test_known_tools_match_the_real_dispatcher(core):
-    """KNOWN_TOOLS must track core._run_agent_tool, or case validation would reject
-    a legitimate tool or accept a nonexistent one."""
-    import inspect
+    """KNOWN_TOOLS must track the real tool registry, or case validation would
+    reject a legitimate tool or accept a nonexistent one.
 
-    source = inspect.getsource(core._run_agent_tool)
-    for tool in KNOWN_TOOLS:
-        assert f'"{tool}"' in source, f"{tool!r} is no longer dispatched by core"
+    Compared against `core.KNOWN_TOOLS` rather than by grepping
+    `_run_agent_tool`'s source: the write tools now dispatch through a registry
+    dict, so their names no longer appear as literals in that function and a source
+    scan would silently pass while checking nothing."""
+    assert KNOWN_TOOLS == core.KNOWN_TOOLS
+
+
+def test_the_write_tool_list_is_a_subset_of_the_known_tools():
+    """`WRITE_TOOLS` decides which cases can change data. A name in it that no
+    longer exists would silently stop protecting anything."""
+    from evaluation.trajectory import WRITE_TOOLS
+
+    assert WRITE_TOOLS < KNOWN_TOOLS
+
+
+def test_every_write_tool_has_a_canonical_dedup_key(core):
+    """`_canonical_tool_key` keys writes on their PARSED fields so a re-phrased
+    duplicate collapses to one entry. A write tool missing from that list would fall
+    back to raw-string keying — the exact hole that allowed a double charge."""
+    from evaluation.trajectory import WRITE_TOOLS
+
+    assert WRITE_TOOLS == core._WRITE_TOOL_NAMES
+    assert set(core._WRITE_TOOLS) == core._WRITE_TOOL_NAMES
 
 
 def test_event_types_constant_covers_the_documented_vocabulary():

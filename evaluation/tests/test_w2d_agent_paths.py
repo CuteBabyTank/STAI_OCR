@@ -201,11 +201,34 @@ def test_a_reply_with_neither_action_nor_answer_is_treated_as_the_answer(
     finance_fixture, core, scripted_model
 ):
     """Small models often reply in prose without the scaffolding. Discarding that
-    would strand the user with nothing."""
+    would strand the user with nothing, so the prose is still kept as the answer."""
+    scripted_model("I couldn't find anything matching that in your receipts.")
+    events = _drain(core, "What did I buy at the moon base?")
+    assert _types(events) == ["start", "final"]
+    assert "couldn't find" in events[-1]["answer"]
+    assert events[-1]["grounded"] is True
+
+
+def test_prose_that_states_a_figure_without_calling_a_tool_is_blocked(
+    finance_fixture, core, scripted_model
+):
+    """The exception to the test above, and the reason it changed.
+
+    A model that replies "you spent about 1,585 pesos" WITHOUT calling a tool did
+    not read that from the ledger — it came from its own weights. Passing it through
+    hands the user a fabricated balance that looks exactly like a real one. The
+    guardrail replaces it with an honest refusal rather than guessing what was meant.
+
+    Only figures are blocked: prose with no money claim still reaches the user (the
+    test above). What is measured here is Snag's response to a fabricating model,
+    not how often a real model fabricates — that needs a live run."""
     scripted_model("You spent about 1,585 pesos in total.")
     events = _drain(core, "How much did I spend?")
-    assert _types(events) == ["start", "final"]
-    assert "1,585" in events[-1]["answer"]
+
+    answer = events[-1]["answer"]
+    assert "1,585" not in answer
+    assert events[-1]["grounded"] is False
+    assert "receipts and accounts" in answer
 
 
 def test_an_unknown_tool_does_not_crash_the_run(finance_fixture, core, scripted_model):

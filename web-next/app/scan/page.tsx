@@ -12,6 +12,7 @@ import { Select } from "../components/ui";
 import PeriodControl from "../components/PeriodControl";
 import TxnRow from "../components/TxnRow";
 import ConfidenceBadge from "../components/ConfidenceBadge";
+import { broadcastRefresh } from "../lib/useRefresh";
 
 interface PeriodSel {
   granularity: Granularity;
@@ -29,7 +30,20 @@ interface BatchItem {
   currency?: string;
   needsReview?: boolean;
   confidence?: number; // measured OCR confidence (0..1) from token logprobs
+  audit?: AuditFinding[]; // arithmetic checks the receipt failed
   error?: string;
+}
+
+// One failed arithmetic check from the backend's post-extraction audit
+// (`extraction.audit_receipt`). `error` means the receipt does not add up and a
+// human should confirm it; `warning` is worth showing but not blocking.
+interface AuditFinding {
+  code: string;
+  severity: "error" | "warning";
+  message: string;
+  expected?: number | null;
+  found?: number | null;
+  difference?: number | null;
 }
 
 // One step in the ReAct agent's reasoning trace, streamed live from the backend.
@@ -115,11 +129,23 @@ export default function Dashboard() {
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [chatOpen, setChatOpen] = useState(false);
+  // Minimized is a third state: the panel collapses to its header so this page's
+  // receipt list stays readable, without ending the conversation.
+  const [chatMin, setChatMin] = useState(false);
+  const [chatUnread, setChatUnread] = useState(false);
   const [seeded, setSeeded] = useState(false);
   const [msgs, setMsgs] = useState<ChatMsg[]>([]);
   const [typing, setTyping] = useState(false);
   const [chatText, setChatText] = useState("");
   const chatBodyRef = useRef<HTMLDivElement>(null);
+  // The SSE handler closes over its creation-time state, and minimizing usually
+  // happens WHILE an answer streams — so the flag has to be read from a ref.
+  const chatMinRef = useRef(chatMin);
+  chatMinRef.current = chatMin;
+
+  useEffect(() => {
+    if (!chatMin) setChatUnread(false);
+  }, [chatMin]);
 
   const [showPast, setShowPast] = useState(false);
   const [pastMonth, setPastMonth] = useState("All months");
@@ -210,7 +236,7 @@ export default function Dashboard() {
           throw new Error(
             j.detail ||
               (res.status >= 500
-                ? "The model took too long to read these receipts (it may be busy). Try again in a moment."
+                ? "The model couldn't read these receipts (it may be busy). Try again in a moment."
                 : rawText.slice(0, 160) || res.statusText),
           );
         }
@@ -247,6 +273,9 @@ export default function Dashboard() {
                   typeof ok[0].confidence?.overall === "number"
                     ? ok[0].confidence.overall
                     : undefined,
+                // Flattened across pages: a 3-page PDF whose 2nd page doesn't add
+                // up must say so, not hide behind the 1st page's clean audit.
+                audit: ok.flatMap((r) => (r.audit || []) as AuditFinding[]),
               };
             }
             return next;
@@ -348,6 +377,10 @@ export default function Dashboard() {
       .map((m) => ({
         role: m.who === "me" ? "user" : "assistant",
         text: m.text,
+        // Marks a bubble that was a question back to the user. The backend uses it
+        // to rejoin a short reply ("from Cash") with the request it answers —
+        // without the flag it would have to guess from punctuation.
+        clarify: !!m.clarify,
       }));
     // Append the user's message plus an empty bot bubble we fill in as events stream.
     setMsgs((m) => [
@@ -416,6 +449,11 @@ export default function Dashboard() {
             ? `reasoned · ${nCalls} tool call${nCalls === 1 ? "" : "s"}`
             : undefined,
         }));
+        if (chatMinRef.current) setChatUnread(true);
+        // This page has its own copy of the agent panel, so it needs the same
+        // broadcast the floating AgentChat does — otherwise a write made from here
+        // leaves every other mounted view stale.
+        if ((ev.writes || []).length) broadcastRefresh();
       } else if (ev.type === "clarify") {
         // The agent is unsure and is asking the user a question instead of guessing.
         patchBot((b) => ({
@@ -427,6 +465,8 @@ export default function Dashboard() {
             s.live ? { ...s, live: false } : s,
           ),
         }));
+        if (chatMinRef.current) setChatUnread(true);
+        if ((ev.writes || []).length) broadcastRefresh();
       } else if (ev.type === "error") {
         patchBot((b) => ({
           ...b,
@@ -933,6 +973,21 @@ export default function Dashboard() {
                           >
                             {b.category}
                           </span>
+                          {/* Why it needs review. A bare "needs review" badge
+                              makes the user re-check the whole receipt; naming
+                              the failed sum points them at the one wrong line. */}
+                          {!!b.audit?.length && (
+                            <ul className="b-audit">
+                              {b.audit.map((f, i) => (
+                                <li
+                                  key={`${f.code}-${i}`}
+                                  className={`b-audit-${f.severity}`}
+                                >
+                                  {f.message}
+                                </li>
+                              ))}
+                            </ul>
+                          )}
                         </>
                       ) : b.status === "error" ? (
                         <>
@@ -992,40 +1047,94 @@ export default function Dashboard() {
       {/* Robot RAG assistant */}
       <button
         className="robot-fab"
-        onClick={() => (chatOpen ? setChatOpen(false) : openChat())}
-        aria-label="Ask the assistant"
+        onClick={() => {
+          // From minimized, restore rather than close — see AgentChat.
+          if (chatOpen && chatMin) setChatMin(false);
+          else if (chatOpen) setChatOpen(false);
+          else openChat();
+        }}
+        aria-label={
+          chatOpen && chatMin ? "Expand the assistant" : "Ask the assistant"
+        }
       >
-        {!chatOpen && <span className="ping" />}
+        {(!chatOpen || (chatMin && chatUnread)) && <span className="ping" />}
         <span className="float">
           <RobotSVG />
         </span>
       </button>
 
       <div
-        className={"chat" + (chatOpen ? " open" : "")}
+        className={
+          "chat" + (chatOpen ? " open" : "") + (chatMin ? " min" : "")
+        }
         role="dialog"
         aria-label="Receipt assistant"
       >
-        <div className="chat-head">
+        <div
+          className="chat-head"
+          onClick={chatMin ? () => setChatMin(false) : undefined}
+        >
           <div className="chat-ava">
             <RobotSVG eye="var(--accent)" body="var(--accent-wash)" />
+            {chatMin && chatUnread && <span className="unread" />}
           </div>
           <div>
             <div className="ct">Receipt Assistant</div>
             <div className="cs">
-              <span className="live" />
-              ReAct agent · shows its reasoning
+              {chatMin && chatUnread ? (
+                <span className="new">New reply · click to open</span>
+              ) : chatMin && typing ? (
+                <>
+                  <span className="live" />
+                  Working on it…
+                </>
+              ) : (
+                <>
+                  <span className="live" />
+                  ReAct agent · shows its reasoning
+                </>
+              )}
             </div>
           </div>
-          <button
-            className="close-x"
-            onClick={() => setChatOpen(false)}
-            aria-label="Close chat"
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-              <path d="M6 6l12 12M18 6 6 18" />
-            </svg>
-          </button>
+          <div className="head-actions">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setChatMin(!chatMin);
+              }}
+              aria-label={chatMin ? "Expand chat" : "Minimize chat"}
+              aria-expanded={!chatMin}
+              title={chatMin ? "Expand" : "Minimize"}
+            >
+              <svg
+                className="chev"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M6 9l6 6 6-6" />
+              </svg>
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setChatOpen(false);
+              }}
+              aria-label="Close chat"
+              title="Close"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeLinecap="round"
+              >
+                <path d="M6 6l12 12M18 6 6 18" />
+              </svg>
+            </button>
+          </div>
         </div>
         <div className="chat-body" ref={chatBodyRef}>
           {msgs.map((m, i) => {

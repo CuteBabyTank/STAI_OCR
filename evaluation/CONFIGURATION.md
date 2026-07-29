@@ -147,10 +147,21 @@ Code-derived, not proposals. Use these instead of copying numbers from lecture e
 
 | Constant | Value | Location |
 |---|---|---|
-| `_MAX_AGENT_STEPS` | `3` | `core.py:2617` |
-| Registered tools | `sql_ledger`, `search_receipts` | `core.py:2770` |
+| `_MAX_AGENT_STEPS` | `4` | `core._MAX_AGENT_STEPS` |
+| Registered tools | read: `sql_ledger`, `search_receipts`, `list_accounts`, `list_plans` · write: `add_expense`, `add_income`, `transfer_money`, `record_activity`, `create_plan`, `update_plan` | `core.KNOWN_TOOLS` |
+| Write-capable tools | `add_expense`, `add_income`, `transfer_money`, `record_activity`, `create_plan`, `update_plan` — every other tool is read-only | `core._WRITE_TOOLS` |
+| Observation sanitizer | ReAct control tokens and instruction-override phrasing are defanged in all tool output | `core._sanitize_observation` |
+| Grounding guardrail | a data claim with no tool call is replaced; ungrounded figures set `grounded=False` | `core._ungrounded_numbers` |
+| Single-expense ceiling | `ADD_EXPENSE_MAX_AMOUNT`, default `1000000` | `core.ADD_EXPENSE_MAX_AMOUNT` |
+| Ledger base currency | `LEDGER_BASE_CURRENCY`, default `PHP` | `core.LEDGER_BASE_CURRENCY` |
+| Audit tolerance | `max(₱1.00, amount × 2%)` | `extraction.AUDIT_ABS_TOLERANCE` / `AUDIT_REL_TOLERANCE` |
+| Audit VAT rate | `0.12` | `extraction.VAT_RATE` |
+| Audit finding codes | `items_vs_subtotal`, `items_vs_total`, `sales_breakdown_vs_subtotal`, `vat_rate`, `subtotal_vs_total`, `payment_vs_total`, `line_item_math`, `negative_total`, `negative_line_item` | `extraction.audit_receipt` |
 | Repeat-call guard | cached on 1st repeat; force-finalize at `repeats >= 2` | `core.py:2963` |
-| History window | 10 turns × 600 chars | `core.py:2755` |
+| History window | ≤30 messages, ≤1200 chars each, **≤8000 chars total** (the binding constraint), newest-first | `core._format_history` |
+| History placement | fenced, immediately before `Begin. Question:` — ~330 chars, not 2,368 behind the worked examples | `core._REACT_PROMPT` |
+| `AGENT_NUM_CTX` | `16384` (prompt alone is ~3,450 tok; measured prefill 0.24s@8k → 0.26s@16k) | `core.AGENT_NUM_CTX` |
+| `AGENT_NUM_PREDICT` | `512` | `core.AGENT_NUM_PREDICT` |
 | Retrieval `k` | `4` | `core.semantic_search` default |
 | SQL retry | 1 retry on a bad query | `core._sql_agent_core` |
 

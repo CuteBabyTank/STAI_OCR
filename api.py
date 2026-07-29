@@ -185,7 +185,7 @@ async def extract(file: UploadFile = File(...), model: str = DEFAULT_MODEL):
     try:
         # Offload the blocking vision call to a worker thread so the event loop
         # stays free to accept other requests during the ~seconds-long extraction.
-        data, disambiguation_reasons, confidence = await run_in_threadpool(_work)
+        data, disambiguation_reasons, confidence, audit = await run_in_threadpool(_work)
     except GuardrailError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
@@ -203,6 +203,10 @@ async def extract(file: UploadFile = File(...), model: str = DEFAULT_MODEL):
         # Measured confidence from the model's token logprobs (0..1), plus the
         # per-field / per-item breakdown so clients can flag weak reads.
         "confidence": confidence,
+        # Structured arithmetic audit: every check the receipt failed, with the two
+        # numbers and their difference. `review_reasons` above is the `error` subset
+        # rendered as prose; this carries the warnings too.
+        "audit": audit,
     }
 
 

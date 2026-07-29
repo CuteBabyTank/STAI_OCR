@@ -77,6 +77,30 @@ def core():
     return _core
 
 
+@pytest.fixture(autouse=True)
+def _reset_agent_write_guard():
+    """Clear the agent's run-scoped duplicate-write guard between tests.
+
+    `core._EXPENSE_WRITES_THIS_RUN` remembers what a single ReAct run has already
+    written, so a re-phrased duplicate cannot double-charge. In production
+    `agent_stream` resets it at the start of every turn. Tests that call the write
+    tools DIRECTLY never go through `agent_stream`, so without this the guard
+    persists across tests and the second test to record, say, 1000.00 on Cash today
+    is silently treated as a duplicate of the first — a test-order dependency that
+    would look like a broken tool.
+
+    Imported lazily and guarded: this file must not import `core` at module scope
+    (see the header), and the fixture must not fail for a test that never touches it.
+    """
+    try:
+        import core as _core
+
+        _core._EXPENSE_WRITES_THIS_RUN.reset()
+    except Exception:  # noqa: BLE001 - never let test wiring mask a real failure
+        pass
+    yield
+
+
 @pytest.fixture
 def accounts_by_name(finance):
     """Map account name -> row, including archived ones."""

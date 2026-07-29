@@ -476,6 +476,197 @@ def _category_id_for_name(con, name: str | None) -> int | None:
     return row[0] if row else None
 
 
+# --------------------------------------------------------------------------- #
+# Name resolution for conversational entry ("the BDO card", "miscellaneous")
+#
+# `_category_id_for_name` above is an exact-match bridge for OCR categories, which
+# come from a fixed taxonomy. Free text from a user does not: they write "BDO card"
+# for "BDO Credit Card" and "miscellaneous" for "Other". These resolvers do the
+# fuzzy half, and — critically — they report AMBIGUITY instead of picking a winner.
+# `parse_quick_text` silently falls back to `accounts[0]` when nothing matches,
+# which is acceptable for a UI draft the user visually confirms before saving. It is
+# NOT acceptable for the chat agent, which writes without a confirmation screen, so
+# these return a status the caller must handle rather than a best guess.
+# --------------------------------------------------------------------------- #
+
+# Words that carry no identifying information in an account reference. Dropped only
+# on a second pass, so a genuine "Credit Card" still matches on the first.
+_ACCOUNT_NOISE = frozenset({
+    "my", "the", "a", "an", "using", "with", "from", "on", "in", "to", "via",
+    "account", "acct", "card", "wallet", "bank",
+})
+
+# Names people use that are not the seeded category name. Keys are compared
+# lowercase against the whole query, values are real DEFAULT_CATEGORIES names.
+_CATEGORY_ALIASES = {
+    "misc": "Other",
+    "miscellaneous": "Other",
+    "others": "Other",
+    "uncategorized": "Other",
+    "grocery": "Groceries",
+    "dining": "Food",
+    "restaurant": "Food",
+    "meal": "Food",
+    "meals": "Food",
+    "utilities": "Bills",
+    "utility": "Bills",
+    "rent": "Bills",
+    "medical": "Health",
+    "medicine": "Health",
+    "pharmacy": "Health",
+    "commute": "Transport",
+    "transportation": "Transport",
+    "fare": "Transport",
+    "gas": "Transport",
+    "fun": "Entertainment",
+    "leisure": "Entertainment",
+    "clothes": "Shopping",
+    "clothing": "Shopping",
+}
+
+
+def _tokens(text: str) -> list[str]:
+    return [t for t in _re.split(r"[^a-z0-9]+", (text or "").lower()) if t]
+
+
+def _match_by_name(query: str, rows: list[dict], noise: frozenset[str]) -> list[dict]:
+    """Rank `rows` against `query` by name, returning every row in the best tier that
+    matched anything. Returning the whole tier (not the top row) is what lets the
+    caller see ambiguity: two accounts tied at the same tier is a question for the
+    user, not a coin flip."""
+    q = (query or "").strip().lower()
+    if not q:
+        return []
+    q_tokens = _tokens(q)
+    meaningful = [t for t in q_tokens if t not in noise] or q_tokens
+
+    def tier_exact(r):
+        return r["name"].lower() == q
+
+    def tier_all_tokens(r):
+        # every word of the query appears in the account name: "bdo card" matches
+        # "BDO Credit Card" but not "BPI Checking"
+        name_tokens = set(_tokens(r["name"]))
+        return bool(q_tokens) and all(t in name_tokens for t in q_tokens)
+
+    def tier_substring(r):
+        n = r["name"].lower()
+        return q in n or n in q
+
+    def tier_meaningful_tokens(r):
+        # drop filler words and require what's left: "my bdo" -> "bdo"
+        name_tokens = set(_tokens(r["name"]))
+        return bool(meaningful) and all(t in name_tokens for t in meaningful)
+
+    def tier_any_token(r):
+        # Pure digits are excluded: the caller may pass a whole phrase that still
+        # contains the amount ("1000"), and an account named after card digits
+        # ("BPI 1000") would otherwise absorb every expense of that value. A digit
+        # run is still reachable through the stricter tiers above.
+        name_tokens = set(_tokens(r["name"]))
+        return any(t in name_tokens for t in meaningful if not t.isdigit())
+
+    # Tier order is load-bearing. `tier_meaningful_tokens` MUST precede
+    # `tier_substring`: with accounts "BDO" and "BDO Credit Card", the query "the BDO
+    # card" hits `name in query` for "BDO" alone, and a lone hit is reported as a
+    # confident "ok" — silently charging the savings account for a card purchase.
+    # Ordered this way the same query matches both on their shared meaningful token
+    # and comes back `ambiguous`, which is a question for the user, not a guess.
+    for tier in (tier_exact, tier_all_tokens, tier_meaningful_tokens,
+                 tier_substring, tier_any_token):
+        hits = [r for r in rows if tier(r)]
+        if hits:
+            return hits
+    return []
+
+
+def resolve_account(query: str, accounts: list[dict] | None = None) -> dict:
+    """Resolve free text to exactly one account.
+
+    Returns `{"status": "ok", "account": {...}}` when a single account matches,
+    `{"status": "ambiguous", "candidates": [...]}` when several tie, and
+    `{"status": "not_found", "candidates": [...]}` when none do. The caller is
+    expected to ask the user rather than guess on anything but "ok".
+    """
+    pool = accounts if accounts is not None else list_accounts()
+    if not pool:
+        return {"status": "not_found", "candidates": []}
+    hits = _match_by_name(query, pool, _ACCOUNT_NOISE)
+    if len(hits) == 1:
+        return {"status": "ok", "account": hits[0]}
+    if len(hits) > 1:
+        return {"status": "ambiguous", "candidates": hits}
+    return {"status": "not_found", "candidates": pool}
+
+
+def resolve_category(query: str, kind: str = "expense",
+                     categories: list[dict] | None = None) -> dict:
+    """Resolve free text to exactly one category of `kind`. Same contract as
+    `resolve_account`, plus an alias pass so "miscellaneous" reaches "Other"."""
+    pool = [c for c in (categories if categories is not None else list_categories())
+            if c["kind"] == kind]
+    if not pool:
+        return {"status": "not_found", "candidates": []}
+
+    q = (query or "").strip().lower()
+    # Alias first: "miscellaneous" would otherwise token-match nothing at all.
+    alias_target = _CATEGORY_ALIASES.get(q)
+    if alias_target is None:
+        # also catch an alias appearing inside a longer phrase ("put it under misc")
+        for alias, target in _CATEGORY_ALIASES.items():
+            if _re.search(rf"\b{_re.escape(alias)}\b", q):
+                alias_target = target
+                break
+    if alias_target:
+        hit = next((c for c in pool if c["name"].lower() == alias_target.lower()), None)
+        if hit:
+            return {"status": "ok", "category": hit}
+
+    hits = _match_by_name(query, pool, frozenset({"the", "a", "an", "under", "as"}))
+    if len(hits) == 1:
+        return {"status": "ok", "category": hits[0]}
+    if len(hits) > 1:
+        return {"status": "ambiguous", "candidates": hits}
+    return {"status": "not_found", "candidates": pool}
+
+
+# The three "plan" entities the agent can act on. Each is a named thing with a
+# money target that the user refers to conversationally ("my emergency fund", "the
+# car loan", "what Mark owes me"), so all three need the same fuzzy name resolution
+# accounts do — and the same refusal to guess between two candidates.
+PLAN_KINDS = {
+    "goal": {"lister": "list_goals", "label": "goal", "title_key": "title"},
+    "debt": {"lister": "list_debts", "label": "debt", "title_key": "name"},
+    "receivable": {"lister": "list_receivables", "label": "receivable",
+                   "title_key": "name"},
+}
+
+
+def resolve_plan(query: str, kind: str, rows: list[dict] | None = None) -> dict:
+    """Resolve free text to exactly one goal / debt / receivable.
+
+    Same contract as `resolve_account`: `ok` with the row, `ambiguous` with the
+    candidates, or `not_found` with everything available. Goals store their name in
+    `title` and debts/receivables in `name`; both are normalized to `name` for
+    matching so one matcher serves all three.
+    """
+    if kind not in PLAN_KINDS:
+        raise FinanceError(f"Unknown plan kind: {kind!r}")
+    spec = PLAN_KINDS[kind]
+    pool = rows if rows is not None else globals()[spec["lister"]]()
+    # Normalize the display field so `_match_by_name` sees a uniform shape.
+    normalized = [dict(r, name=r.get(spec["title_key"]) or r.get("name") or "")
+                  for r in pool]
+    if not normalized:
+        return {"status": "not_found", "candidates": []}
+    hits = _match_by_name(query, normalized, frozenset({"my", "the", "a", "an"}))
+    if len(hits) == 1:
+        return {"status": "ok", "plan": hits[0]}
+    if len(hits) > 1:
+        return {"status": "ambiguous", "candidates": hits}
+    return {"status": "not_found", "candidates": normalized}
+
+
 def post_receipt_as_expense(receipt_id: int, account_id: int) -> int:
     """Bridge: turn an OCR'd receipt into an expense transaction against `account_id`
     (PRD integration). The transaction links back via receipt_id so the two views
@@ -1205,6 +1396,36 @@ def create_receivable(name: str, total_amount: float, collected_amount: float = 
         )
         con.commit()
         return cur.lastrowid
+
+
+_EDITABLE_PLAN_FIELDS = {
+    "debts": ("name", "total_amount", "paid_amount", "currency", "due_date"),
+    "receivables": ("name", "total_amount", "collected_amount", "currency", "due_date"),
+}
+
+
+def update_plan_fields(table: str, plan_id: int, payload: dict) -> bool:
+    """Edit a debt or receivable. Goals already have `update_goal`; these two had no
+    updater at all, so the agent could create and delete them but never correct a
+    typo'd amount.
+
+    Column names come from a fixed allow-list, never from the caller's keys — the
+    payload reaches here from model-parsed text, and interpolating an arbitrary key
+    into the SQL would be an injection point. Same defence as `_validate_backup`."""
+    allowed = _EDITABLE_PLAN_FIELDS.get(table)
+    if allowed is None:
+        raise FinanceError(f"Not an editable plan table: {table!r}")
+    fields = {k: payload[k] for k in allowed if k in payload}
+    if not fields:
+        return False
+    assignments = ", ".join(f"{k} = ?" for k in fields)
+    with _connect() as con:
+        cur = con.execute(
+            f"UPDATE {table} SET {assignments} WHERE id = ?",
+            (*fields.values(), plan_id),
+        )
+        con.commit()
+        return cur.rowcount > 0
 
 
 def delete_receivable(rec_id: int) -> bool:

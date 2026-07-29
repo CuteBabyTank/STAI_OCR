@@ -42,7 +42,19 @@ EVENT_TYPES = frozenset({"start", "token", "action", "observation", "clarify", "
 TERMINAL_EVENTS = frozenset({"final", "clarify", "error"})
 
 # The tools the agent may call (core._run_agent_tool).
-KNOWN_TOOLS = frozenset({"sql_ledger", "search_receipts"})
+KNOWN_TOOLS = frozenset({
+    # read-only
+    "sql_ledger", "search_receipts", "list_accounts", "list_plans",
+    # writes — a case allowing one of these mutates the ledger when it runs
+    "add_expense", "add_income", "transfer_money",
+    "record_activity", "create_plan", "update_plan",
+})
+# Kept separate so a case file can be checked for "does this case let the agent
+# change data?" without hardcoding the list in three places.
+WRITE_TOOLS = frozenset({
+    "add_expense", "add_income", "transfer_money",
+    "record_activity", "create_plan", "update_plan",
+})
 
 
 # --------------------------------------------------------------------------- #
