@@ -11,6 +11,8 @@ import { usePathname } from "next/navigation";
 import Sidebar from "./Sidebar";
 import Fab from "./Fab";
 import AgentChat from "./AgentChat";
+import OcrToast from "./OcrToast";
+import { useOcrJobs } from "../lib/ocrJobs";
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const path = usePathname() || "/";
@@ -30,16 +32,27 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   // the corner, so hiding the FAB then would be hiding it for nothing.
   const [chatMin, setChatMin] = useState(false);
 
+  // Three widgets share the bottom-right corner: the chat launcher (always at
+  // right:24), the quick-add FAB (right:96) and now the OCR progress toast. The
+  // toast's home is directly above the launcher — but the chat panel opens into
+  // exactly that space, so while the panel is up the toast drops into the FAB's
+  // slot instead and the FAB steps aside for it. That keeps all three on screen
+  // and non-overlapping in every combination of open/minimized.
+  const { running, finishedAt } = useOcrJobs();
+  const toastActive = running || finishedAt !== null;
+  const toastAside = showChat && chatOpen;
+
   return (
     <div className="shell">
       <Sidebar />
       {children}
       {showFab && (
         <Fab
-          hidden={chatOpen && !chatMin}
+          hidden={chatOpen && (!chatMin || toastActive)}
           onChange={() => window.dispatchEvent(new Event("ledger:refresh"))}
         />
       )}
+      <OcrToast aside={toastAside} />
       {showChat && (
         <AgentChat
           open={chatOpen}

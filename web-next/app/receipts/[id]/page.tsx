@@ -2,20 +2,25 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import type { LineItem } from "../../lib/types";
+import type { Account, LineItem } from "../../lib/types";
 import { money } from "../../lib/format";
 import { Select } from "../../components/ui";
 
 type Row = Record<string, any>;
 
 // Editable header fields, shown as table rows (top to bottom).
-const FIELDS: { key: string; label: string; type: "text" | "number" | "date" | "category" }[] = [
+const FIELDS: {
+  key: string;
+  label: string;
+  type: "text" | "number" | "date" | "category" | "account";
+}[] = [
   { key: "vendor_name", label: "Vendor", type: "text" },
   { key: "vendor_tin", label: "Tax ID", type: "text" },
   { key: "vendor_address", label: "Address", type: "text" },
   { key: "receipt_number", label: "Receipt no.", type: "text" },
   { key: "receipt_date", label: "Date", type: "date" },
   { key: "category", label: "Category", type: "category" },
+  { key: "account_id", label: "Charged to", type: "account" },
   { key: "currency", label: "Currency", type: "text" },
   { key: "subtotal", label: "Subtotal", type: "number" },
   { key: "vatable_sales", label: "Taxable sales", type: "number" },
@@ -33,6 +38,7 @@ export default function ReceiptDetail() {
 
   const [receipt, setReceipt] = useState<Row | null>(null);
   const [items, setItems] = useState<LineItem[]>([]);
+  const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<Row>({});
@@ -50,6 +56,22 @@ export default function ReceiptDetail() {
   };
   useEffect(() => { if (id) load(); /* eslint-disable-next-line */ }, [id]);
 
+  // Accounts populate the "Charged to" picker. Loaded once, independently of the
+  // receipt: a failure here must not blank the page, it just leaves the picker
+  // empty (and the stored account_id still renders as a plain id).
+  useEffect(() => {
+    fetch("/api/accounts")
+      .then((r) => r.json())
+      .then((j) => setAccounts(j.accounts || []))
+      .catch(() => setAccounts([]));
+  }, []);
+
+  const accountName = (accountId: any) => {
+    if (accountId === null || accountId === undefined || accountId === "") return null;
+    const a = accounts.find((x) => String(x.id) === String(accountId));
+    return a ? a.name : `Account #${accountId}`;
+  };
+
   const startEdit = () => { setDraft({ ...receipt }); setErr(""); setEditing(true); };
   const cancel = () => { setEditing(false); setErr(""); };
 
@@ -63,7 +85,12 @@ export default function ReceiptDetail() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
       });
-      if (!res.ok) throw new Error(`Save failed (${res.status})`);
+      if (!res.ok) {
+        // The API explains *why* a save was rejected (e.g. an account that no
+        // longer exists); showing "Save failed (422)" instead would hide it.
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.detail || `Save failed (${res.status})`);
+      }
       const j = await res.json();
       setReceipt(j.receipt);
       setEditing(false);
@@ -77,6 +104,9 @@ export default function ReceiptDetail() {
   };
 
   const displayVal = (f: (typeof FIELDS)[number], v: any) => {
+    // Checked before the empty-value guard: an unassigned account reads better as
+    // "Not assigned" than as a bare em dash.
+    if (f.type === "account") return accountName(v) ?? "Not assigned";
     if (v === null || v === undefined || v === "") return "—";
     if (f.type === "number") return money(v, receipt?.currency);
     return String(v);
@@ -136,6 +166,23 @@ export default function ReceiptDetail() {
                             onChange={(e) => setDraft({ ...draft, [f.key]: e.target.value })}
                           >
                             {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                          </Select>
+                        ) : f.type === "account" ? (
+                          <Select
+                            value={draft[f.key] ?? ""}
+                            onChange={(e) =>
+                              setDraft({
+                                ...draft,
+                                // "" is the "Not assigned" option — send null so the
+                                // backend clears the link rather than rejecting "".
+                                [f.key]: e.target.value === "" ? null : Number(e.target.value),
+                              })
+                            }
+                          >
+                            <option value="">Not assigned</option>
+                            {accounts.map((a) => (
+                              <option key={a.id} value={String(a.id)}>{a.name}</option>
+                            ))}
                           </Select>
                         ) : (
                           <input

@@ -20,10 +20,18 @@ import re
 # --------------------------------------------------------------------------- #
 # Configuration
 # --------------------------------------------------------------------------- #
-# The vision/OCR model. Overridable via the VISION_MODEL env var so a resource-
-# constrained deployment can drop to a smaller model (e.g. qwen2.5vl:3b) without
-# a code change; defaults to the 7B model used in development.
-DEFAULT_MODEL = os.environ.get("VISION_MODEL", "qwen2.5vl:7b")
+# The vision/OCR model, served by the shared Ollama endpoint (see core.OLLAMA_HOST).
+# Overridable via the VISION_MODEL env var so a deployment can run a local model
+# (e.g. qwen2.5vl:7b) without a code change.
+#
+# gemma4:e4b is the production choice and now matches docker-compose.yml, which had
+# been overriding a qwen2.5vl:7b default here — so the same code read receipts with
+# a different model depending only on how it was launched.
+#
+# Note gemma4 encodes an image to a FIXED ~256 tokens regardless of resolution, so
+# resolution/crop tuning does not reduce its prompt cost the way it does on
+# qwen2.5vl (~2,100 image tokens, scaling with pixels). See evaluation/PERFORMANCE.md.
+DEFAULT_MODEL = os.environ.get("VISION_MODEL", "gemma4:e4b")
 
 EXTRACTION_PROMPT = """You are a careful transcription tool reading a purchase
 receipt or invoice — the kind you get at a restaurant, cafe, grocery, retail

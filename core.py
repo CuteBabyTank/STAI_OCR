@@ -33,6 +33,18 @@ from typing import Optional
 import mlflow
 from pydantic import BaseModel, Field, ValidationError
 
+# Production serves the models from the shared Ollama endpoint, not a local one.
+# This MUST run before `import ollama`: the package builds its default Client at
+# import time from os.environ, so setting OLLAMA_HOST afterwards is silently
+# ignored and every call would go to localhost instead.
+#
+# setdefault, not assignment — an explicit OLLAMA_HOST (docker-compose, an .env,
+# or a shell export pointing at a local Ollama) still wins, so running fully
+# offline just means exporting the local host plus local VISION_MODEL/AGENT_MODEL.
+OLLAMA_HOST = os.environ.setdefault(
+    "OLLAMA_HOST", "http://103.231.240.155:11434"
+)
+
 try:
     import ollama
 except ImportError:  # pragma: no cover
@@ -450,12 +462,14 @@ OCR_CONCURRENCY = max(1, _env_int("OCR_CONCURRENCY", 3))
 MLFLOW_ENABLED = _env_bool("MLFLOW_ENABLED", True)
 MLFLOW_SAMPLE_RATE = _env_float("MLFLOW_SAMPLE_RATE", 1.0)
 
-# Text-only model used by the SQL agent, the RAG answerer, and the ReAct planner.
-# qwen2.5:7b reasons/routes and summarizes numbers far more reliably than a 3B model
-# (which mis-routed tools, looped, and garbled amounts). It runs partly on CPU on a
-# 4GB GPU so it's a bit slower per turn — worth it for correct answers. Overridable
-# via AGENT_MODEL env (e.g. "llama3.2:3b" for faster/smaller on constrained hosts).
-AGENT_MODEL = os.environ.get("AGENT_MODEL", "qwen2.5:latest")
+# Text model used by the SQL agent, the RAG answerer, and the ReAct planner.
+# gemma4:12b is the production choice and now matches docker-compose.yml, which had
+# been overriding a qwen2.5:latest default here. Overridable via AGENT_MODEL env
+# (e.g. "qwen2.5:latest" or "llama3.2:3b" when running against a local Ollama).
+#
+# gemma4 is a *thinking* model: _chat() passes think=False, without which it spends
+# its whole token budget on hidden reasoning and returns empty content.
+AGENT_MODEL = os.environ.get("AGENT_MODEL", "gemma4:12b")
 # Embedding model used by the RAG retriever. Small (~275 MB), fast, local.
 EMBED_MODEL = os.environ.get("EMBED_MODEL", "nomic-embed-text")
 
@@ -1125,6 +1139,12 @@ def init_db() -> None:
             # Measured OCR confidence: overall score (0..1) + per-field JSON.
             ("confidence", "REAL"),
             ("field_confidence", "TEXT"),
+            # The account this receipt was charged to (accounts.id, set by the user
+            # on the receipt detail page). NULL = not yet assigned. Deliberately not
+            # a FK constraint: `accounts` is created by finance.py's schema, which may
+            # not have run yet on a fresh ledger, and SQLite cannot add a FK to an
+            # existing table anyway. update_receipt() validates the id instead.
+            ("account_id", "INTEGER"),
         ]
         
         for col_name, col_type in columns_to_add:
@@ -1241,11 +1261,46 @@ _EDITABLE_RECEIPT_FIELDS = (
     "vendor_name", "vendor_tin", "vendor_address", "receipt_number", "receipt_date",
     "subtotal", "vatable_sales", "vat_exempt_sales", "zero_rated_sales", "vat_amount",
     "discount", "discount_type", "total_amount", "cash", "change", "currency", "category",
+    "account_id",
 )
 _EDITABLE_NUMERIC_FIELDS = {
     "subtotal", "vatable_sales", "vat_exempt_sales", "zero_rated_sales", "vat_amount",
     "discount", "total_amount", "cash", "change",
 }
+
+
+def _coerce_account_id(value) -> int | None:
+    """Validate the account a receipt is charged to, returning an int or None.
+
+    Empty string / None clears the link — the detail page's "Not assigned" option
+    sends "", and that has to mean *unassign*, not "reject the whole save".
+
+    The id is checked against the `accounts` table rather than enforced with a
+    foreign key (see the migration note). `accounts` is owned by finance.py, which
+    imports core — so core cannot import finance back without a cycle. Both modules
+    share one ledger.db, so querying the table directly is enough and keeps the
+    dependency pointing one way.
+    """
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    try:
+        account_id = int(value)
+    except (TypeError, ValueError):
+        raise GuardrailError(f"account_id must be a whole number, got {value!r}.")
+    with _connect() as con:
+        try:
+            row = con.execute(
+                "SELECT id FROM accounts WHERE id = ?", (account_id,)
+            ).fetchone()
+        except sqlite3.OperationalError:
+            # finance schema has never been initialised, so no account can exist.
+            raise GuardrailError(
+                "No accounts exist yet — create one under Wallet before charging a "
+                "receipt to it."
+            )
+    if row is None:
+        raise GuardrailError(f"Account {account_id} does not exist.")
+    return account_id
 
 
 def update_receipt(receipt_id: int, fields: dict) -> dict | None:
@@ -1258,7 +1313,9 @@ def update_receipt(receipt_id: int, fields: dict) -> dict | None:
     for key, value in (fields or {}).items():
         if key not in _EDITABLE_RECEIPT_FIELDS:
             continue
-        if key in _EDITABLE_NUMERIC_FIELDS:
+        if key == "account_id":
+            updates[key] = _coerce_account_id(value)
+        elif key in _EDITABLE_NUMERIC_FIELDS:
             updates[key] = _num(value)
         else:
             v = None if value is None else str(value).strip()

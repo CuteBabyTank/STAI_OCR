@@ -342,6 +342,97 @@ select.month-filter {
 .toast.show { opacity:1; transform:translate(-50%, 0); }
 .toast .tdot { width:8px; height:8px; border-radius:50%; background:var(--positive); }
 
+/* OCR progress toast — bottom-right, directly above the chat launcher
+   (.robot-fab, bottom:24 height:60 -> 96). z-index sits above .chat (56) so a
+   run stays visible, and `.aside` drops it into the quick-add FAB's slot while
+   the chat panel occupies the space above the launcher (see AppShell). */
+.ocr-toast {
+  position:fixed; bottom:96px; right:24px; z-index:57;
+  display:flex; align-items:center; gap:12px;
+  width:326px; max-width:calc(100vw - 48px); padding:13px 14px;
+  background:var(--surface); border:1px solid var(--border); border-radius:15px;
+  box-shadow:var(--shadow-lg);
+  opacity:0; visibility:hidden; transform:translateY(10px) scale(.97);
+  transform-origin:bottom right; pointer-events:none;
+  transition:opacity .22s, transform .22s cubic-bezier(.22,1,.36,1),
+             visibility .22s, bottom .22s, right .22s;
+}
+.ocr-toast.show { opacity:1; visibility:visible; transform:none; pointer-events:auto; }
+
+/* Aside: the chat panel is up, so the space above the launcher is taken and the
+   toast drops into the quick-add FAB's slot (AppShell hides that FAB to make
+   room). Only ~72px of clearance exists under the panel's bottom edge (it ends at
+   96px), so this variant is deliberately one line — the two-line version overlapped
+   the panel by a few pixels. The title still carries the state; the sub line is
+   detail the expanded position can afford and this one can't.
+   max-width leaves room for the 96px offset so it can't run off a narrow screen. */
+.ocr-toast.aside {
+  bottom:16px; right:96px; padding:9px 12px; width:auto; min-width:236px;
+  max-width:calc(100vw - 120px);
+}
+.ocr-toast.aside .ocr-toast-sub { display:none; }
+.ocr-toast.aside .ocr-toast-icon { width:28px; height:28px; border-radius:9px; }
+.ocr-toast.aside .ocr-toast-icon svg { width:18px; height:18px; }
+.ocr-toast.aside .ocr-spinner { width:16px; height:16px; border-width:2.2px; }
+
+.ocr-toast-icon {
+  width:34px; height:34px; border-radius:10px; flex-shrink:0;
+  display:grid; place-items:center;
+  background:var(--accent-wash); color:var(--accent);
+}
+.ocr-toast-icon svg { width:21px; height:21px; }
+.ocr-toast.done .ocr-toast-icon {
+  background:color-mix(in srgb, var(--positive) 16%, transparent); color:var(--positive);
+}
+.ocr-toast.failed .ocr-toast-icon {
+  background:color-mix(in srgb, var(--negative) 15%, transparent); color:var(--negative);
+}
+
+.ocr-spinner {
+  width:19px; height:19px; border-radius:50%;
+  border:2.4px solid color-mix(in srgb, var(--accent) 26%, transparent);
+  border-top-color:var(--accent);
+  animation:ocr-spin .8s linear infinite;
+}
+@keyframes ocr-spin { to { transform:rotate(360deg); } }
+
+/* The check draws itself on completion — the moment the toast exists to report,
+   so it should read as an event rather than a static icon swap. */
+.ocr-check {
+  stroke-dasharray:24; stroke-dashoffset:24;
+  animation:ocr-draw .34s .04s cubic-bezier(.65,0,.35,1) forwards;
+}
+@keyframes ocr-draw { to { stroke-dashoffset:0; } }
+
+.ocr-toast-text { flex:1; min-width:0; }
+.ocr-toast-title {
+  font-size:13.5px; font-weight:600; letter-spacing:-.01em; color:var(--ink);
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.ocr-toast-sub { font-size:11.5px; color:var(--ink-3); margin-top:2px; line-height:1.35; }
+
+.ocr-toast-link {
+  font-size:12.5px; font-weight:600; color:var(--accent); text-decoration:none;
+  padding:5px 9px; border-radius:8px; flex-shrink:0;
+}
+.ocr-toast-link:hover { background:var(--accent-wash); }
+
+.ocr-toast-x {
+  width:26px; height:26px; border-radius:8px; border:none; background:none; flex-shrink:0;
+  color:var(--ink-3); display:grid; place-items:center;
+}
+.ocr-toast-x:hover { background:var(--sunken); color:var(--ink); }
+.ocr-toast-x svg { width:15px; height:15px; }
+
+/* Respect a reduced-motion preference: the spinner still has to convey "working",
+   so it slows to a pulse rather than stopping dead, and the check just appears. */
+@media (prefers-reduced-motion:reduce) {
+  .ocr-toast { transition:opacity .2s, visibility .2s; transform:none; }
+  .ocr-toast.show { transform:none; }
+  .ocr-spinner { animation-duration:2.4s; }
+  .ocr-check { animation:none; stroke-dashoffset:0; }
+}
+
 /* Robot RAG assistant */
 .robot-fab {
   position:fixed; bottom:24px; right:24px; z-index:55; width:60px; height:60px; border-radius:50%;
@@ -638,6 +729,21 @@ a.nav-item { text-decoration:none; }
 .rl-meta { font-size:12px; color:var(--ink-3); margin-top:2px; display:flex; align-items:center; }
 .rl-amt { font-size:14.5px; font-weight:600; white-space:nowrap; }
 .rl-chev { width:18px; height:18px; stroke-width:2; color:var(--ink-3); flex-shrink:0; }
+
+/* Receipts-list toolbar: the sort picker sits next to "Add receipts".
+   The Select primitive is width:100% because it is built for stacked form fields,
+   so the wrapper is what gives it a sane width in a header row. */
+.rl-toolbar { align-items:center; }
+.rl-sort { display:flex; align-items:center; gap:8px; }
+.rl-sort-label { font-size:13px; font-weight:550; color:var(--ink-2); white-space:nowrap; }
+.rl-sort .bt-select { width:auto; min-width:200px; padding:9px 12px; }
+/* Narrow screens: the header already wraps, so let the picker take the full row
+   rather than squeezing it against the button. */
+@media (max-width:640px) {
+  .rl-toolbar { width:100%; flex-wrap:wrap; }
+  .rl-sort { flex:1 1 100%; }
+  .rl-sort .bt-select { width:100%; min-width:0; }
+}
 
 /* editable values table on the detail page */
 .val-table { width:100%; border-collapse:collapse; font-size:14px; }

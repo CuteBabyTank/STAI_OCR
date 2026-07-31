@@ -251,9 +251,15 @@ def receipt_detail(receipt_id: int):
 
 @app.put("/receipts/{receipt_id}")
 def edit_receipt(receipt_id: int, payload: dict):
-    """Update a receipt's editable header fields (vendor, date, amounts, category…).
-    Only whitelisted fields are written; unknown keys are ignored."""
-    row = update_receipt(receipt_id, payload)
+    """Update a receipt's editable header fields (vendor, date, amounts, category,
+    the account it was charged to…). Only whitelisted fields are written; unknown
+    keys are ignored."""
+    try:
+        row = update_receipt(receipt_id, payload)
+    except GuardrailError as exc:
+        # e.g. account_id naming an account that doesn't exist — a bad request from
+        # the client, not a server fault, so 422 rather than a 500.
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     if row is None:
         raise HTTPException(status_code=404, detail=f"Receipt {receipt_id} not found")
     return {"receipt": row}
@@ -836,7 +842,11 @@ def get_backup_export():
 
 @app.post("/backup/import")
 def post_backup_import(payload: dict):
-    return _guard(import_backup, payload, payload.get("replace", True))
+    # `replace` defaults to False here, not True: with replace the import clears every
+    # finance table first, so defaulting it on made a caller that simply forgot the key
+    # destroy the existing ledger. Wiping records has to be asked for explicitly. The
+    # UI (web-next/app/settings/page.tsx) sends replace: true, so restore is unchanged.
+    return _guard(import_backup, payload, bool(payload.get("replace", False)))
 
 
 @app.post("/ask")

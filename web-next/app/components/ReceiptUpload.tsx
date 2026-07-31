@@ -8,127 +8,34 @@
 // nothing hits the vision model until "Run OCR" is pressed. A read costs a minute
 // or two per page and writes a receipt to the ledger, so firing it off the moment
 // a file lands means a mis-drop is an expensive, already-committed mistake.
+//
+// The staging list and the run itself live in lib/ocrJobs.tsx, above this modal in
+// the tree — so pressing Run OCR and immediately closing this window no longer
+// abandons the read. This component is now just the view over that store: the
+// corner toast (components/OcrToast.tsx) reports the same run once the modal is
+// gone, and reopening the modal shows the run still in progress.
 import { useEffect, useRef, useState } from "react";
 import { money } from "../lib/format";
+import { useOcrJobs } from "../lib/ocrJobs";
 import { Modal, Button } from "./ui";
 
-type BatchItem = {
-  // Stable id, not the array index: files can be staged while an earlier read is
-  // still running, so rows shift and positional writes would clobber each other.
-  key: number;
-  name: string;
-  status: "queued" | "reading" | "done" | "error";
-  id?: number;
-  merchant?: string;
-  amount?: number;
-  currency?: string;
-  error?: string;
-};
-
-const CLIENT_CHUNK = 12;
-
-export default function ReceiptUpload({
-  onClose,
-  onDone,
-}: {
-  onClose: () => void;
-  onDone: () => void;
-}) {
-  const [batch, setBatch] = useState<BatchItem[]>([]);
+export default function ReceiptUpload({ onClose }: { onClose: () => void }) {
+  const {
+    items: batch,
+    counts,
+    running,
+    stage: stageFiles,
+    unstage,
+    run: runOcr,
+    clearFinished,
+    setViewerOpen,
+  } = useOcrJobs();
   const [dragging, setDragging] = useState(false);
   const [camera, setCamera] = useState(false);
   const [camErr, setCamErr] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const seqRef = useRef(0);
-  // Staged files, keyed by row. Kept in a ref (not state) because a File is inert
-  // data the render never reads — only the run needs it.
-  const stagedRef = useRef(new Map<number, File>());
-
-  const patch = (key: number, item: BatchItem) =>
-    setBatch((prev) => prev.map((b) => (b.key === key ? item : b)));
-
-  // --- Step 1: stage files. No network call, no model, nothing written. ------
-  const stageFiles = (files: File[]) => {
-    if (!files.length) return;
-    const rows = files.map((f) => {
-      const key = (seqRef.current += 1);
-      stagedRef.current.set(key, f);
-      return { key, name: f.name, status: "queued" as const };
-    });
-    setBatch((prev) => [...prev, ...rows]);
-  };
-
-  const unstage = (key: number) => {
-    stagedRef.current.delete(key);
-    setBatch((prev) => prev.filter((b) => b.key !== key));
-  };
-
-  // --- Step 2: read the staged files, on an explicit press ------------------
-  // Chunked, one chunk at a time, so a big drop never oversubscribes the model.
-  const runOcr = async () => {
-    const queued = batch
-      .filter((b) => b.status === "queued")
-      .map((b) => ({ key: b.key, file: stagedRef.current.get(b.key)! }))
-      .filter((q) => q.file);
-    if (!queued.length) return;
-
-    queued.forEach(({ key, file }) =>
-      patch(key, { key, name: file.name, status: "reading" }),
-    );
-    let ok = 0;
-
-    for (let start = 0; start < queued.length; start += CLIENT_CHUNK) {
-      const chunk = queued.slice(start, start + CLIENT_CHUNK);
-      const fd = new FormData();
-      chunk.forEach(({ file }) => fd.append("files", file));
-      try {
-        const res = await fetch("/api/extract/batch", { method: "POST", body: fd });
-        const rawText = await res.text();
-        let j: any = {};
-        try { j = rawText ? JSON.parse(rawText) : {}; } catch { /* non-JSON */ }
-        if (!res.ok) {
-          throw new Error(
-            j.detail ||
-              (res.status >= 500
-                ? "The model couldn't read these receipts (it may be busy). Try again in a moment."
-                : rawText.slice(0, 160) || res.statusText)
-          );
-        }
-        const results: any[] = j.results || [];
-        chunk.forEach(({ key, file: f }) => {
-          const mine = results.filter((r) => r.source_file === f.name);
-          const good = mine.filter((r) => !r.error && r.receipt_id);
-          good.forEach(() => (ok += 1));
-          if (good.length === 0) {
-            patch(key, { key, name: f.name, status: "error", error: mine[0]?.error || "Failed to read" });
-          } else {
-            const first = good[0].data || {};
-            const pages = mine.length;
-            patch(key, {
-              key,
-              name: pages > 1 ? `${f.name} · ${good.length}/${pages} pages` : f.name,
-              status: "done",
-              id: good[0].receipt_id,
-              merchant: first.vendor_name || f.name,
-              amount: pages > 1
-                ? good.reduce((s, r) => s + (r.data?.total_amount || 0), 0)
-                : (first.total_amount ?? 0),
-              currency: first.currency,
-            });
-          }
-        });
-      } catch (e: any) {
-        chunk.forEach(({ key, file: f }) =>
-          patch(key, { key, name: f.name, status: "error", error: e?.message || "Failed to read" })
-        );
-      }
-    }
-    // Read attempts are spent — don't let a retry silently re-send them.
-    queued.forEach(({ key }) => stagedRef.current.delete(key));
-    if (ok) onDone();
-  };
 
   const onFiles = (fl: FileList | null) => fl && stageFiles(Array.from(fl));
 
@@ -187,18 +94,37 @@ export default function ReceiptUpload({
   // Always release the camera when the modal unmounts.
   useEffect(() => () => stopCamera(), []);
 
-  const done = batch.filter((b) => b.status === "done").length;
-  const reading = batch.filter((b) => b.status === "reading").length;
-  const queued = batch.filter((b) => b.status === "queued").length;
+  // Tell the store this view is on screen, so the toast doesn't clear rows the
+  // user is currently reading when it retires itself.
+  useEffect(() => {
+    setViewerOpen(true);
+    return () => setViewerOpen(false);
+  }, [setViewerOpen]);
+
+  // Closing the window is the user acknowledging a finished run: its rows go away
+  // so the next open starts clean, and the corner toast stops reporting it. A run
+  // still in flight is untouched (clearFinished is a no-op then) — the whole point
+  // is that closing does not cancel it.
+  const closeModal = () => {
+    stopCamera();
+    clearFinished();
+    onClose();
+  };
+
+  const { done, reading, queued } = counts;
 
   return (
     <Modal
       title="Add receipts"
       wide
-      onClose={() => { stopCamera(); onClose(); }}
+      onClose={closeModal}
       footer={
         <>
-          <Button onClick={() => { stopCamera(); onClose(); }}>{done ? "Done" : "Close"}</Button>
+          {/* Closing mid-read is now a supported move, not an abandonment: the run
+              belongs to the store and the corner toast takes over reporting it. */}
+          <Button onClick={closeModal}>
+            {reading > 0 ? "Close — keep reading" : done ? "Done" : "Close"}
+          </Button>
           {/* Two distinct actions: stage files, then read them. Neither button
               ever becomes a status label — progress lives on the rows below, so
               the modal can't look stuck and more files can be staged mid-read. */}
@@ -213,7 +139,7 @@ export default function ReceiptUpload({
               <Button
                 variant="primary"
                 onClick={runOcr}
-                disabled={!queued || reading > 0}
+                disabled={!queued || running}
                 title={queued ? `Read ${queued} staged file${queued > 1 ? "s" : ""}` : "Upload a receipt first"}
               >
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" width="16" height="16" aria-hidden="true">
@@ -278,7 +204,7 @@ export default function ReceiptUpload({
               (~1-2 min per page), so say so rather than leaving a silent spinner. */}
           <div className="rcpt-progress">
             {reading > 0
-              ? `Reading ${reading} of ${batch.length}… the vision model can take a minute or two per receipt.`
+              ? `Reading ${reading} of ${batch.length}… a minute or two per receipt. You can close this window — it keeps going, and the corner badge will tell you when it's done.`
               : queued > 0
                 ? `${queued} file${queued > 1 ? "s" : ""} ready — press Run OCR to read ${queued > 1 ? "them" : "it"}.`
                 : `${done} of ${batch.length} filed`}

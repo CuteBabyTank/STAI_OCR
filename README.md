@@ -37,15 +37,22 @@ docker-compose.yml       web + api + ollama + mlflow, wired together
 
 | Model              | Role                                          | Env var        |
 | ------------------ | --------------------------------------------- | -------------- |
-| `qwen2.5vl:7b`     | vision/OCR — reads the receipt image          | `VISION_MODEL` |
-| `qwen2.5:latest`   | text — SQL agent, RAG answerer, ReAct planner | `AGENT_MODEL`  |
+| `gemma4:e4b`       | vision/OCR — reads the receipt image          | `VISION_MODEL` |
+| `gemma4:12b`       | text — SQL agent, RAG answerer, ReAct planner | `AGENT_MODEL`  |
 | `nomic-embed-text` | embeddings — powers semantic search (RAG)     | `EMBED_MODEL`  |
 
-> **`docker-compose.yml` overrides the first two** to `gemma4:e4b` / `gemma4:12b`,
-> because the container targets the shared class Ollama endpoint rather than a local
-> model. So the model actually in use depends on how you launched the app. Never cite
-> a default from this table when recording an evaluation run — read the effective
-> value from `GET /health` instead. See `evaluation/CONFIGURATION.md`.
+These are the **production** models, served by the shared Ollama endpoint
+(`OLLAMA_HOST`, default `http://103.231.240.155:11434`, set in `core.py` before the
+`ollama` import because the package binds its client at import time).
+
+> Code and `docker-compose.yml` now agree. They previously did not: the code defaulted
+> to `qwen2.5vl:7b` / `qwen2.5:latest` while compose overrode both to the `gemma4`
+> pair, so the same source read receipts with a different model depending only on how
+> it was launched. Still prefer `GET /health` over this table when recording an
+> evaluation run. See `evaluation/CONFIGURATION.md`.
+
+To run fully offline against a local Ollama, export all three:
+> `OLLAMA_HOST=http://localhost:11434 VISION_MODEL=qwen2.5vl:7b AGENT_MODEL=qwen2.5:latest`
 
 ### Data flow
 
@@ -307,6 +314,31 @@ Streamlit prints a local URL (default <http://localhost:8501>). Drag a receipt
 onto the dropzone, click **Process receipts**, review/edit the ledger, then
 download CSV or Excel. Use the **Ask your receipts** panel at the bottom to talk
 to the ReAct agent — watch it stream its reasoning, pick a tool, and answer.
+
+### Mock data for manual testing
+
+An empty ledger makes the budget-tracker pages hard to exercise, so
+`seed_mock_data.py` fills one with three months of Philippine-context demo data —
+BDO, BPI and UnionBank accounts plus a GCash wallet, a credit card and an auto
+loan, transactions across every category, budgets, goals, debts, receivables,
+recurring bills, installment plans and 14 receipts with line items.
+
+```bash
+python seed_mock_data.py            # seed ledger.db
+python seed_mock_data.py --status    # what is seeded
+python seed_mock_data.py --purge     # remove only the seeded rows
+python seed_mock_data.py --reseed    # purge, then seed again
+```
+
+It is **additive**: it never drops or rebuilds a table, it reuses (rather than
+duplicates) an account whose name already exists, and re-running it is a no-op.
+Every inserted row is recorded by id in `settings['mock_seed']`, so `--purge`
+deletes exactly those rows and leaves your own records untouched. Pass
+`--anchor YYYY-MM-DD` for a reproducible seed (dates default to today so the
+current-period views have data) and `--db path` to target another database.
+
+This is distinct from `evaluation/fixtures/seed_finance.py`, which builds the
+frozen, disposable fixture the evaluation suite asserts against.
 
 ---
 

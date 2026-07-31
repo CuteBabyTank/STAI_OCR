@@ -52,6 +52,18 @@ export default function SettingsPage() {
     try {
       const text = await file.text();
       const payload = JSON.parse(text);
+      // Import with replace clears every finance table first, so the records
+      // currently in the ledger are gone for good unless they were exported. That
+      // is not something to do on a stray click on a file picker.
+      const ok = window.confirm(
+        "Import will REPLACE everything currently in your ledger — accounts, " +
+          "transactions, budgets, goals, debts — with the contents of this file.\n\n" +
+          "Export a backup first if you have not. Continue?",
+      );
+      if (!ok) {
+        setMsg("Import cancelled. Nothing was changed.");
+        return;
+      }
       const res = await importBackup({ ...payload, replace: true });
       const n = Object.values(res.imported || {}).reduce((s: number, x: any) => s + x, 0);
       setMsg(`Imported ${n} records. Reloading…`);
@@ -118,7 +130,13 @@ export default function SettingsPage() {
             <Button variant="primary" onClick={doExport}>Export data</Button>
             <Button onClick={() => fileRef.current?.click()}>Import backup</Button>
             <input ref={fileRef} type="file" accept="application/json" style={{ display: "none" }}
-              onChange={(e) => e.target.files?.[0] && doImport(e.target.files[0])} />
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                // Clear the input so picking the same file again re-fires onChange —
+                // otherwise cancelling the confirm below would make that file unpickable.
+                e.target.value = "";
+                if (file) doImport(file);
+              }} />
           </div>
         </div>
       </main>

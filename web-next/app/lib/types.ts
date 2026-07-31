@@ -12,6 +12,7 @@ export interface Receipt {
   source_file: string | null;
   confidence?: number | null;         // measured OCR confidence 0..1 (overall)
   field_confidence?: string | null;   // JSON string: {overall, fields, items}
+  account_id?: number | null;         // accounts.id this receipt was charged to
 }
 
 // Parsed shape of Receipt.field_confidence / the /extract "confidence" payload.

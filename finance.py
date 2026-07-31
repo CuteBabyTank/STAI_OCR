@@ -1664,6 +1664,33 @@ def import_backup(payload: dict, replace: bool = True) -> dict:
                 if bad:
                     raise FinanceError(f"Backup table {table!r} has unknown column(s): {bad}")
 
+        if not replace:
+            # A backup carries its original primary keys, so merging one into a
+            # populated ledger collides on them. Detect that up front and explain
+            # it, rather than failing mid-insert with a raw IntegrityError (a 500)
+            # after some tables have already been written and rolled back.
+            for table, rows in data.items():
+                pk_cols = [r[1] for r in con.execute(f"PRAGMA table_info({table})") if r[5]]
+                if not pk_cols:
+                    continue
+                where = " AND ".join(f'"{c}" = ?' for c in pk_cols)
+                for row in rows:
+                    if any(c not in row for c in pk_cols):
+                        continue
+                    clash = con.execute(
+                        f"SELECT 1 FROM {table} WHERE {where} LIMIT 1",
+                        [row[c] for c in pk_cols],
+                    ).fetchone()
+                    if clash:
+                        key = ", ".join(f"{c}={row[c]!r}" for c in pk_cols)
+                        raise FinanceError(
+                            f"Backup cannot be merged: {table} already has a row with "
+                            f"{key}. A backup keeps its original ids, so a merge only "
+                            "works when nothing conflicts — note even a brand-new ledger "
+                            "has the seeded default categories. Pass replace=true to "
+                            "restore this backup over the current ledger instead."
+                        )
+
         if replace:
             for t in _BACKUP_TABLES:
                 con.execute(f"DELETE FROM {t}")
