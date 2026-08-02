@@ -5,7 +5,14 @@ Bench Boutique and Uniqlo receipts, so a passing test means the pipeline handles
 what the model actually emits — not a hand-idealized version of it.
 """
 
-from extraction import _dedupe_items, _fix_payment_fields, _remap_summary_lines
+from extraction import (
+    _dedupe_items,
+    _fix_payment_fields,
+    _remap_summary_lines,
+    audit_receipt,
+    undo_vat_added_to_total,
+    vat_is_inside_subtotal,
+)
 
 
 def _items(*rows):
@@ -102,6 +109,80 @@ def test_consistent_payments_are_left_alone():
             "cash": 1000.0, "change": 460.0, "discount": None}
     out = _fix_payment_fields(data)
     assert (out["total_amount"], out["cash"], out["change"]) == (540.0, 1000.0, 460.0)
+
+
+# --------------------------------------------------------------------------- #
+# undo_vat_added_to_total — VAT printed inside the subtotal is never added on
+# --------------------------------------------------------------------------- #
+def _pepper_lunch():
+    """The Pepper Lunch receipt as the model read it: every printed figure is
+    correct, but total_amount (545.00 + 58.39) and change (1,000.00 − 603.39) are
+    arithmetic the model invented. The paper prints no Total line and CHANGE 455.00.
+    """
+    return {"items": _items(("DINE-IN", None, None, 425.0),
+                            ("SET MEAL A", None, None, 120.0)),
+            "subtotal": 545.0, "vatable_sales": 486.61, "vat_amount": 58.39,
+            "vat_exempt_sales": 0.0, "zero_rated_sales": 0.0, "discount": None,
+            "total_amount": 603.39, "cash": 1000.0, "change": 396.61,
+            "currency": "PHP"}
+
+
+def test_vat_inflated_total_is_corrected():
+    out = _fix_payment_fields(_pepper_lunch())
+    assert (out["total_amount"], out["cash"], out["change"]) == (545.0, 1000.0, 455.0)
+
+
+def test_vat_inflated_total_survives_the_payment_identity():
+    """The reason the bug got through: cash − change == total holds on the invented
+    pair, so the consistency shortcut in _fix_payment_fields certified it. The VAT
+    correction has to run before that check, not after."""
+    data = _pepper_lunch()
+    assert abs(data["cash"] - data["change"] - data["total_amount"]) < 0.01
+    assert undo_vat_added_to_total(data)["total_amount"] == 545.0
+
+
+def test_tax_exclusive_receipt_keeps_its_added_tax():
+    """A receipt that really does charge tax on top: the breakdown adds up to the
+    subtotal on its own, so 100.00 + 12.00 = 112.00 is the correct total."""
+    data = {"items": _items(("Widget", 1, 100.0, 100.0)), "subtotal": 100.0,
+            "vatable_sales": 100.0, "vat_amount": 12.0, "discount": None,
+            "total_amount": 112.0, "cash": 200.0, "change": 88.0}
+    assert vat_is_inside_subtotal(data) is False
+    out = _fix_payment_fields(data)
+    assert (out["total_amount"], out["change"]) == (112.0, 88.0)
+
+
+def test_vat_inclusive_receipt_with_a_correct_total_is_untouched():
+    data = {"items": _items(("Ramen", 1, 545.0, 545.0)), "subtotal": 545.0,
+            "vatable_sales": 486.61, "vat_amount": 58.39, "discount": None,
+            "total_amount": 545.0, "cash": 1000.0, "change": 455.0}
+    out = _fix_payment_fields(data)
+    assert (out["total_amount"], out["change"]) == (545.0, 455.0)
+
+
+def test_printed_change_is_not_recomputed_when_only_the_total_was_inflated():
+    """Change 455.00 was read off the paper; correcting the total must leave it
+    alone rather than re-deriving a figure we already have."""
+    data = _pepper_lunch() | {"change": 455.0}
+    out = undo_vat_added_to_total(data)
+    assert (out["total_amount"], out["change"]) == (545.0, 455.0)
+
+
+def test_audit_flags_an_uncorrected_vat_inflated_total():
+    """A row that reaches the ledger inflated by some other route — a manual edit,
+    or a receipt saved before this fix — must be flagged for review, not accepted."""
+    codes = {f["code"]: f for f in audit_receipt(_pepper_lunch())}
+    assert codes["vat_added_to_total"]["severity"] == "error"
+    assert codes["vat_added_to_total"]["difference"] == 58.39
+
+
+def test_audit_stays_quiet_on_a_genuine_tax_exclusive_total():
+    data = {"items": _items(("Widget", 1, 100.0, 100.0)), "subtotal": 100.0,
+            "vatable_sales": 100.0, "vat_amount": 12.0, "total_amount": 112.0,
+            "cash": 112.0, "change": 0.0, "discount": None}
+    codes = [f["code"] for f in audit_receipt(data)]
+    assert "vat_added_to_total" not in codes
+    assert "subtotal_vs_total" not in codes
 
 
 # --------------------------------------------------------------------------- #

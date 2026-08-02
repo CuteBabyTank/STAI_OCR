@@ -73,6 +73,14 @@ STRICT RULES — follow exactly:
     ONLY. The cash the customer handed over ("CASH", "TENDERED", "AMOUNT PAID")
     goes in "cash". The money returned ("CHANGE") goes in "change". Never put the
     cash or the change into total_amount.
+10b. A tax breakdown does NOT get added to anything. On a VAT-inclusive receipt
+    (the usual layout in the Philippines and most of Asia/Europe) the "VATable
+    486.61 / 12% VAT 58.39" table is a BREAKDOWN of the 545.00 already charged —
+    486.61 + 58.39 = 545.00 — not a tax to add on top. NEVER produce a total by
+    adding vat_amount to the subtotal, and never recompute change from it. If the
+    receipt prints no "Total" / "Amount Due" line, total_amount is null; leave it
+    null rather than building one. Copy the printed CHANGE figure as printed —
+    never work it out as cash minus a total.
 11. A tax breakdown is often a small table: a row of headers
     (VATable | Tax | Exempt | Zero-Rated) with a row of numbers directly beneath.
     Read the number UNDER each header into its field: the value under
@@ -305,6 +313,89 @@ def _remap_summary_lines(data: dict) -> dict:
     return data
 
 
+def _gross_anchor(data: dict) -> float | None:
+    """The receipt's own gross figure before payment: the printed subtotal, or the
+    line items' sum when no subtotal was printed. None when neither is available."""
+    subtotal = _num(data.get("subtotal"))
+    if subtotal is not None:
+        return subtotal
+    amounts = [a for a in (_num(i.get("amount")) for i in data.get("items") or [])
+               if a is not None]
+    return round(sum(amounts), 2) if amounts else None
+
+
+def vat_is_inside_subtotal(data: dict) -> bool:
+    """True when the printed tax breakdown decomposes the subtotal instead of
+    sitting on top of it — i.e. the receipt is VAT-inclusive.
+
+    The tell is arithmetic, printed on the receipt itself: on a VAT-inclusive
+    receipt the taxable-sales figure is the amount NET of tax, so
+    `vatable + exempt + zero-rated + vat == subtotal` (Pepper Lunch:
+    486.61 + 58.39 = 545.00). On a tax-exclusive receipt the breakdown lines add
+    up to the subtotal on their own and the tax is charged on top. We only return
+    True when the inclusive reading holds and the exclusive one does not, so an
+    ambiguous receipt (zero VAT, no breakdown printed) is never claimed either way.
+    """
+    gross = _gross_anchor(data)
+    vat = _num(data.get("vat_amount"))
+    if gross is None or gross <= 0 or not vat or vat <= 0:
+        return False
+    parts = [p for p in (_num(data.get("vatable_sales")),
+                         _num(data.get("vat_exempt_sales")),
+                         _num(data.get("zero_rated_sales"))) if p is not None]
+    if not parts:
+        return False
+    parts_sum = round(sum(parts), 2)
+    return abs(parts_sum + vat - gross) <= 0.5 and abs(parts_sum - gross) > 0.5
+
+
+def undo_vat_added_to_total(data: dict) -> dict:
+    """Undo a total the model built by adding a VAT-inclusive tax figure back on.
+
+    This is the Pepper Lunch failure: the receipt prints SUBTOTAL 545.00, CASH
+    1,000.00, CHANGE 455.00 and a "VATable 486.61 / 12% VAT 58.39" table, and no
+    Total line at all. The model transcribed every figure correctly, then did the
+    arithmetic it is told not to do — total 545.00 + 58.39 = 603.39, and change
+    1,000.00 − 603.39 = 396.61. Both invented numbers, and the receipt was charged
+    ₱58.39 more than it cost.
+
+    `_fix_payment_fields` could not catch it: its cash − change == total identity
+    HOLDS on the invented pair, because the model derived one from the other. So we
+    check against the receipt's own breakdown instead, and only act on direct
+    evidence: the VAT is demonstrably inside the subtotal AND the total is exactly
+    the subtotal plus that VAT. A genuinely tax-exclusive receipt fails the first
+    test, and a printed total that agrees with the subtotal fails the second, so
+    neither is touched.
+
+    The Bench Boutique lesson — a partly-captured item list must never rewrite a
+    printed total — holds here even when the anchor falls back to the item sum:
+    that fallback is only reached when the printed breakdown adds up to it exactly
+    (`vatable + VAT == the anchor`), which a partial item list does not do.
+    """
+    if not vat_is_inside_subtotal(data):
+        return data
+    gross = _gross_anchor(data)
+    total = _num(data.get("total_amount"))
+    vat = _num(data.get("vat_amount"))
+    if gross is None or total is None:
+        return data
+
+    due = round(gross - (_num(data.get("discount")) or 0.0), 2)
+    inflated = round(due + vat, 2)
+    # Only when the total IS the inflated figure and is not already the right one.
+    if abs(total - inflated) > 0.5 or abs(total - due) <= 0.5:
+        return data
+    data["total_amount"] = due
+
+    # The change was computed off the inflated total, so it is inflated's mirror
+    # image, not a figure read off the paper — re-derive it from the corrected due.
+    cash = _num(data.get("cash"))
+    change = _num(data.get("change"))
+    if cash is not None and change is not None and abs(cash - change - inflated) <= 0.5:
+        data["change"] = round(cash - due, 2)
+    return data
+
+
 def _fix_payment_fields(data: dict) -> dict:
     """Correct total_amount / cash / change when the model misassigned them.
 
@@ -316,7 +407,14 @@ def _fix_payment_fields(data: dict) -> dict:
     We only reassign numbers that were actually read off the receipt; nothing is
     invented. If we can't resolve it cleanly, values are left as-is and the
     reconciliation flag stays on for manual review.
+
+    Runs `undo_vat_added_to_total` first: a total the model produced as
+    subtotal + VAT satisfies the cash − change == total identity below (the model
+    derived the change from it), so it has to be undone before that identity is
+    allowed to certify the payments as consistent.
     """
+    data = undo_vat_added_to_total(data)
+
     total = _num(data.get("total_amount"))
     cash = _num(data.get("cash"))
     change = _num(data.get("change"))
@@ -530,14 +628,29 @@ def audit_receipt(data: dict) -> list[dict]:
         inclusive_due = round(subtotal - discount, 2)          # PH receipts usually
         exclusive_due = round(subtotal - discount + (vat or 0.0), 2)  # tax added on
         tol = _tolerance(total)
-        if abs(inclusive_due - total) > tol and abs(exclusive_due - total) > tol:
-            findings.append(_finding(
-                "subtotal_vs_total", "warning",
-                f"Subtotal {cur}{subtotal:,.2f} less a {cur}{discount:,.2f} discount "
-                f"comes to {cur}{inclusive_due:,.2f}, but the printed total is "
-                f"{cur}{total:,.2f}.",
-                expected=total, found=inclusive_due,
-            ))
+        if abs(inclusive_due - total) > tol:
+            # The exclusive reading is only a legitimate excuse when the receipt
+            # actually charges tax on top. When its own breakdown shows the VAT is
+            # already inside the subtotal, "total == subtotal + VAT" is the tax
+            # counted twice — an error, not an alternative convention.
+            if abs(exclusive_due - total) <= tol and vat_is_inside_subtotal(data):
+                findings.append(_finding(
+                    "vat_added_to_total", "error",
+                    f"The total of {cur}{total:,.2f} is the {cur}{inclusive_due:,.2f} "
+                    f"due plus the {cur}{vat:,.2f} VAT — but that VAT is already "
+                    f"inside the subtotal ({cur}{(vatable or 0.0):,.2f} vatable + "
+                    f"{cur}{vat:,.2f} VAT = {cur}{subtotal:,.2f}), so it has been "
+                    f"charged twice.",
+                    expected=inclusive_due, found=total,
+                ))
+            elif abs(exclusive_due - total) > tol:
+                findings.append(_finding(
+                    "subtotal_vs_total", "warning",
+                    f"Subtotal {cur}{subtotal:,.2f} less a {cur}{discount:,.2f} discount "
+                    f"comes to {cur}{inclusive_due:,.2f}, but the printed total is "
+                    f"{cur}{total:,.2f}.",
+                    expected=total, found=inclusive_due,
+                ))
 
     # ---- 6. cash and change against the total ---------------------------- #
     if cash is not None and change is not None and total is not None and total > 0:

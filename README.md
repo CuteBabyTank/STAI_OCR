@@ -77,6 +77,8 @@ To run fully offline against a local Ollama, export all three:
           │  _clean_items()   strip "qty @ price"    │
           │  _remap_summary_lines()  move tax lines  │
           │  _dedupe_items()  collapse duplicates    │
+          │  undo_vat_added_to_total()  drop double- │
+          │       counted VAT-inclusive tax          │
           │  _fix_payment_fields()  Total/Cash/Change│
           │  _coerce_numeric_fields()  str → float   │
           └────────────────────┬────────────────────┘
@@ -162,7 +164,8 @@ To run fully offline against a local Ollama, export all three:
 | Structured Outputs     | `core.ReceiptData` / `LineItem` — Pydantic-validated JSON from the model                                                                                                                                                                                                            |
 | Guardrails             | `core.validate_input` (file type/size) + `core.validate_output` (schema) + SQL-agent read-only query filter + agent `receipt_ids` scope                                                                                                                                             |
 | Disambiguation         | `core.needs_disambiguation` — flags missing totals/items/mismatched tax ID for human review instead of guessing                                                                                                                                                                     |
-| Arithmetic audit       | `extraction.audit_receipt` via `core.audit_extraction` — 8 structured checks run on the single shared extraction path after every read; `error` findings become review reasons, `warning`s are surfaced beside the receipt. Returned as `audit` by `/extract` and `/extract/batch`    |
+| Arithmetic audit       | `extraction.audit_receipt` via `core.audit_extraction` — 9 structured checks run on the single shared extraction path after every read; `error` findings become review reasons, `warning`s are surfaced beside the receipt. Returned as `audit` by `/extract` and `/extract/batch`    |
+| VAT double-count guard | `extraction.undo_vat_added_to_total` — a VAT-inclusive receipt's tax breakdown decomposes the subtotal, so a model-computed `subtotal + VAT` total (and the change derived from it) is undone before saving; the `vat_added_to_total` audit check catches any that arrive by another route. `python repair_receipts.py [--apply]` backfills rows saved before the fix |
 | Memory                 | `core.save_receipt` / `list_receipts` — persistent SQLite ledger across sessions                                                                                                                                                                                                    |
 | RAG                    | `core.semantic_search` / `rag_answer` — embeds each receipt (`nomic-embed-text`) into `receipt_docs`, retrieves by cosine similarity, answers grounded in retrieved docs (keyword fallback if the embed model is absent)                                                            |
 | SQL Agent              | `core.ask_ledger` — NL question → generated SQL → executed against `ledger.db`                                                                                                                                                                                                      |

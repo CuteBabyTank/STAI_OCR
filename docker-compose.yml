@@ -5,8 +5,10 @@ services:
   # web-next/next.config.js), so there's no CORS to configure.
   web:
     build: ./web-next
+    # Published on 7860 to match the VM's NAT forward (external 2148 -> 7860).
+    # Override for a different host with WEB_PORT, e.g. WEB_PORT=8502 for local.
     ports:
-      - "8502:3000"
+      - "${WEB_PORT:-7860}:3000"
     depends_on:
       - api
     environment:
@@ -24,8 +26,13 @@ services:
       sh -c "mkdir -p /data &&
              { [ -f /data/ledger.db ] || cp /app/ledger.db /data/ledger.db 2>/dev/null || true; } &&
              exec uvicorn api:app --host 0.0.0.0 --port 8000"
+    # Published on 8000 to match the VM's NAT forward (external 2168 -> 8000).
+    # The browser never needs this — it calls same-origin /api/*, which the web
+    # service rewrites to http://api:8000 inside the compose network. This
+    # publish is for hitting /docs and /health directly from outside.
+    # Override with API_PORT, e.g. API_PORT=8001 for local dev.
     ports:
-      - "8001:8000"
+      - "${API_PORT:-8000}:8000"
     depends_on:
       mlflow:
         condition: service_started
