@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server";
+import { slog, serr, nextReqId, errFields, connHint } from "../../../lib/serverLog";
 
 // Dedicated streaming proxy for the ReAct agent (Server-Sent Events).
 //
@@ -16,6 +17,10 @@ const API_BASE = process.env.API_BASE || "http://api:8000";
 
 export async function POST(req: NextRequest): Promise<Response> {
   const body = await req.text();
+  const id = nextReqId("agent");
+  const started = Date.now();
+  slog("agent-proxy", "-> upstream", { id, url: `${API_BASE}/agent/stream`, bytes: body.length });
+
   let upstream: Response;
   try {
     upstream = await fetch(`${API_BASE}/agent/stream`, {
@@ -24,10 +29,31 @@ export async function POST(req: NextRequest): Promise<Response> {
       body,
     });
   } catch (e: any) {
+    // fetch() wraps the real network error in a generic "fetch failed", so the
+    // useful code (ENOTFOUND / ECONNREFUSED) is on `e.cause`. Unwrap it, or the
+    // log says nothing the browser didn't already show.
+    const root = e?.cause ?? e;
+    const hint = connHint(root, API_BASE);
+    serr("agent-proxy", "<- request failed", {
+      id,
+      ms: Date.now() - started,
+      ...errFields(root),
+      ...(hint ? { hint } : {}),
+    });
     return new Response(
       `data: ${JSON.stringify({ type: "error", message: `agent proxy: ${e?.message || e}` })}\n\n`,
       { status: 502, headers: { "content-type": "text/event-stream" } },
     );
+  }
+
+  if (!upstream.ok) {
+    serr("agent-proxy", "<- upstream error status", {
+      id,
+      status: upstream.status,
+      ms: Date.now() - started,
+    });
+  } else {
+    slog("agent-proxy", "<- streaming", { id, status: upstream.status, ms: Date.now() - started });
   }
 
   // Pipe the upstream SSE body straight through, unbuffered.

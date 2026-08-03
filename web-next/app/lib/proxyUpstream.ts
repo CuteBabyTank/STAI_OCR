@@ -1,6 +1,7 @@
 import http from "node:http";
 import https from "node:https";
 import type { NextRequest } from "next/server";
+import { slog, serr, nextReqId, errFields, connHint } from "./serverLog";
 
 // Server-only: forwards a POST to the FastAPI service with NO socket timeout.
 //
@@ -16,6 +17,16 @@ import type { NextRequest } from "next/server";
 // Each endpoint needs its own STATIC route file (/api/extract, /api/extract/batch).
 const API_BASE = process.env.API_BASE || "http://api:8000";
 
+// Printed once when the module first loads, so the very first line in the log
+// says where this process will send extractions. API_BASE is read at RUNTIME here
+// (unlike the next.config.js rewrite, which bakes it in at BUILD time) — setting
+// it for the build but not for the server is a real and easy mistake, and it fails
+// only on this path while the rest of the app looks healthy. Make it observable.
+slog("extract-proxy", "upstream configured", {
+  API_BASE,
+  from: process.env.API_BASE ? "env" : "default (compose-only hostname)",
+});
+
 export function proxyPostUntimed(req: NextRequest, upstreamPath: string): Promise<Response> {
   return req.arrayBuffer().then(
     (buf) =>
@@ -23,6 +34,15 @@ export function proxyPostUntimed(req: NextRequest, upstreamPath: string): Promis
         const body = Buffer.from(buf);
         const url = new URL(`${API_BASE}${upstreamPath}${req.nextUrl.search}`);
         const client = url.protocol === "https:" ? https : http;
+
+        const id = nextReqId("extract");
+        const started = Date.now();
+        const ms = () => Date.now() - started;
+        slog("extract-proxy", "-> upstream", {
+          id,
+          url: url.toString(),
+          bytes: body.length,
+        });
 
         const upstream = client.request(
           {
@@ -39,10 +59,40 @@ export function proxyPostUntimed(req: NextRequest, upstreamPath: string): Promis
           (res) => {
             const chunks: Buffer[] = [];
             res.on("data", (c: Buffer) => chunks.push(c));
-            res.on("end", () => {
+            // A mid-response socket failure (upstream restarted, connection reset)
+            // fires here, NOT on the request — without this the promise would never
+            // settle and the browser would hang until it gave up on its own.
+            res.on("error", (e: Error) => {
+              serr("extract-proxy", "<- response stream failed", {
+                id,
+                ms: ms(),
+                ...errFields(e),
+              });
               resolve(
-                new Response(Buffer.concat(chunks), {
-                  status: res.statusCode || 502,
+                new Response(
+                  JSON.stringify({ detail: `Extraction proxy error (response): ${e.message}` }),
+                  { status: 502, headers: { "content-type": "application/json" } },
+                ),
+              );
+            });
+            res.on("end", () => {
+              const payload = Buffer.concat(chunks);
+              const status = res.statusCode || 502;
+              if (status >= 400) {
+                // Include a slice of the body: FastAPI puts the real reason in
+                // {"detail": ...}, and that reason is the whole point of the log.
+                serr("extract-proxy", "<- upstream error status", {
+                  id,
+                  status,
+                  ms: ms(),
+                  body: payload.subarray(0, 500).toString("utf8"),
+                });
+              } else {
+                slog("extract-proxy", "<- ok", { id, status, ms: ms(), bytes: payload.length });
+              }
+              resolve(
+                new Response(payload, {
+                  status,
                   headers: {
                     "content-type": res.headers["content-type"] || "application/json",
                   },
@@ -53,6 +103,14 @@ export function proxyPostUntimed(req: NextRequest, upstreamPath: string): Promis
         );
 
         upstream.on("error", (e: Error) => {
+          const hint = connHint(e, API_BASE);
+          serr("extract-proxy", "<- request failed", {
+            id,
+            url: url.toString(),
+            ms: ms(),
+            ...errFields(e),
+            ...(hint ? { hint } : {}),
+          });
           resolve(
             new Response(JSON.stringify({ detail: `Extraction proxy error: ${e.message}` }), {
               status: 502,
