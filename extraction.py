@@ -77,10 +77,19 @@ STRICT RULES — follow exactly:
     (the usual layout in the Philippines and most of Asia/Europe) the "VATable
     486.61 / 12% VAT 58.39" table is a BREAKDOWN of the 545.00 already charged —
     486.61 + 58.39 = 545.00 — not a tax to add on top. NEVER produce a total by
-    adding vat_amount to the subtotal, and never recompute change from it. If the
-    receipt prints no "Total" / "Amount Due" line, total_amount is null; leave it
-    null rather than building one. Copy the printed CHANGE figure as printed —
-    never work it out as cash minus a total.
+    adding vat_amount to the subtotal, and never recompute change from it.
+    total_amount is the FINAL amount the customer was charged — the bottom line,
+    the figure they actually paid. When the receipt prints no "Total" / "Amount
+    Due" line, that final amount is still on the receipt: it is the last summary
+    figure before the payment lines, normally the SUBTOTAL. Copy that figure into
+    total_amount exactly as printed. On the Pepper Lunch example above the answer
+    is 545.00 — not 603.39 (that is 545.00 with the VAT wrongly added back on) and
+    not null. Copy it; never build it by arithmetic. The one exception: if a
+    DISCOUNT line is printed, the final amount charged is the figure AFTER the
+    discount — use the discounted figure the receipt prints, and if the receipt
+    only prints the pre-discount subtotal, leave total_amount null so it is not
+    overstated. Copy the printed CHANGE figure as printed — never work it out as
+    cash minus a total.
 11. A tax breakdown is often a small table: a row of headers
     (VATable | Tax | Exempt | Zero-Rated) with a row of numbers directly beneath.
     Read the number UNDER each header into its field: the value under
@@ -136,7 +145,8 @@ exact keys. Use null when a value is not present. Money values are plain numbers
   "vat_amount": number,            // EXACT printed tax/VAT figure; null if not printed. Never computed.
   "discount": number,              // total discount amount
   "discount_type": string,         // e.g. "Promo", "Loyalty", "Senior Citizen", "PWD", "Coupon", or null
-  "total_amount": number,          // the "Total" / "Amount Due" line. NOT cash, NOT change.
+  "total_amount": number,          // FINAL amount charged: the "Total"/"Amount Due" line, else the
+                                   // printed subtotal. Never subtotal+VAT. NOT cash, NOT change.
   "cash": number,                  // cash tendered / amount paid by the customer ("CASH", "TENDERED")
   "change": number,                // change given back to the customer ("CHANGE")
   "currency": string,              // currency code/symbol shown, e.g. "PHP", "USD", "EUR"; null if none
@@ -396,6 +406,44 @@ def undo_vat_added_to_total(data: dict) -> dict:
     return data
 
 
+def undo_discount_omitted_from_total(data: dict) -> dict:
+    """Undo a total copied from the subtotal on a receipt that also printed a discount.
+
+    Rule 10b now tells the model that when no "Total" / "Amount Due" line is
+    printed, the final amount charged is the printed subtotal — which is right on
+    the common VAT-inclusive receipt, and is what stops totals coming back null.
+    But on a receipt that prints SUBTOTAL 500.00 / DISCOUNT 50.00 and no total, a
+    literal reading of that instruction copies 500.00, overstating the charge by
+    the discount.
+
+    `_fix_payment_fields` cannot correct it: it deliberately never replaces a total
+    the model transcribed (the Bench Boutique lesson — a partly-captured item list
+    once rewrote a correctly read "TOTAL SALE 972.00" down to 256.00), and by then
+    this total looks transcribed.
+
+    So we act only on arithmetic the receipt itself prints: the payment lines have
+    to independently confirm the discounted figure (cash − change == subtotal −
+    discount). A receipt whose total genuinely equals its subtotal fails that test,
+    because its own cash/change agree with the undiscounted amount. Without both
+    payment figures there is no evidence, and nothing is touched.
+    """
+    subtotal = _num(data.get("subtotal"))
+    total = _num(data.get("total_amount"))
+    discount = _num(data.get("discount")) or 0.0
+    cash = _num(data.get("cash"))
+    change = _num(data.get("change"))
+    if subtotal is None or total is None or discount <= 0:
+        return data
+    if cash is None or change is None:
+        return data  # no independent check available — leave it for review
+    if abs(total - subtotal) > 0.5:
+        return data  # the total isn't a copy of the subtotal; not our case
+    due = round(subtotal - discount, 2)
+    if abs(cash - change - due) <= 0.5:
+        data["total_amount"] = due
+    return data
+
+
 def _fix_payment_fields(data: dict) -> dict:
     """Correct total_amount / cash / change when the model misassigned them.
 
@@ -414,6 +462,10 @@ def _fix_payment_fields(data: dict) -> dict:
     allowed to certify the payments as consistent.
     """
     data = undo_vat_added_to_total(data)
+    # Then the discount case, for the same reason: a total copied off the subtotal
+    # on a discounted receipt also satisfies cash − change == total only if it is
+    # already right, so it must be settled before that identity is trusted below.
+    data = undo_discount_omitted_from_total(data)
 
     total = _num(data.get("total_amount"))
     cash = _num(data.get("cash"))

@@ -11,6 +11,7 @@ from extraction import (
     _remap_summary_lines,
     audit_receipt,
     undo_vat_added_to_total,
+    undo_discount_omitted_from_total,
     vat_is_inside_subtotal,
 )
 
@@ -166,6 +167,41 @@ def test_printed_change_is_not_recomputed_when_only_the_total_was_inflated():
     data = _pepper_lunch() | {"change": 455.0}
     out = undo_vat_added_to_total(data)
     assert (out["total_amount"], out["change"]) == (545.0, 455.0)
+
+
+# --------------------------------------------------------------------------- #
+# undo_discount_omitted_from_total — copying the subtotal must not skip a discount
+# --------------------------------------------------------------------------- #
+def test_subtotal_copied_as_total_is_reduced_by_a_printed_discount():
+    """Rule 10b tells the model to copy the subtotal when no Total line is printed.
+    On a discounted receipt a literal reading overstates the charge, and the printed
+    payment lines are the evidence that corrects it: 1,000 − 550 = 450."""
+    data = {"items": _items(("Shirt", 1, 500.0, 500.0)), "subtotal": 500.0,
+            "discount": 50.0, "total_amount": 500.0, "cash": 1000.0, "change": 550.0}
+    out = _fix_payment_fields(data)
+    assert out["total_amount"] == 450.0
+
+
+def test_total_equal_to_subtotal_is_kept_when_the_payments_agree_with_it():
+    """A receipt whose discount was already applied before the subtotal was printed:
+    cash − change confirms 500.00, so the total must not be reduced a second time."""
+    data = {"items": _items(("Shirt", 1, 500.0, 500.0)), "subtotal": 500.0,
+            "discount": 50.0, "total_amount": 500.0, "cash": 1000.0, "change": 500.0}
+    out = _fix_payment_fields(data)
+    assert out["total_amount"] == 500.0
+
+
+def test_discount_correction_needs_both_payment_figures():
+    """With no cash/change there is no independent check, so nothing is invented."""
+    data = {"items": _items(("Shirt", 1, 500.0, 500.0)), "subtotal": 500.0,
+            "discount": 50.0, "total_amount": 500.0, "cash": None, "change": None}
+    assert undo_discount_omitted_from_total(data)["total_amount"] == 500.0
+
+
+def test_undiscounted_receipt_is_untouched_by_the_discount_guard():
+    data = {"items": _items(("Ramen", 1, 545.0, 545.0)), "subtotal": 545.0,
+            "discount": None, "total_amount": 545.0, "cash": 1000.0, "change": 455.0}
+    assert undo_discount_omitted_from_total(data)["total_amount"] == 545.0
 
 
 def test_audit_flags_an_uncorrected_vat_inflated_total():
