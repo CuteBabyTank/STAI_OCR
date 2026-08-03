@@ -59,12 +59,56 @@ STRICT RULES — follow exactly:
    them. If a line shows just a description and one amount, set quantity and
    unit_price to null and put the figure in amount. Never copy a value from one
    line item onto another.
-8. vatable_sales and vat_amount capture any printed tax breakdown ("VAT", "GST",
-   "Sales Tax", "Tax", "VATable Sales", "12% VAT", etc.). Copy the EXACT numbers
-   printed next to those labels. Do NOT compute tax as a percentage of anything.
-   Do NOT derive vatable_sales from the total. If the receipt does not print a
-   taxable-sales figure, vatable_sales is null. If it prints no tax amount,
-   vat_amount is null.
+7b. NUMBERS INSIDE A PRODUCT NAME ARE PART OF THE NAME — NEVER A PRICE, NEVER A
+   QUANTITY. Product names routinely contain digits: "Mineral Water 500ml",
+   "Coke 1.5L", "Pancit Canton 60g", "Eggs 12s", "SPF 50 Sunblock", "Chanel No. 5",
+   "iPhone 15", "Size 32 Jeans", "2pc Chicken", "Tide 3-in-1". A number that is
+   attached to a unit of measure (ml, L, li, g, kg, mg, oz, lb, pc, pcs, pk, pack,
+   ct, s, cm, mm, in, %, W, GB) or that reads as part of the product's name stays
+   in "description". Examples of the ONLY correct reading:
+     "Mineral Water 500ml        25.00"  -> description "Mineral Water 500ml",
+        quantity null, unit_price null, amount 25.00   (NOT amount 500, NOT qty 500)
+     "Coke 1.5L                  85.00"  -> description "Coke 1.5L", amount 85.00
+     "2pc Chicken Meal          189.00"  -> description "2pc Chicken Meal",
+        quantity null, amount 189.00   ("2pc" is the product's name, not a quantity)
+7c. HOW TO TELL WHICH NUMBER ON A LINE IS THE PRICE: the price is the number in the
+   receipt's right-hand money column — the LAST number on the line, vertically
+   aligned with the prices on every other line, normally printed with two decimal
+   places and/or a currency symbol. A number sitting inside the text, or one with no
+   decimals while all the prices on this receipt have decimals, is part of the
+   description. If a line's only trailing number is a size ("Bottled Water 350ml")
+   because the price column was cut off or unreadable, set amount to null — do not
+   promote the size to the price.
+7d. quantity is only a count printed in the receipt's own quantity position: a
+   "QTY" column, a leading standalone integer in that column, or the notation
+   "2 x" / "2 @" / "x2". Anything else — including a number welded to a unit —
+   is not a quantity.
+8. TAX (VAT / GST / sales tax): COPY the printed money figure; never compute it,
+   and never take a percentage of anything.
+   a. vat_amount must be a MONEY figure printed beside a tax label. "12%",
+      "VAT 12%", "TAX RATE 12%", "V" and "(V)" line markers are RATES or FLAGS,
+      not amounts. NEVER put 12 (or any bare percentage) into vat_amount.
+   b. "VAT (12%)  58.39" -> vat_amount is 58.39. "VAT (12%)" printed with no money
+      figure beside or beneath it -> vat_amount is null.
+   c. NEVER calculate the tax as 12% of the subtotal, the total, or the vatable
+      sales, and never back it out of an inclusive price. If the tax amount is not
+      printed, the correct answer is null. A computed figure is a WRONG answer.
+   d. vatable_sales is the figure printed beside "VATable Sales" / "Taxable Sales"
+      / "Amount Net of VAT" — normally SMALLER than the total. Never copy the
+      subtotal or the total into it and never derive it from them.
+   e. A printed 0.00 is a real value: "VAT-Exempt Sales 0.00" -> 0.00, not null.
+   f. Never put a tax figure into "discount". A senior-citizen "Less VAT" line is
+      a VAT deduction, not a discount — if the label says VAT, it is not a discount.
+8b. DISCOUNT: only a printed, labeled deduction, copied as a money amount.
+   a. discount is the MONEY figure on a line labeled "Discount", "Less Discount",
+      "SC Disc", "PWD Discount", "Promo", "Coupon", "Less". Copy that figure.
+   b. "20%", "SC 20%", "Disc 5%" is a RATE. NEVER put 20 or 5 into discount. If the
+      receipt prints only the rate and no money amount, discount is null.
+   c. A deduction printed as "-50.00" or "(50.00)" is a POSITIVE 50.00 in discount.
+   d. If NO discount line is printed, discount and discount_type are BOTH null.
+      Never invent a discount, and never add one to make the numbers balance.
+   e. discount_type is the WORD printed on that line ("Senior Citizen", "PWD",
+      "Promo", "Loyalty", "Employee", "Coupon") — never a number or a percentage.
 9. "items" is ONLY for purchased products/services. Summary and tax lines —
    Subtotal, Taxable/VATable Sales, Tax-Exempt Sales, Zero-Rated Sales, VAT/Tax,
    Discount, Total, Cash, Change — are NOT items. Put each in its own dedicated
@@ -90,6 +134,19 @@ STRICT RULES — follow exactly:
     only prints the pre-discount subtotal, leave total_amount null so it is not
     overstated. Copy the printed CHANGE figure as printed — never work it out as
     cash minus a total.
+10c. CHANGE is ONLY the money figure printed beside "CHANGE" / "CHANGE DUE" /
+    "SUKLI". Copy that figure exactly, digit for digit. NEVER compute it, NEVER
+    derive it from cash minus the total, and NEVER adjust it to make the receipt
+    balance. If the receipt prints CHANGE 455.00, the answer is 455.00 even when
+    your own arithmetic says otherwise — your arithmetic is not evidence, the
+    printed figure is. A printed "CHANGE 0.00" is 0.00, not null.
+10d. If no CHANGE line is printed, change is null. If no CASH / TENDERED line is
+    printed, cash is null. Card, GCash, Maya and other cashless receipts usually
+    print neither — leave both null rather than copying the total into cash or
+    putting 0 into change.
+10e. Never let one payment figure overwrite another: the number beside "CASH" goes
+    only in cash, the number beside "CHANGE" goes only in change, and neither ever
+    lands in total_amount.
 11. A tax breakdown is often a small table: a row of headers
     (VATable | Tax | Exempt | Zero-Rated) with a row of numbers directly beneath.
     Read the number UNDER each header into its field: the value under
@@ -119,6 +176,29 @@ STRICT RULES — follow exactly:
       - "Other"    — anything that clearly fits none of the above
     Base the choice on the merchant and the items. Output one of those four exact
     words. If genuinely unclear, use "Other". Never invent a different category.
+17. receipt_date is the date the PURCHASE was made — the transaction date — and
+    nothing else.
+    a. It is the date printed in the header block, beside the receipt/OR/invoice
+       number, or on the same line as the time of sale ("06/14/2026 14:32").
+       The date printed next to the transaction time is almost always the one.
+    b. IGNORE every other date on the paper. These are NOT the receipt date:
+       "Valid until" / "Valid from", ATP / PTU / permit / BIR accreditation dates
+       ("ATP No. ... issued 01/02/2024", "Accred. Date", "Serial No. ... valid
+       until 2027"), warranty, return-policy and exchange deadlines, expiry or
+       best-before dates, birth dates in a senior-citizen/PWD block, membership
+       expiry, and anything printed in the small-print footer.
+    c. Output YYYY-MM-DD. Work out the field order from the receipt itself:
+       - A component greater than 12 MUST be the day: "25/06/2026" -> 2026-06-25.
+       - A spelled or abbreviated month is decisive: "14 JUN 2026" -> 2026-06-14,
+         "JUN 14, 2026" -> 2026-06-14, "2026-JUN-14" -> 2026-06-14.
+       - A 4-digit component is the year. A 2-digit year "26" means 2026.
+       - Only if the order is still ambiguous (all numeric, both components 12 or
+         under) read it as MONTH/DAY/YEAR — the convention on Philippine and US
+         receipts: "03/08/2026" -> 2026-03-08.
+    d. Copy the digits as printed. Do not shift, swap, correct or "modernise" the
+       year, and never substitute today's date. If the transaction date is not
+       printed or not legible, receipt_date is null.
+    e. Put only the date in receipt_date — no time, no day name.
 
 Return ONLY a single valid JSON object — no prose, no markdown fences. Use these
 exact keys. Use null when a value is not present. Money values are plain numbers
@@ -129,29 +209,43 @@ exact keys. Use null when a value is not present. Money values are plain numbers
   "vendor_tin": string,            // merchant tax ID if labeled (TIN/GST/Tax ID/etc.); else null. NOT the receipt no.
   "vendor_address": string,
   "receipt_number": string,        // receipt / invoice / OR / SI no.
-  "receipt_date": string,          // YYYY-MM-DD if possible
+  "receipt_date": string,          // TRANSACTION date only, YYYY-MM-DD (rule 17). Not a
+                                   // permit/ATP/valid-until/expiry date. null if not printed.
   "items": [
     {
-      "description": string,       // the item name/description as printed
-      "quantity": number,          // only if a quantity is printed for this line; else null
+      "description": string,       // item name as printed, INCLUDING sizes like "500ml", "1.5L"
+      "quantity": number,          // only a printed count ("2 x", "QTY 2"); a size is not a quantity
       "unit_price": number,        // only if a unit/per-item price is printed for this line; else null
-      "amount": number             // the line total/amount printed for this item
+      "amount": number             // the price from the right-hand money column; never a size/volume
     }
   ],
   "subtotal": number,              // the subtotal / gross amount line, before tax and discounts
   "vatable_sales": number,         // EXACT printed taxable-sales figure; null if not printed. Never derived.
   "vat_exempt_sales": number,      // tax-exempt sales
   "zero_rated_sales": number,      // zero-rated sales
-  "vat_amount": number,            // EXACT printed tax/VAT figure; null if not printed. Never computed.
-  "discount": number,              // total discount amount
-  "discount_type": string,         // e.g. "Promo", "Loyalty", "Senior Citizen", "PWD", "Coupon", or null
+  "vat_amount": number,            // EXACT printed tax/VAT MONEY figure; never a % rate, never computed
+  "discount": number,              // printed discount MONEY amount, always positive; never a % rate
+  "discount_type": string,         // the word on the discount line: "Promo", "Loyalty", "Senior Citizen",
+                                   // "PWD", "Coupon"; null when no discount line is printed
   "total_amount": number,          // FINAL amount charged: the "Total"/"Amount Due" line, else the
                                    // printed subtotal. Never subtotal+VAT. NOT cash, NOT change.
   "cash": number,                  // cash tendered / amount paid by the customer ("CASH", "TENDERED")
-  "change": number,                // change given back to the customer ("CHANGE")
+  "change": number,                // the figure printed beside "CHANGE" — copied, never cash minus total
   "currency": string,              // currency code/symbol shown, e.g. "PHP", "USD", "EUR"; null if none
   "category": string               // EXACTLY one of: "Food", "Shopping", "Health", "Other"
 }
+
+Before you answer, check these five — they are where this task usually goes wrong:
+  1. Every item amount came from the right-hand price column. No size or volume
+     from a product name ("500ml", "1.5L", "60g", "2pc") was used as an amount,
+     a unit_price or a quantity.
+  2. vat_amount is a printed money figure, not a percentage and not something you
+     worked out. If no tax amount was printed, it is null.
+  3. discount is a printed money figure, not a percentage, and it is null if no
+     discount line was printed.
+  4. change is exactly the number printed beside "CHANGE" — not cash minus total.
+  5. receipt_date is the transaction date, not a permit / valid-until / expiry
+     date, and its day and month are the right way round.
 
 Remember: transcribe only what is printed. A missing value must be null, never a
 guess or a calculation. Return the JSON object only."""
