@@ -479,6 +479,9 @@ _REGION_DESCRIPTION = {
            "below it has been cut off",
     "bottom": "the BOTTOM of the receipt (the summary block, the tax breakdown "
               "and the payment lines). Everything above it has been cut off",
+    "items": "the MIDDLE of the receipt (the line-item block). The merchant's "
+             "header and part of the summary block have been cropped away so the "
+             "item lines fill the frame",
 }
 
 
@@ -1720,6 +1723,184 @@ def audit_receipt(data: dict) -> list[dict]:
             ))
 
     return findings
+
+
+# --------------------------------------------------------------------------- #
+# Check-driven re-read — "if it doesn't add up, go and look again"
+# --------------------------------------------------------------------------- #
+# `audit_receipt` already says exactly WHICH sum failed and by how much. That is
+# enough to aim a second reading: a failed items-vs-subtotal means re-read the
+# item block, a failed cash − change means re-read the payment lines. This table
+# turns each finding code into that instruction — which fields to ask for, and
+# which part of the paper to crop to.
+#
+# The danger in asking again is obvious and has to be designed against: a model
+# told "these numbers don't add up" will happily ADJUST one until they do, and an
+# invented figure that balances is far worse than a transcribed one that doesn't.
+# Two things prevent it. The prompt says in as many words that a receipt which
+# genuinely doesn't balance is an acceptable answer and that adjusting a figure to
+# close the gap is the worst outcome. And nothing the re-read returns is kept
+# unless `audit_score` says the receipt's own arithmetic got STRICTLY better —
+# which a fabricated figure can achieve only by being right, because the score is
+# computed from the same printed figures it would have to fit between.
+#
+# `kind` is "items" (re-read the whole line-item block) or "fields" (re-read these
+# specific figures). `target` is what the look actually ASKS — several checks can
+# fail for one reason and produce the same question, and asking it twice at
+# temperature 0 returns the same answer twice. Dedupe is by target, not by code:
+# items-vs-subtotal and items-vs-total are two failures of one item block.
+_TAX_BLOCK_FIELDS = ("subtotal", "vatable_sales", "vat_exempt_sales",
+                     "zero_rated_sales", "vat_amount")
+RECHECK_RECIPES: dict[str, dict] = {
+    # The item block: the sum of the lines missed a printed figure.
+    "items_vs_subtotal": {"target": "items", "kind": "items", "region": "items"},
+    "items_vs_total": {"target": "items", "kind": "items", "region": "items"},
+    "items_incomplete": {"target": "items", "kind": "items", "region": "items"},
+    "line_item_math": {"target": "items", "kind": "items", "region": "items"},
+    # The tax block. Both checks read the same five figures: a VAT that doesn't
+    # match its vatable sales and a breakdown that doesn't reach the subtotal are
+    # the same table misread, and the wider field list gives the model the context
+    # to correct whichever figure is actually wrong.
+    "sales_breakdown_vs_subtotal": {"target": "tax_block", "kind": "fields",
+                                    "region": "bottom", "fields": _TAX_BLOCK_FIELDS},
+    "vat_rate": {"target": "tax_block", "kind": "fields", "region": "bottom",
+                 "fields": _TAX_BLOCK_FIELDS},
+    # The bottom line.
+    "subtotal_vs_total": {"target": "bottom_line", "kind": "fields",
+                          "region": "bottom",
+                          "fields": ("subtotal", "discount", "vat_amount",
+                                     "total_amount")},
+    "vat_added_to_total": {"target": "bottom_line", "kind": "fields",
+                           "region": "bottom",
+                           "fields": ("subtotal", "discount", "vat_amount",
+                                      "total_amount")},
+    # The payment lines.
+    "payment_vs_total": {"target": "payment", "kind": "fields", "region": "bottom",
+                         "fields": ("total_amount", "cash", "change")},
+}
+
+# Which failed check to act on first when several fail at once. The item block
+# comes first because it is upstream of everything else: lines that don't add up
+# to the subtotal are usually the reason the subtotal doesn't fit the total either,
+# so fixing them can clear the rest without a second look.
+RECHECK_PRIORITY = (
+    "items_incomplete", "items_vs_subtotal", "items_vs_total", "line_item_math",
+    "sales_breakdown_vs_subtotal", "vat_added_to_total", "subtotal_vs_total",
+    "vat_rate", "payment_vs_total",
+)
+
+
+def audit_score(data: dict) -> tuple[int, float, int]:
+    """How badly a receipt fails its own arithmetic, as a comparable score:
+    (error findings, total absolute discrepancy, warning findings).
+
+    Lower is better, compared left to right. This is the gate a re-read has to
+    pass before anything it returns is kept: the receipt's own printed figures
+    have to agree with each other MORE than they did before, or the re-read is
+    discarded whole. It is deliberately computed from `audit_receipt` rather than
+    from the one check that triggered the look, so a "fix" that closes one gap by
+    opening a bigger one somewhere else scores worse and is thrown away."""
+    findings = audit_receipt(data)
+    errors = sum(1 for f in findings if f["severity"] == "error")
+    warnings = sum(1 for f in findings if f["severity"] == "warning")
+    gap = 0.0
+    for finding in findings:
+        difference = finding.get("difference")
+        if isinstance(difference, (int, float)):
+            gap += abs(difference)
+    return errors, round(gap, 2), warnings
+
+
+def next_recheck(findings: list[dict], already_tried) -> dict | None:
+    """The highest-priority failed check whose re-read hasn't been made yet, or
+    None. `already_tried` holds recipe TARGETS (see `RECHECK_RECIPES`), so each
+    distinct question is asked at most once per receipt: at temperature 0 the same
+    question about the same pixels returns the same answer, and several checks
+    routinely fail for one reason."""
+    by_code = {f["code"]: f for f in findings}
+    for code in RECHECK_PRIORITY:
+        recipe = RECHECK_RECIPES.get(code)
+        if code in by_code and recipe and recipe["target"] not in already_tried:
+            return by_code[code]
+    return None
+
+
+def build_recheck_prompt(finding: dict, recipe: dict, data: dict,
+                         region: str | None = None,
+                         fingerprint: str | None = None) -> str:
+    """The prompt for one check-driven re-read: what failed, what you said last
+    time, and where to look — with the arithmetic explicitly NOT the target."""
+    kind = recipe.get("kind")
+    fields = [f for f in recipe.get("fields", ()) if f in _FIELD_HINTS]
+    if kind != "items" and not fields:
+        return ""
+
+    lines = []
+    if fingerprint:
+        lines.append(image_read_marker(fingerprint))
+    lines.append(
+        "You have already read this receipt once. A check on the figures you "
+        "returned FAILED, so this is a second look at the part of the receipt "
+        "those figures come from."
+    )
+    lines.append(f"\nWhat failed: {finding.get('message', 'the receipt does not add up.')}")
+    if region in _REGION_DESCRIPTION:
+        lines.append(
+            f"\nThe image attached to this message is a CROP of "
+            f"{_REGION_DESCRIPTION[region]}. It is enlarged so the small print is "
+            f"legible."
+        )
+
+    if kind == "items":
+        lines.append(
+            "\nRead the item block again from its FIRST product line to its LAST, "
+            "one line at a time, and return EVERY line — including lines that "
+            "repeat the same product at the same price, and any line you skipped "
+            "last time. Give each line its description as printed (sizes like "
+            "\"500ml\" stay in the description) and its amount from the right-hand "
+            "money column; quantity and unit_price only where that line prints "
+            "them. Summary lines (Subtotal, VAT, Discount, Total, Cash, Change) "
+            "are NOT items."
+        )
+        keys = ["items", "items_printed_count", "items_section_verified"]
+    else:
+        previous = []
+        for field in fields:
+            value = data.get(field)
+            previous.append(f"  - {field}: "
+                            f"{'(nothing found)' if value in (None, '') else value}"
+                            f"  — {_FIELD_HINTS[field]}")
+        lines.append(
+            "\nRe-read each of these figures where it is printed. What you "
+            "returned last time is shown so you can confirm or correct it, not so "
+            "you can repeat it without looking:"
+        )
+        lines.extend(previous)
+        keys = list(fields)
+
+    lines.extend([
+        "",
+        "HOW TO ANSWER — this matters more than closing the gap:",
+        "  - Copy what is printed. NEVER calculate a figure, and NEVER adjust one "
+        "so that the receipt adds up.",
+        "  - A receipt whose printed figures do not balance is a REAL and "
+        "ACCEPTABLE answer. If everything you returned last time is what the paper "
+        "says, return it again unchanged and the mismatch stands.",
+        "  - Inventing or nudging a number to close the gap is the worst possible "
+        "outcome: it turns a visible problem into a wrong figure nobody can see.",
+        "  - A figure that is not printed at all is null, even if that leaves the "
+        "check failing.",
+        "  - Money values are plain numbers: no currency symbols, no commas.",
+        "",
+        "Return ONLY a single JSON object with exactly these keys and no others: "
+        + ", ".join(keys) + ".",
+    ])
+    if kind == "items":
+        lines.append(
+            'The "items" value is a list of {"description", "quantity", '
+            '"unit_price", "amount"} objects.'
+        )
+    return "\n".join(lines)
 
 
 def audit_messages(findings: list[dict], severity: str | None = None) -> list[str]:

@@ -153,11 +153,15 @@ from extraction import (
     assess_item_coverage,
     audit_messages,
     audit_receipt,
+    RECHECK_RECIPES,
+    audit_score,
     build_extraction_prompt,
+    build_recheck_prompt,
     build_recovery_prompt,
     fields_in_region,
     merge_recovered_items,
     missing_fields,
+    next_recheck,
     normalize_receipt_date,
     reconcile,
 )
@@ -481,6 +485,15 @@ OCR_NUM_PREDICT = _env_int("OCR_NUM_PREDICT", 4096)
 # that was already read. Costs one extra vision call on the receipts that need it
 # and nothing on the ones that don't; set OCR_RECOVERY_PASS=0 to turn it off.
 OCR_RECOVERY_PASS = _env_bool("OCR_RECOVERY_PASS", True)
+# Check-driven re-read. When a receipt's own arithmetic fails — the line items
+# don't reach the subtotal, the tax breakdown doesn't fit, cash − change isn't the
+# total — read the part of the paper behind that sum again, and keep the answer
+# only if the figures agree with each other better than before. Triggered by the
+# audit, so it costs nothing on a receipt that reconciles. Two looks is the useful
+# ceiling: each failed check is asked about once (a repeat at temperature 0 returns
+# the same answer), and the item look usually clears the checks downstream of it.
+OCR_RECONCILE_PASS = _env_bool("OCR_RECONCILE_PASS", True)
+OCR_RECONCILE_MAX_LOOKS = max(0, _env_int("OCR_RECONCILE_MAX_LOOKS", 2))
 # Output cap for that second call. Small when only fields are asked for; the item
 # re-read is the case that needs room, so this matches the main budget.
 OCR_RECOVERY_NUM_PREDICT = _env_int("OCR_RECOVERY_NUM_PREDICT", 2048)
@@ -786,19 +799,22 @@ def _image_fingerprint(image_bytes: bytes) -> str:
     return hashlib.sha256(image_bytes or b"").hexdigest()[:16]
 
 
-# How much of the receipt each recovery crop keeps. They overlap by 10% of the
-# height on purpose: a summary block that starts slightly above the halfway line
-# would otherwise be sliced in two, and a line cut in half is a line lost.
-_REGION_FRACTIONS = {"top": 0.55, "bottom": 0.55}
+# The slice of the receipt's height each crop keeps, as (start, end) fractions.
+# top and bottom overlap by 10% of the height on purpose: a summary block that
+# starts slightly above the halfway line would otherwise be sliced in two, and a
+# line cut in half is a line lost. "items" trims only the extremes — the merchant
+# header and the payment lines — because the item block's real extent is unknown
+# and cutting into it is the exact failure the re-read exists to fix.
+_REGION_BOX = {"top": (0.0, 0.55), "bottom": (0.45, 1.0), "items": (0.10, 0.92)}
 # Below this height a crop is pointless — the whole receipt already fits the
 # encoder's grid, and halving it just throws away context.
 _MIN_CROP_HEIGHT = 400
 
 
 def crop_region(image_bytes: bytes, region: str) -> bytes | None:
-    """Return the top or bottom slice of a receipt image, re-normalized for the
-    model, or None when cropping wouldn't help (no Pillow, short image, undecodable
-    bytes, unknown region).
+    """Return the named slice of a receipt image ("top" / "bottom" / "items"),
+    re-normalized for the model, or None when cropping wouldn't help (no Pillow,
+    short image, undecodable bytes, unknown region).
 
     This is the lever behind the recovery pass's hit rate on VAT / cash / change.
     A receipt is tall and narrow; fitting its longest edge into OCR_MAX_IMAGE_DIM
@@ -806,8 +822,8 @@ def crop_region(image_bytes: bytes, region: str) -> bytes | None:
     both the smallest print and the last thing the encoder has attention for. The
     crop is re-scaled to the same ceiling on its own, so those lines arrive at
     roughly twice the resolution for the same token cost."""
-    fraction = _REGION_FRACTIONS.get(region)
-    if Image is None or not image_bytes or fraction is None:
+    span = _REGION_BOX.get(region)
+    if Image is None or not image_bytes or span is None:
         return None
     try:
         im = Image.open(io.BytesIO(image_bytes))
@@ -815,9 +831,9 @@ def crop_region(image_bytes: bytes, region: str) -> bytes | None:
         width, height = im.size
         if height < _MIN_CROP_HEIGHT:
             return None
-        keep = max(1, int(round(height * fraction)))
-        box = (0, 0, width, keep) if region == "top" else (0, height - keep, width, height)
-        im = im.crop(box)
+        top = max(0, min(height - 1, int(round(height * span[0]))))
+        bottom = max(top + 1, min(height, int(round(height * span[1]))))
+        im = im.crop((0, top, width, bottom))
         if im.mode not in ("RGB", "L"):
             im = im.convert("RGB")
         if OCR_MAX_IMAGE_DIM and max(im.size) > OCR_MAX_IMAGE_DIM:
@@ -1104,6 +1120,93 @@ def _recover_missing_fields(image_bytes: bytes, model: str, data: dict,
     return data
 
 
+def _recheck_arithmetic(image_bytes: bytes, model: str, data: dict,
+                        fingerprint: str | None = None,
+                        source_bytes: bytes | None = None) -> dict:
+    """Re-read the part of the receipt behind a sum that doesn't add up, and keep
+    the result only if the receipt's own arithmetic gets better.
+
+    This is the "if it doesn't reconcile, go and look again" rule. `audit_receipt`
+    has already named which check failed and by how much; `extraction.RECHECK_RECIPES`
+    turns that into an instruction — re-read the item block, or re-read these five
+    tax figures — and the look is given a crop of that part of the paper. The loop
+    re-audits after each look, so fixing the item block can clear the total and the
+    payment checks without spending another call on them.
+
+    The two rules that keep this from doing harm:
+
+      * A look is only KEPT if `audit_score` strictly improves. The candidate is
+        built on a copy, run through the same cleanup chain, and re-audited; if the
+        receipt does not agree with itself more than it did before, the whole
+        answer is discarded — including a "correction" that closes one gap by
+        opening a bigger one elsewhere. This is what lets a re-read overwrite a
+        figure the first pass transcribed, which nothing else in the pipeline is
+        allowed to do: there is proof it is an improvement, not a preference.
+      * Each failed check is tried at most once, and at most
+        OCR_RECONCILE_MAX_LOOKS times in total. At temperature 0 a repeat of the
+        same question about the same pixels returns the same answer, so a second
+        identical attempt buys nothing.
+
+    The item look deliberately uses the middle-band crop rather than the full
+    image: the full-image re-read is what `_recover_missing_fields` already did, so
+    repeating it would be that same no-op question. A different framing is the
+    point.
+    """
+    tried: set[str] = set()
+    looks = 0
+    kept = 0
+    crop_source = source_bytes or image_bytes
+
+    while looks < OCR_RECONCILE_MAX_LOOKS:
+        finding = next_recheck(audit_receipt(data), tried)
+        if finding is None:
+            break
+        recipe = RECHECK_RECIPES[finding["code"]]
+        tried.add(recipe["target"])   # the question asked, not the check that failed
+        looks += 1
+
+        region = recipe.get("region")
+        cropped = crop_region(crop_source, region) if region else None
+        prompt = build_recheck_prompt(finding, recipe, data,
+                                      region=region if cropped else None,
+                                      fingerprint=fingerprint)
+        if not prompt:
+            continue
+        patch = _ask_again(cropped or image_bytes, model, prompt)
+        if patch is None:
+            continue
+
+        before = audit_score(data)
+        candidate = json.loads(json.dumps(data))
+        if recipe["kind"] == "items":
+            if not patch.get("items"):
+                continue
+            merge_recovered_items(candidate, patch["items"])
+            for field in ("items_printed_count", "items_section_verified"):
+                if field in patch:
+                    candidate[field] = patch[field]
+        else:
+            changed = False
+            for field in recipe.get("fields", ()):
+                if field not in patch:
+                    continue
+                value = (_num(patch[field]) if field in _RECOVERY_NUMERIC
+                         else _clean_str(patch[field]))
+                if value != candidate.get(field):
+                    candidate[field] = value
+                    changed = True
+            if not changed:
+                continue
+        candidate = _clean_extraction(candidate)
+        if audit_score(candidate) < before:
+            data = candidate
+            kept += 1
+
+    _mlog_metric("recheck_looks", looks)
+    _mlog_metric("recheck_kept", kept)
+    return data
+
+
 def _run_vision_model(
     image_bytes: bytes, model: str, source_bytes: bytes | None = None
 ) -> tuple[ReceiptData, list[str], dict, dict]:
@@ -1176,6 +1279,12 @@ def _run_vision_model(
             _recover_missing_fields(image_bytes, model, raw, fingerprint,
                                     source_bytes=source_bytes)
         )
+    # Then the arithmetic: anything that still doesn't add up gets the part of the
+    # receipt behind it read again, and the answer is kept only if the receipt's
+    # own figures agree with each other better than before.
+    if OCR_RECONCILE_PASS:
+        raw = _recheck_arithmetic(image_bytes, model, raw, fingerprint,
+                                  source_bytes=source_bytes)
     data = validate_output(raw)
     data.category = categorize(data)  # normalize to the fixed taxonomy
     # Provenance: which image this row was read from. Two receipts with different

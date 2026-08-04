@@ -160,6 +160,8 @@ Code-derived, not proposals. Use these instead of copying numbers from lecture e
 | Item-coverage statuses | `complete` · `incomplete` · `unverified` · `empty` — stored in `receipts.items_status` | `extraction.assess_item_coverage` |
 | Date ordering | printed date parsed in Python, not by the model: spelled month → 4-digit year → component >12 → year-first (`26-06-14` = 14 Jun 2026); a trailing 4-digit year falls back to MONTH/DAY/YEAR | `extraction.normalize_receipt_date` |
 | Second-pass recovery | `OCR_RECOVERY_PASS`, default on; re-asks only for empty fields / a half-read item block, and may only FILL nulls. At most 2 extra calls per receipt | `core._recover_missing_fields` |
+| Check-driven re-read | `OCR_RECONCILE_PASS`, default on; `OCR_RECONCILE_MAX_LOOKS` = 2. Triggered by audit findings; an answer is kept only when `extraction.audit_score` (errors, total gap, warnings) strictly improves | `core._recheck_arithmetic` |
+| Re-read targets | `items` (item block, middle crop) · `tax_block` · `bottom_line` · `payment` (bottom crop) — one look each per receipt | `extraction.RECHECK_RECIPES` |
 | Recovery crops | bottom 55% (summary, tax, payment) · top 55% (merchant header) · full image for an item re-read; skipped under 400px tall | `core.crop_region` / `extraction.FIELD_REGIONS` |
 | Read independence | every request's prompt is prefixed with `READ ID <sha256[:16]>` of its own image, so no two images share a prompt prefix (KV-cache reuse across receipts); stored as `receipts.image_sha256` | `extraction._READ_MARKER` / `core._image_fingerprint` |
 | Repeat-call guard | cached on 1st repeat; force-finalize at `repeats >= 2` | `core.py:2963` |
