@@ -31,6 +31,11 @@ interface BatchItem {
   needsReview?: boolean;
   confidence?: number; // measured OCR confidence (0..1) from token logprobs
   audit?: AuditFinding[]; // arithmetic checks the receipt failed
+  // Receipts already filed from the byte-identical image. The one legitimate
+  // reason a new upload reads exactly like an older one — worth saying out loud,
+  // because the alternative explanation (two different photos read the same) is a
+  // bug, and the user can't tell them apart by looking.
+  sameImageIds?: number[];
   error?: string;
 }
 
@@ -276,6 +281,11 @@ export default function Dashboard() {
                 // Flattened across pages: a 3-page PDF whose 2nd page doesn't add
                 // up must say so, not hide behind the 1st page's clean audit.
                 audit: ok.flatMap((r) => (r.audit || []) as AuditFinding[]),
+                sameImageIds: Array.from(
+                  new Set(
+                    ok.flatMap((r) => (r.same_image_receipt_ids || []) as number[]),
+                  ),
+                ),
               };
             }
             return next;
@@ -986,6 +996,20 @@ export default function Dashboard() {
                                   {f.message}
                                 </li>
                               ))}
+                            </ul>
+                          )}
+                          {/* Says which of the two "this looks like one I've
+                              already filed" explanations applies: the same file
+                              read twice (this note) or two different photos —
+                              which would be a misread, not a repeat. */}
+                          {!!b.sameImageIds?.length && (
+                            <ul className="b-audit">
+                              <li className="b-audit-warning">
+                                This is the same image file as receipt
+                                {b.sameImageIds.length > 1 ? "s " : " "}
+                                {b.sameImageIds.map((n) => `#${n}`).join(", ")} —
+                                already in the ledger.
+                              </li>
                             </ul>
                           )}
                         </>

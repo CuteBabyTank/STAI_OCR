@@ -168,6 +168,8 @@ To run fully offline against a local Ollama, export all three:
 | Item-block coverage    | `extraction.assess_item_coverage` — every read is graded `complete` / `incomplete` / `unverified` / `empty` by checking the model's own count of the printed lines (prompt rule 14b) against the rows it returned and the receipt's printed subtotal. Returned as `items_coverage`, stored in `receipts.items_status`, and an `incomplete` verdict holds the receipt for review instead of filing a half-read item list |
 | Date parsing           | `extraction.normalize_receipt_date` — the model transcribes the printed date verbatim (`receipt_date_raw`) and Python derives the ISO date, so ordering is a fixed, tested rule rather than something the model re-derives per receipt: spelled month → 4-digit year → any component >12 is the day → year-first (`26-06-14` is 14 Jun 2026), with MONTH/DAY/YEAR only as the last resort on a trailing 4-digit year |
 | Second-pass recovery   | `core._recover_missing_fields` — when the first read leaves fields empty or its item block doesn't check out, the same model is asked again about only those fields, with the place each one is printed named in the prompt. It may only FILL nulls, and a re-read item list replaces the first only when it beats it against the receipt's own figures. `OCR_RECOVERY_PASS=0` disables it |
+| Region-targeted re-read | `core.crop_region` + `extraction.FIELD_REGIONS` — each recovery look is given a CROP of the part of the paper its fields are printed on (bottom = summary, tax and payment lines; top = merchant header) rather than the whole receipt. A receipt scaled to fit `OCR_MAX_IMAGE_DIM` leaves its smallest, lowest print — VAT, cash, change — barely legible; the crop roughly doubles their resolution at no extra token cost. At most two extra calls per receipt; the item block is always re-read on the full image, never a crop |
+| Read independence      | `extraction._READ_MARKER` — every request's prompt is prefixed with its own image's fingerprint, so no two different receipts share a prompt prefix and an inference server's KV-cache reuse cannot answer one receipt with another's numbers. Deterministic, so re-reading a file is still reproducible. The fingerprint is stored as `receipts.image_sha256`, and `core.receipts_from_same_image` reports when the byte-identical file is already filed — which is what separates "the same receipt uploaded twice" from "two different receipts read the same" |
 | VAT double-count guard | `extraction.undo_vat_added_to_total` — a VAT-inclusive receipt's tax breakdown decomposes the subtotal, so a model-computed `subtotal + VAT` total (and the change derived from it) is undone before saving; the `vat_added_to_total` audit check catches any that arrive by another route. `python repair_receipts.py [--apply]` backfills rows saved before the fix |
 | Memory                 | `core.save_receipt` / `list_receipts` — persistent SQLite ledger across sessions                                                                                                                                                                                                    |
 | RAG                    | `core.semantic_search` / `rag_answer` — embeds each receipt (`nomic-embed-text`) into `receipt_docs`, retrieves by cosine similarity, answers grounded in retrieved docs (keyword fallback if the embed model is absent)                                                            |
@@ -491,11 +493,14 @@ Two tables are created automatically in `ledger.db` on first run:
 `receipt_number`, `receipt_date`, `receipt_date_raw`, `subtotal`, `vatable_sales`,
 `vat_exempt_sales`, `zero_rated_sales`, `vat_amount`, `discount`, `discount_type`,
 `total_amount`, `cash`, `change`, `currency`, `flagged`, `items_status`,
-`items_printed_count`
+`items_printed_count`, `image_sha256`
 
 `receipt_date_raw` keeps the date exactly as printed beside the parsed ISO one, so
 a date that reads oddly can be checked without re-running OCR. `items_status` /
 `items_printed_count` record whether the item block was read end to end.
+`image_sha256` is the fingerprint of the image the row was read from: two rows
+with different fingerprints came from two different images, and a repeat of the
+same fingerprint is the same file filed twice.
 
 **`line_items`** — one row per line item, linked by `receipt_id`  
 `id`, `receipt_id`, `description`, `quantity`, `unit_price`, `amount`

@@ -59,6 +59,7 @@ from core import (
     get_receipt_items,
     iter_page_images,
     missing_field_report,
+    receipts_from_same_image,
     update_receipt,
     list_budgets,
     list_income,
@@ -214,6 +215,14 @@ async def extract(file: UploadFile = File(...), model: str = DEFAULT_MODEL):
         # Fields a receipt normally prints that are still empty after the second
         # look — what a reviewer should check by eye, not a failed check.
         "missing_fields": missing_field_report(data),
+        # Provenance: the fingerprint of the image this was read from, and any
+        # receipt already filed from the byte-identical file. Two receipts with
+        # different fingerprints were read from different images — which is how a
+        # "these two reads look identical" report gets an answer instead of a guess.
+        "image_sha256": data.image_sha256,
+        "same_image_receipt_ids": receipts_from_same_image(
+            data.image_sha256, exclude_id=receipt_id
+        ),
     }
 
 

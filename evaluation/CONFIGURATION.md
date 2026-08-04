@@ -159,7 +159,9 @@ Code-derived, not proposals. Use these instead of copying numbers from lecture e
 | Audit finding codes | `items_vs_subtotal`, `items_vs_total`, `sales_breakdown_vs_subtotal`, `vat_rate`, `subtotal_vs_total`, `payment_vs_total`, `line_item_math`, `negative_total`, `negative_line_item`, `items_incomplete`, `items_unverified`, `date_unreadable`, `date_implausible` | `extraction.audit_receipt` |
 | Item-coverage statuses | `complete` · `incomplete` · `unverified` · `empty` — stored in `receipts.items_status` | `extraction.assess_item_coverage` |
 | Date ordering | printed date parsed in Python, not by the model: spelled month → 4-digit year → component >12 → year-first (`26-06-14` = 14 Jun 2026); a trailing 4-digit year falls back to MONTH/DAY/YEAR | `extraction.normalize_receipt_date` |
-| Second-pass recovery | `OCR_RECOVERY_PASS`, default on; re-asks only for empty fields / a half-read item block, and may only FILL nulls | `core._recover_missing_fields` |
+| Second-pass recovery | `OCR_RECOVERY_PASS`, default on; re-asks only for empty fields / a half-read item block, and may only FILL nulls. At most 2 extra calls per receipt | `core._recover_missing_fields` |
+| Recovery crops | bottom 55% (summary, tax, payment) · top 55% (merchant header) · full image for an item re-read; skipped under 400px tall | `core.crop_region` / `extraction.FIELD_REGIONS` |
+| Read independence | every request's prompt is prefixed with `READ ID <sha256[:16]>` of its own image, so no two images share a prompt prefix (KV-cache reuse across receipts); stored as `receipts.image_sha256` | `extraction._READ_MARKER` / `core._image_fingerprint` |
 | Repeat-call guard | cached on 1st repeat; force-finalize at `repeats >= 2` | `core.py:2963` |
 | History window | ≤30 messages, ≤1200 chars each, **≤8000 chars total** (the binding constraint), newest-first | `core._format_history` |
 | History placement | fenced, immediately before `Begin. Question:` — ~330 chars, not 2,368 behind the worked examples | `core._REACT_PROMPT` |

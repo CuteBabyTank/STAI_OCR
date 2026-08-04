@@ -17,6 +17,7 @@ Adds, on top of the original extraction pipeline:
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import math
@@ -152,7 +153,9 @@ from extraction import (
     assess_item_coverage,
     audit_messages,
     audit_receipt,
+    build_extraction_prompt,
     build_recovery_prompt,
+    fields_in_region,
     merge_recovered_items,
     missing_fields,
     normalize_receipt_date,
@@ -639,6 +642,10 @@ class ReceiptData(BaseModel):
     # Computed, not extracted: see `extraction.assess_item_coverage`. Set on the
     # extraction path once the data is clean; None on a record built elsewhere.
     items_coverage: Optional[dict] = None
+    # Provenance, not extracted: the fingerprint of the image this was read from
+    # (`_image_fingerprint`). Stored on the row, so "were these two receipts really
+    # read from two different images?" has an answer that isn't a guess.
+    image_sha256: Optional[str] = None
     subtotal: Optional[float] = None
     vatable_sales: Optional[float] = None
     vat_exempt_sales: Optional[float] = None
@@ -766,6 +773,62 @@ def preprocess_image(image_bytes: bytes) -> bytes:
         return buf.getvalue()
     except Exception:  # noqa: BLE001 - never let normalization break extraction
         return image_bytes
+
+
+def _image_fingerprint(image_bytes: bytes) -> str:
+    """A stable id for one receipt image: the first 16 hex chars of its SHA-256.
+
+    Used for two things, and it has to be deterministic for both: it makes each
+    extraction request's prompt prefix unique to its image (see
+    `extraction._READ_MARKER` — this is what stops one receipt being answered with
+    another's numbers), and it is stored on the row as the receipt's provenance,
+    so two receipts can be shown to have come from two different images."""
+    return hashlib.sha256(image_bytes or b"").hexdigest()[:16]
+
+
+# How much of the receipt each recovery crop keeps. They overlap by 10% of the
+# height on purpose: a summary block that starts slightly above the halfway line
+# would otherwise be sliced in two, and a line cut in half is a line lost.
+_REGION_FRACTIONS = {"top": 0.55, "bottom": 0.55}
+# Below this height a crop is pointless — the whole receipt already fits the
+# encoder's grid, and halving it just throws away context.
+_MIN_CROP_HEIGHT = 400
+
+
+def crop_region(image_bytes: bytes, region: str) -> bytes | None:
+    """Return the top or bottom slice of a receipt image, re-normalized for the
+    model, or None when cropping wouldn't help (no Pillow, short image, undecodable
+    bytes, unknown region).
+
+    This is the lever behind the recovery pass's hit rate on VAT / cash / change.
+    A receipt is tall and narrow; fitting its longest edge into OCR_MAX_IMAGE_DIM
+    leaves the width — and every character on it — small, and the bottom block is
+    both the smallest print and the last thing the encoder has attention for. The
+    crop is re-scaled to the same ceiling on its own, so those lines arrive at
+    roughly twice the resolution for the same token cost."""
+    fraction = _REGION_FRACTIONS.get(region)
+    if Image is None or not image_bytes or fraction is None:
+        return None
+    try:
+        im = Image.open(io.BytesIO(image_bytes))
+        im = ImageOps.exif_transpose(im)
+        width, height = im.size
+        if height < _MIN_CROP_HEIGHT:
+            return None
+        keep = max(1, int(round(height * fraction)))
+        box = (0, 0, width, keep) if region == "top" else (0, height - keep, width, height)
+        im = im.crop(box)
+        if im.mode not in ("RGB", "L"):
+            im = im.convert("RGB")
+        if OCR_MAX_IMAGE_DIM and max(im.size) > OCR_MAX_IMAGE_DIM:
+            scale = OCR_MAX_IMAGE_DIM / max(im.size)
+            im = im.resize((max(1, round(im.width * scale)),
+                            max(1, round(im.height * scale))), Image.LANCZOS)
+        buf = io.BytesIO()
+        im.save(buf, format="JPEG", quality=OCR_JPEG_QUALITY)
+        return buf.getvalue()
+    except Exception:  # noqa: BLE001 - a failed crop just means we skip that look
+        return None
 
 
 def _is_pdf(image_bytes: bytes, content_type: str | None) -> bool:
@@ -918,27 +981,9 @@ def _clean_extraction(raw: dict) -> dict:
     return _coerce_numeric_fields(raw)
 
 
-def _recover_missing_fields(image_bytes: bytes, model: str, data: dict) -> dict:
-    """Second pass: ask the model again about only what the first read missed.
-
-    Two triggers, both evidence-based:
-      * a field in `_RECOVERY_FIELDS` came back empty, or
-      * `assess_item_coverage` says the item block was not fully read.
-    Neither triggers on a clean extraction, so a receipt the model read properly
-    costs exactly one call as before.
-
-    The result can only ADD: a recovered value is written only where the field is
-    still None, and a re-read item list replaces the first one only when it beats
-    it against the receipt's own printed figures (`merge_recovered_items`). Any
-    failure — a dead endpoint, unparseable JSON, a model that answers with prose —
-    leaves the first-pass extraction exactly as it was."""
-    fields = missing_fields(data, _RECOVERY_FIELDS)
-    coverage = assess_item_coverage(data)
-    want_items = coverage["status"] in ("empty", "incomplete")
-    prompt = build_recovery_prompt(fields, want_items, data)
-    if not prompt:
-        return data
-
+def _ask_again(image_bytes: bytes, model: str, prompt: str) -> dict | None:
+    """One recovery call. Returns the model's JSON object, or None on any failure
+    — a second look that goes wrong must cost nothing but the call."""
     try:
         response = _chat(
             model=model,
@@ -950,10 +995,17 @@ def _recover_missing_fields(image_bytes: bytes, model: str, data: dict) -> dict:
         )
         patch = _coerce_json(response["message"]["content"])
     except Exception:  # noqa: BLE001 - a failed second look must never lose the first
-        return data
-    if not isinstance(patch, dict):
-        return data
+        return None
+    return patch if isinstance(patch, dict) else None
 
+
+def _apply_recovery_patch(data: dict, patch: dict, fields: list[str],
+                          want_items: bool) -> list[str]:
+    """Merge one recovery answer into `data` in place; return what it filled.
+
+    The rule the whole pass rests on: a recovered value is written ONLY where the
+    field is still None. A second look can complete a receipt; it can never
+    contradict one."""
     filled: list[str] = []
     for field in fields:
         if field not in patch or data.get(field) is not None:
@@ -967,7 +1019,7 @@ def _recover_missing_fields(image_bytes: bytes, model: str, data: dict) -> dict:
 
     if want_items and patch.get("items"):
         before = len(data.get("items") or [])
-        data = merge_recovered_items(data, patch["items"])
+        merge_recovered_items(data, patch["items"])   # mutates `data` in place
         if len(data.get("items") or []) != before:
             # The re-read replaced the list, so its own account of the item block
             # describes the rows we are now keeping; the first pass's does not.
@@ -975,24 +1027,98 @@ def _recover_missing_fields(image_bytes: bytes, model: str, data: dict) -> dict:
                 if field in patch:
                     data[field] = patch[field]
             filled.append("items")
+    return filled
+
+
+def _recover_missing_fields(image_bytes: bytes, model: str, data: dict,
+                            fingerprint: str | None = None,
+                            source_bytes: bytes | None = None) -> dict:
+    """Second pass: ask the model again about only what the first read missed.
+
+    Two triggers, both evidence-based:
+      * a field in `_RECOVERY_FIELDS` came back empty, or
+      * `assess_item_coverage` says the item block was not fully read.
+    Neither triggers on a clean extraction, so a receipt the model read properly
+    costs exactly one call as before.
+
+    The looks are aimed at the part of the paper each missing field is printed on
+    (`extraction.FIELD_REGIONS`), and are given a CROP of that part rather than the
+    whole receipt — which is what makes this work for VAT, cash and change, the
+    three that kept coming back empty. They are printed smallest and lowest, and on
+    a full-height receipt scaled to fit OCR_MAX_IMAGE_DIM there is barely enough
+    resolution left for them; the bottom crop roughly doubles it (see
+    `crop_region`). At most two extra calls per receipt:
+      1. the item block and the summary/payment fields — the full image when the
+         items need re-reading (a crop would cut the list in half), otherwise the
+         bottom crop;
+      2. the header fields, on the top crop.
+
+    Everything the calls return can only ADD (`_apply_recovery_patch`), and any
+    failure leaves the first-pass extraction exactly as it was."""
+    fields = missing_fields(data, _RECOVERY_FIELDS)
+    coverage = assess_item_coverage(data)
+    want_items = coverage["status"] in ("empty", "incomplete")
+    if not fields and not want_items:
+        return data
+
+    bottom_fields = fields_in_region(fields, "bottom")
+    top_fields = fields_in_region(fields, "top")
+    # Crops are cut from the ORIGINAL upload when we have it: cropping the
+    # downscaled image would only re-enlarge detail already discarded.
+    crop_source = source_bytes or image_bytes
+
+    # (image, prompt-fields, ask-for-items, region) for each look, in order.
+    looks: list[tuple[bytes | None, list[str], bool, str | None]] = []
+    if want_items:
+        # The item list has to be read against the whole receipt: a crop that
+        # splits the block guarantees the partial read we are trying to fix.
+        looks.append((image_bytes, bottom_fields, True, None))
+    elif bottom_fields:
+        cropped = crop_region(crop_source, "bottom")
+        looks.append((cropped or image_bytes, bottom_fields, False,
+                      "bottom" if cropped else None))
+    if top_fields:
+        cropped = crop_region(crop_source, "top")
+        looks.append((cropped or image_bytes, top_fields, False,
+                      "top" if cropped else None))
+
+    filled: list[str] = []
+    for page, look_fields, ask_items, region in looks:
+        prompt = build_recovery_prompt(look_fields, ask_items, data,
+                                       region=region, fingerprint=fingerprint)
+        if not prompt or page is None:
+            continue
+        patch = _ask_again(page, model, prompt)
+        if patch is None:
+            continue
+        filled.extend(_apply_recovery_patch(data, patch, look_fields, ask_items))
 
     # Metrics, not params: `extract_batch` opens ONE MLflow run for a whole import
     # and this function runs once per page inside it. Re-logging a param key with a
     # different value raises, and that exception would surface as a FAILED PAGE —
     # telemetry losing a receipt. Metrics accumulate as a series, so they are safe
     # to log once per page.
+    _mlog_metric("recovery_looks", len(looks))
     _mlog_metric("recovery_fields_requested", len(fields))
     _mlog_metric("recovery_fields_filled", len(filled))
     return data
 
 
 def _run_vision_model(
-    image_bytes: bytes, model: str
+    image_bytes: bytes, model: str, source_bytes: bytes | None = None
 ) -> tuple[ReceiptData, list[str], dict, dict]:
     """Normalize the image, call the vision model, and run the full cleanup +
     validation + disambiguation + confidence pipeline. This is the SINGLE hot path
     shared by both the single-file (`extract_receipt_validated`) and batch
     (`_extract_page_saved`) entry points, so they can never drift.
+
+    `image_bytes` is the preprocessed image the model reads. `source_bytes`, when
+    given, is the ORIGINAL upload behind it — used only to cut the recovery pass's
+    region crops, which is the whole point of those crops: cropping the already
+    downscaled image would re-enlarge detail that was thrown away, while cropping
+    the original recovers it. It is also what the receipt's fingerprint identifies,
+    so the same file uploaded twice is recognisable even if OCR_MAX_IMAGE_DIM
+    changed in between.
 
     Returns (data, disambiguation_reasons, confidence, raw_response). No MLflow, no
     input validation, and no image normalization here — callers own those (single-
@@ -1006,9 +1132,14 @@ def _run_vision_model(
     # Ask for the per-token probability distribution so confidence is measured,
     # not guessed (only when the client supports it).
     logprob_kwargs = {"logprobs": True, "top_logprobs": 1} if _OLLAMA_SUPPORTS_LOGPROBS else {}
+    # The prompt is prefixed with this image's own fingerprint so no two different
+    # receipts can ever share a prompt prefix — see `extraction._READ_MARKER` for
+    # why (two receipts from one merchant came back with identical values).
+    fingerprint = _image_fingerprint(source_bytes or image_bytes)
     chat_args = dict(
         model=model,
-        messages=[{"role": "user", "content": EXTRACTION_PROMPT, "images": [image_bytes]}],
+        messages=[{"role": "user", "content": build_extraction_prompt(fingerprint),
+                   "images": [image_bytes]}],
         format="json",
         # num_ctx: prompt + tokenized image can exceed Ollama's 4096 default.
         options={"temperature": 0, "num_predict": OCR_NUM_PREDICT, "num_ctx": OCR_NUM_CTX},
@@ -1041,9 +1172,15 @@ def _run_vision_model(
     # validation so a recovered value goes through the same cleanup, coercion and
     # schema checks as a first-pass one — there is no back door into the record.
     if OCR_RECOVERY_PASS:
-        raw = _clean_extraction(_recover_missing_fields(image_bytes, model, raw))
+        raw = _clean_extraction(
+            _recover_missing_fields(image_bytes, model, raw, fingerprint,
+                                    source_bytes=source_bytes)
+        )
     data = validate_output(raw)
     data.category = categorize(data)  # normalize to the fixed taxonomy
+    # Provenance: which image this row was read from. Two receipts with different
+    # fingerprints were demonstrably read from two different images.
+    data.image_sha256 = fingerprint
     # The verdict on the item block: complete / incomplete / unverified / empty,
     # with the evidence behind it. Computed after cleanup so it judges the rows
     # that will actually be stored.
@@ -1084,8 +1221,13 @@ def extract_receipt_validated(
             validate_input(image_bytes, content_type)
             # Normalize once here (EXIF-rotate + downscale + re-encode); the batch
             # path normalizes in iter_page_images instead.
+            source_bytes = image_bytes
             image_bytes = preprocess_image(image_bytes)
-            data, reasons, confidence, response, audit = _run_vision_model(image_bytes, model)
+            # The original goes along too: the recovery pass cuts its region crops
+            # from it, at the resolution the downscale above gave up.
+            data, reasons, confidence, response, audit = _run_vision_model(
+                image_bytes, model, source_bytes
+            )
 
             _mlog_metric("latency_seconds", time.time() - t0)
             # token usage isn't always returned by every Ollama build; log if present
@@ -1113,15 +1255,22 @@ def extract_receipt_validated(
 
 
 def _extract_page_saved(
-    page_bytes: bytes, model: str, source_file: str, page_no: int | None
+    page_bytes: bytes, model: str, source_file: str, page_no: int | None,
+    source_bytes: bytes | None = None,
 ) -> dict:
     """Extract one already-preprocessed page image and persist it. Returns a
     per-page result dict. Never raises — failures are captured in the dict so one
     bad page can't abort a large batch. Indexing is deferred (index=False) and
-    backfilled lazily on the next search."""
+    backfilled lazily on the next search.
+
+    `source_bytes` is the original upload behind this page, when there is one (a
+    raster image; a PDF page has only its render). It is used for the recovery
+    pass's crops and for the receipt's fingerprint — see `_run_vision_model`."""
     label = source_file if page_no is None else f"{source_file}#p{page_no}"
     try:
-        data, reasons, confidence, _, audit = _run_vision_model(page_bytes, model)
+        data, reasons, confidence, _, audit = _run_vision_model(
+            page_bytes, model, source_bytes
+        )
         receipt_id = save_receipt(
             data, label, flagged=bool(reasons), confidence=confidence, index=False
         )
@@ -1134,6 +1283,15 @@ def _extract_page_saved(
             "review_reasons": reasons,
             "confidence": confidence,
             "audit": audit,
+            # Provenance, the same as /extract returns. This is the path the scan
+            # UI actually uses, so it is the one that has to be able to answer
+            # "why do these two receipts read the same?" — different fingerprints
+            # mean different images; a non-empty id list means the same file was
+            # filed before.
+            "image_sha256": data.image_sha256,
+            "same_image_receipt_ids": receipts_from_same_image(
+                data.image_sha256, exclude_id=receipt_id
+            ),
             "error": None,
         }
     except Exception as exc:  # noqa: BLE001 - isolate per-page failures
@@ -1171,21 +1329,24 @@ def extract_batch(
 
     concurrency = max(1, concurrency or OCR_CONCURRENCY)
 
-    # Expand every upload into per-page (bytes, source, page_no) work items first.
-    # PDFs may explode into many pages; a plain image is a single page (page_no=None).
-    work: list[tuple[bytes, str, int | None]] = []
+    # Expand every upload into per-page (bytes, original, source, page_no) work
+    # items first. PDFs may explode into many pages; a plain image is a single page
+    # (page_no=None). The original upload rides along for a raster image so the
+    # recovery pass can crop it at full resolution; a PDF page has no original
+    # beyond the render it already is, so it carries None.
+    work: list[tuple[bytes, bytes | None, str, int | None]] = []
     for raw, content_type, source_file in files:
         try:
             validate_input(raw, content_type)
             pages = iter_page_images(raw, content_type)
         except Exception as exc:  # noqa: BLE001 - surface as a failed result, keep going
-            work.append((b"__error__:" + str(exc)[:400].encode(), source_file, None))
+            work.append((b"__error__:" + str(exc)[:400].encode(), None, source_file, None))
             continue
         if len(pages) == 1:
-            work.append((pages[0], source_file, None))
+            work.append((pages[0], raw, source_file, None))
         else:
             for i, pb in enumerate(pages, start=1):
-                work.append((pb, source_file, i))
+                work.append((pb, None, source_file, i))
 
     total = len(work)
     results: list[dict] = []
@@ -1200,7 +1361,7 @@ def extract_batch(
 
         with ThreadPoolExecutor(max_workers=concurrency) as pool:
             futures = []
-            for page_bytes, source_file, page_no in work:
+            for page_bytes, original, source_file, page_no in work:
                 if page_bytes.startswith(b"__error__:"):
                     results.append({
                         "source_file": source_file, "page": page_no, "receipt_id": None,
@@ -1212,7 +1373,8 @@ def extract_batch(
                         progress(done, total)
                     continue
                 futures.append(
-                    pool.submit(_extract_page_saved, page_bytes, model, source_file, page_no)
+                    pool.submit(_extract_page_saved, page_bytes, model, source_file,
+                                page_no, original)
                 )
             for fut in as_completed(futures):
                 results.append(fut.result())
@@ -1323,15 +1485,28 @@ def init_db() -> None:
             # receipt stays identifiable after the fact, not just at upload time.
             ("items_status", "TEXT"),
             ("items_printed_count", "INTEGER"),
+            # Fingerprint of the image this row was read from (`_image_fingerprint`).
+            # Provenance: it is what distinguishes "two receipts read from two
+            # different photos" from "the same file filed twice".
+            ("image_sha256", "TEXT"),
         ]
-        
+
         for col_name, col_type in columns_to_add:
             if col_name not in existing_columns:
                 try:
                     con.execute(f"ALTER TABLE receipts ADD COLUMN {col_name} {col_type}")
                 except sqlite3.OperationalError:
                     pass  # Column already exists or other error; ignore
-        
+
+        # After the migration, not with the other indexes above: the column it
+        # covers is added by the loop, so on an existing ledger it does not exist
+        # until this point.
+        try:
+            con.execute("CREATE INDEX IF NOT EXISTS idx_receipts_image "
+                        "ON receipts(image_sha256)")
+        except sqlite3.OperationalError:
+            pass
+
         con.commit()
 
 
@@ -1355,8 +1530,8 @@ def save_receipt(data: ReceiptData, source_file: str, flagged: bool,
                 vat_exempt_sales, zero_rated_sales, vat_amount, discount, discount_type,
                 total_amount, cash, change, currency, category, flagged,
                 confidence, field_confidence, receipt_date_raw, items_status,
-                items_printed_count)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                items_printed_count, image_sha256)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 source_file,
@@ -1384,6 +1559,7 @@ def save_receipt(data: ReceiptData, source_file: str, flagged: bool,
                 data.receipt_date_raw,
                 (data.items_coverage or {}).get("status"),
                 data.items_printed_count,
+                data.image_sha256,
             ),
         )
         receipt_id = cur.lastrowid
@@ -1402,6 +1578,30 @@ def save_receipt(data: ReceiptData, source_file: str, flagged: bool,
         except Exception:  # noqa: BLE001
             pass
     return receipt_id
+
+
+def receipts_from_same_image(image_sha256: str | None,
+                             exclude_id: int | None = None) -> list[int]:
+    """Ids of receipts already filed from the byte-identical image.
+
+    Reported alongside an extraction so the two ways a receipt can look like one
+    you have seen before stay distinguishable: this list is non-empty when the
+    SAME FILE was uploaded again (expected — two rows, same numbers), and empty
+    when two genuinely different photos produced the same values (not expected —
+    that is the bug the per-image read marker exists to prevent, and if it ever
+    recurs this is the evidence).
+
+    Informational only: it never blocks a save. Filing the same receipt twice on
+    purpose is a legitimate thing to do, and deciding otherwise is the user's."""
+    if not image_sha256:
+        return []
+    init_db()
+    with _connect() as con:
+        rows = con.execute(
+            "SELECT id FROM receipts WHERE image_sha256 = ? ORDER BY id",
+            (image_sha256,),
+        ).fetchall()
+    return [r[0] for r in rows if exclude_id is None or r[0] != exclude_id]
 
 
 def list_receipts(limit: int = 100) -> list[dict]:

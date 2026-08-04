@@ -140,7 +140,10 @@ def stub_vision(core, monkeypatch):
         fail_on = fail_on or set()
         seen = {"n": 0}
 
-        def fake_run(page_bytes, model):
+        # `source_bytes` is the original upload behind this page, passed through
+        # for the recovery pass's region crops. A PDF page has none, so it arrives
+        # as None here — the stub accepts it and ignores it.
+        def fake_run(page_bytes, model, source_bytes=None):
             seen["n"] += 1
             if seen["n"] in fail_on:
                 raise RuntimeError(f"page {seen['n']} is unreadable")

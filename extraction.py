@@ -50,9 +50,15 @@ were never looked at, not lines that were read wrongly.
     a time. Do not skip, sample, summarise, merge or stop early — a 30-line
     receipt needs 30 rows. Count the product lines as you read them: that count
     is "items_printed_count", and the number of objects in "items" must equal it.
-  PASS 2 — THE SUMMARY BLOCK. Read the block beneath the items line by line:
-    subtotal, the tax breakdown, discounts, total, cash, change. Every printed
-    line goes into its own dedicated field.
+  PASS 2 — THE SUMMARY BLOCK. Read the block beneath the items line by line, all
+    the way down to the LAST printed line of the receipt: subtotal, the tax
+    breakdown (VATable / VAT / Exempt / Zero-Rated), discounts, total, then the
+    payment lines — CASH or TENDERED, and CHANGE. Every printed line goes into
+    its own dedicated field. The tax figures and the two payment lines are the
+    ones most often missed, because they sit lowest on the paper and are often in
+    smaller type: go back and look at the bottom of the receipt specifically for
+    a VAT amount, a CASH line and a CHANGE line before you decide any of them is
+    absent.
   PASS 3 — THE HEADER AND FOOTER. Merchant name, address, tax ID, receipt/OR
     number, and the transaction date.
   THEN — walk the key list at the bottom of this prompt ONE KEY AT A TIME. For
@@ -329,6 +335,56 @@ guess or a calculation. Return the JSON object only."""
 
 
 # --------------------------------------------------------------------------- #
+# One receipt, one read — keeping requests independent of each other
+# --------------------------------------------------------------------------- #
+# Two receipts from the same merchant came back with identical values, including
+# figures that differed on the paper. Nothing in this repository caches an
+# extraction, so the reuse is happening below us: every request we send carries a
+# BYTE-IDENTICAL ~5,200-token prompt, and an inference server (llama.cpp/Ollama,
+# which is what serves this) reuses the KV cache of whichever slot shares the
+# longest prefix with the incoming request. That is normally just a prefill
+# speed-up — but it puts two different receipts on the same cached prefix, and any
+# mistake in how far that reuse extends (multimodal embeddings are the known weak
+# spot) shows up exactly like this: receipt B answered with receipt A's numbers.
+#
+# We cannot configure the server's cache from here, so we remove the condition it
+# needs: a per-image marker at the VERY START of the prompt, so no two different
+# images ever share a prompt prefix. It is derived from the image bytes, so it is
+# deterministic — re-reading the same file still gives the same request, and the
+# read stays reproducible — and it costs a full prefill per receipt, which is the
+# speed-up we are deliberately giving back.
+#
+# The marker is also the receipt's provenance: it is stored on the row
+# (`receipts.image_sha256`), so "did these two receipts really come from two
+# different images?" is answerable after the fact instead of being a guess.
+_READ_MARKER = """READ ID {fingerprint}
+
+This is a NEW and SEPARATE receipt image. Read the image attached to THIS
+message and nothing else. Do not reuse, recall or repeat any value, line item,
+date or total from a receipt you have read before — including receipts from this
+same merchant, which routinely print the same layout, the same product names and
+the same prices for entirely different purchases. Every figure you return must
+come from the pixels in front of you now.
+"""
+
+
+def image_read_marker(fingerprint: str) -> str:
+    """The per-image preamble. Kept separate from the prompt body so the body
+    stays a stable, reviewable document and the marker stays the only part that
+    varies per request."""
+    return _READ_MARKER.format(fingerprint=fingerprint)
+
+
+def build_extraction_prompt(fingerprint: str | None = None) -> str:
+    """The extraction prompt for one image. Pass the image's fingerprint (see
+    `core._image_fingerprint`) to make this request's prefix unique to that
+    image; omit it only where no image is involved (docs, tests of the body)."""
+    if not fingerprint:
+        return EXTRACTION_PROMPT
+    return f"{image_read_marker(fingerprint)}\n{EXTRACTION_PROMPT}"
+
+
+# --------------------------------------------------------------------------- #
 # Second-pass recovery — re-read only what came back empty
 # --------------------------------------------------------------------------- #
 # One prompt asking for twenty fields at once is where the empties come from: the
@@ -384,6 +440,52 @@ _FIELD_HINTS = {
 # single value found.
 RECOVERABLE_FIELDS = tuple(_FIELD_HINTS)
 
+# Where on the paper each field is printed, so the second look can be given a CROP
+# of that part of the receipt instead of the whole thing.
+#
+# This is the fix for the fields that keep coming back empty — VAT, cash, change.
+# A receipt photo is tall and narrow, and `preprocess_image` fits its longest edge
+# into OCR_MAX_IMAGE_DIM: a 1:3 receipt ends up ~530px wide, and the vision
+# encoder then squeezes that into its own fixed grid. The bottom block — printed
+# smallest, and last — is where that lost detail lands. Cropping to the bottom
+# half and letting it fill the frame on its own gives those same lines roughly
+# twice the pixels, at no extra token cost (gemma4 encodes any image to ~256
+# tokens regardless of resolution).
+#
+# A field printed in more than one place lists both regions and is asked for in
+# both crops; the merge only fills nulls, so a second answer can never overwrite
+# a first one.
+FIELD_REGIONS: dict[str, tuple[str, ...]] = {
+    "vendor_name": ("top",),
+    "vendor_address": ("top",),
+    "vendor_tin": ("top",),
+    "receipt_number": ("top", "bottom"),   # header block on some, footer on others
+    "receipt_date_raw": ("top", "bottom"),
+    "subtotal": ("bottom",),
+    "vatable_sales": ("bottom",),
+    "vat_exempt_sales": ("bottom",),
+    "zero_rated_sales": ("bottom",),
+    "vat_amount": ("bottom",),
+    "discount": ("bottom",),
+    "discount_type": ("bottom",),
+    "total_amount": ("bottom",),
+    "cash": ("bottom",),
+    "change": ("bottom",),
+    "currency": ("bottom",),
+}
+
+_REGION_DESCRIPTION = {
+    "top": "the TOP of the receipt (the merchant's header block). Everything "
+           "below it has been cut off",
+    "bottom": "the BOTTOM of the receipt (the summary block, the tax breakdown "
+              "and the payment lines). Everything above it has been cut off",
+}
+
+
+def fields_in_region(fields, region: str) -> list[str]:
+    """Those of `fields` printed in `region`, in prompt order."""
+    return [f for f in fields if region in FIELD_REGIONS.get(f, ())]
+
 
 def missing_fields(data: dict, fields=RECOVERABLE_FIELDS) -> list[str]:
     """Which of `fields` came back empty, in prompt order. Treats the placeholder
@@ -400,9 +502,15 @@ def missing_fields(data: dict, fields=RECOVERABLE_FIELDS) -> list[str]:
 
 
 def build_recovery_prompt(fields: list[str], include_items: bool,
-                          context: dict | None = None) -> str:
+                          context: dict | None = None,
+                          region: str | None = None,
+                          fingerprint: str | None = None) -> str:
     """Build the focused second-pass prompt for `fields` (and, optionally, a full
-    re-read of the item block). Returns "" when there is nothing to ask for."""
+    re-read of the item block).
+
+    `region` names the crop the image carries ("top" / "bottom"), so the model is
+    told what it is looking at and does not report a field as absent because it
+    was cropped away. Returns "" when there is nothing to ask for."""
     fields = [f for f in fields if f in _FIELD_HINTS]
     if not fields and not include_items:
         return ""
@@ -415,10 +523,20 @@ def build_recovery_prompt(fields: list[str], include_items: bool,
         if value not in (None, ""):
             known.append(f"{label}: {value}")
 
-    lines = [
+    lines = []
+    if fingerprint:
+        lines.append(image_read_marker(fingerprint))
+    lines.append(
         "You already transcribed this receipt once. This is a SECOND look at the "
-        "SAME image, to recover what the first pass left empty.",
-    ]
+        "SAME receipt, to recover what the first pass left empty."
+    )
+    if region in _REGION_DESCRIPTION:
+        lines.append(
+            f"The image attached to this message is a CROP of {_REGION_DESCRIPTION[region]}. "
+            "It is enlarged so the small print is legible — read it carefully. A "
+            "field that is not visible in this crop is null; do not guess at what "
+            "was cut off."
+        )
     if known:
         lines.append(
             "Context from the first pass (already recorded — do not return these): "
