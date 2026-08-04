@@ -163,6 +163,10 @@ Code-derived, not proposals. Use these instead of copying numbers from lecture e
 | Check-driven re-read | `OCR_RECONCILE_PASS`, default on; `OCR_RECONCILE_MAX_LOOKS` = 2. Triggered by audit findings; an answer is kept only when `extraction.audit_score` (errors, total gap, warnings) strictly improves | `core._recheck_arithmetic` |
 | Re-read targets | `items` (item block, middle crop) · `tax_block` · `bottom_line` · `payment` (bottom crop) — one look each per receipt | `extraction.RECHECK_RECIPES` |
 | Recovery crops | bottom 55% (summary, tax, payment) · top 55% (merchant header) · full image for an item re-read; skipped under 400px tall | `core.crop_region` / `extraction.FIELD_REGIONS` |
+| Magnifier | `zoom_region`: crop band -> scale to `OCR_MAX_IMAGE_DIM` (up to `OCR_ZOOM_MAX_UPSCALE`=2.0x) -> grayscale + autocontrast(cutoff=1) + unsharp(2/130/3). Second looks only; the first read is untouched | `core.zoom_region` |
+| Band planning | count = ceil(band px / (width x `OCR_ZOOM_TARGET_ASPECT`=2.0)), capped at `OCR_ZOOM_MAX_BANDS`=3, 12% overlap per seam | `core.plan_zoom_bands` |
+| Item re-read | the 10-92% item span read as N magnified bands (N from `plan_zoom_bands`), stitched seam by seam; one 10-92% zoom when N=1 | `core._item_relook` / `extraction.stitch_item_bands` |
+| Item list adoption | a re-read replaces the first list when it reaches the printed anchor, or gets strictly closer to it while keeping a majority of the first list's AMOUNTS (names garble between reads; prices don't) | `extraction.merge_recovered_items` |
 | Read independence | every request's prompt is prefixed with `READ ID <sha256[:16]>` of its own image, so no two images share a prompt prefix (KV-cache reuse across receipts); stored as `receipts.image_sha256` | `extraction._READ_MARKER` / `core._image_fingerprint` |
 | Repeat-call guard | cached on 1st repeat; force-finalize at `repeats >= 2` | `core.py:2963` |
 | History window | ≤30 messages, ≤1200 chars each, **≤8000 chars total** (the binding constraint), newest-first | `core._format_history` |

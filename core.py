@@ -121,9 +121,10 @@ def _chat(**kwargs):
 # up, so the tested configuration can be read off the env honestly.
 
 try:
-    from PIL import Image, ImageOps
+    from PIL import Image, ImageFilter, ImageOps
 except ImportError:  # pragma: no cover - pillow ships with the app, but stay safe
     Image = None
+    ImageFilter = None
     ImageOps = None
 
 try:
@@ -164,6 +165,8 @@ from extraction import (
     next_recheck,
     normalize_receipt_date,
     reconcile,
+    stitch_item_bands,
+    stitch_item_halves,
 )
 
 _TOP_LEVEL_NUMERIC_FIELDS = (
@@ -494,6 +497,17 @@ OCR_RECOVERY_PASS = _env_bool("OCR_RECOVERY_PASS", True)
 # the same answer), and the item look usually clears the checks downstream of it.
 OCR_RECONCILE_PASS = _env_bool("OCR_RECONCILE_PASS", True)
 OCR_RECONCILE_MAX_LOOKS = max(0, _env_int("OCR_RECONCILE_MAX_LOOKS", 2))
+
+# The magnifier (`zoom_region`), used by every second look. Enlargement is capped
+# because interpolation adds no information — past ~2x it only spends pixels. The
+# target aspect is what decides how many bands a receipt is read in: a band much
+# taller than it is wide gets squeezed by the encoder's fixed grid, and its
+# characters with it. Bands cost one model call each, so the count is capped too.
+OCR_ZOOM_MAX_UPSCALE = max(1.0, _env_float("OCR_ZOOM_MAX_UPSCALE", 2.0))
+OCR_ZOOM_ENHANCE = _env_bool("OCR_ZOOM_ENHANCE", True)
+OCR_ZOOM_MAX_BANDS = max(1, _env_int("OCR_ZOOM_MAX_BANDS", 3))
+_ZOOM_TARGET_ASPECT = max(0.5, _env_float("OCR_ZOOM_TARGET_ASPECT", 2.0))
+_ZOOM_BAND_OVERLAP = 0.12   # of a band's height, shared with each neighbour
 # Output cap for that second call. Small when only fields are asked for; the item
 # re-read is the case that needs room, so this matches the main budget.
 OCR_RECOVERY_NUM_PREDICT = _env_int("OCR_RECOVERY_NUM_PREDICT", 2048)
@@ -805,25 +819,71 @@ def _image_fingerprint(image_bytes: bytes) -> str:
 # line cut in half is a line lost. "items" trims only the extremes — the merchant
 # header and the payment lines — because the item block's real extent is unknown
 # and cutting into it is the exact failure the re-read exists to fix.
-_REGION_BOX = {"top": (0.0, 0.55), "bottom": (0.45, 1.0), "items": (0.10, 0.92)}
+_REGION_BOX = {
+    "top": (0.0, 0.55), "bottom": (0.45, 1.0), "items": (0.10, 0.92),
+}
 # Below this height a crop is pointless — the whole receipt already fits the
 # encoder's grid, and halving it just throws away context.
 _MIN_CROP_HEIGHT = 400
 
 
-def crop_region(image_bytes: bytes, region: str) -> bytes | None:
-    """Return the named slice of a receipt image ("top" / "bottom" / "items"),
-    re-normalized for the model, or None when cropping wouldn't help (no Pillow,
-    short image, undecodable bytes, unknown region).
+def _image_size(image_bytes: bytes) -> tuple[int, int] | None:
+    """The image's (width, height) as it will be READ — EXIF rotation applied —
+    or None if it can't be determined. Reads the header only, no full decode."""
+    if Image is None or not image_bytes:
+        return None
+    try:
+        im = Image.open(io.BytesIO(image_bytes))
+        width, height = im.size
+        # 5-8 are the orientations that transpose the axes; exif_transpose would
+        # swap the two, and callers are asking about the receipt's long edge.
+        if im.getexif().get(0x0112, 1) in (5, 6, 7, 8):
+            return height, width
+        return width, height
+    except Exception:  # noqa: BLE001
+        return None
 
-    This is the lever behind the recovery pass's hit rate on VAT / cash / change.
-    A receipt is tall and narrow; fitting its longest edge into OCR_MAX_IMAGE_DIM
-    leaves the width — and every character on it — small, and the bottom block is
-    both the smallest print and the last thing the encoder has attention for. The
-    crop is re-scaled to the same ceiling on its own, so those lines arrive at
-    roughly twice the resolution for the same token cost."""
-    span = _REGION_BOX.get(region)
-    if Image is None or not image_bytes or span is None:
+
+def _image_height(image_bytes: bytes) -> int | None:
+    size = _image_size(image_bytes)
+    return size[1] if size else None
+
+
+def zoom_region(image_bytes: bytes, span: tuple[float, float] = (0.0, 1.0),
+                enhance: bool | None = None) -> bytes | None:
+    """The magnifier. Cut a horizontal band out of a receipt and hand it back
+    ENLARGED and sharpened, ready to be read on its own.
+
+    `span` is the band as (start, end) fractions of the image height — (0.45, 1.0)
+    is the bottom 55%. Returns None when magnifying can't help or can't be done
+    (no Pillow, an image too short to be worth slicing, undecodable bytes).
+
+    Three things happen, and the order matters:
+
+      1. CROP. A receipt is tall and narrow, so fitting its longest edge into
+         OCR_MAX_IMAGE_DIM is what makes the print small: a 1:6 photo comes out
+         ~270px wide, and every character with it. Cutting a band out first means
+         the budget is spent on the WIDTH of the part we actually need to read.
+      2. MAGNIFY. The band is scaled so its longest edge fills the budget —
+         upwards as well as downwards, which is what was missing before: a crop
+         smaller than the ceiling used to be passed through at its original size,
+         so a "zoomed" look was often no bigger than the read that already failed.
+         Enlargement is capped at OCR_ZOOM_MAX_UPSCALE, because interpolation adds
+         no information and past ~2x only costs pixels.
+      3. ENHANCE. Grayscale (a receipt is monochrome, and the colour channels of a
+         phone JPEG carry mostly noise), a mild autocontrast to pull faded thermal
+         print off its background, and an unsharp mask to put the edges back that
+         the resampling softened. This is standard OCR preparation and it is what
+         makes 6pt print legible rather than merely larger.
+
+    Deliberately NOT applied to the first read of a receipt: that read sees the
+    whole page, where the trade-offs are different, and keeping it untouched means
+    everything here is strictly additive — a zoomed look can only ever be a second
+    opinion, and the callers already refuse to keep one that doesn't help.
+    """
+    enhance = OCR_ZOOM_ENHANCE if enhance is None else enhance
+    start, end = span
+    if Image is None or not image_bytes or not (0.0 <= start < end <= 1.0):
         return None
     try:
         im = Image.open(io.BytesIO(image_bytes))
@@ -831,20 +891,84 @@ def crop_region(image_bytes: bytes, region: str) -> bytes | None:
         width, height = im.size
         if height < _MIN_CROP_HEIGHT:
             return None
-        top = max(0, min(height - 1, int(round(height * span[0]))))
-        bottom = max(top + 1, min(height, int(round(height * span[1]))))
+        top = max(0, min(height - 1, int(round(height * start))))
+        bottom = max(top + 1, min(height, int(round(height * end))))
         im = im.crop((0, top, width, bottom))
-        if im.mode not in ("RGB", "L"):
+
+        if enhance and im.mode != "L":
+            im = im.convert("L")
+        elif im.mode not in ("RGB", "L"):
             im = im.convert("RGB")
-        if OCR_MAX_IMAGE_DIM and max(im.size) > OCR_MAX_IMAGE_DIM:
-            scale = OCR_MAX_IMAGE_DIM / max(im.size)
+
+        budget = OCR_MAX_IMAGE_DIM or max(im.size)
+        scale = budget / max(im.size)
+        if scale > 1.0:
+            scale = min(scale, OCR_ZOOM_MAX_UPSCALE)
+        if abs(scale - 1.0) > 0.01:
             im = im.resize((max(1, round(im.width * scale)),
                             max(1, round(im.height * scale))), Image.LANCZOS)
+
+        if enhance and ImageFilter is not None:
+            # cutoff=1: clip only the extreme 1% at each end. A larger cutoff
+            # "cleans up" a faded receipt by deleting its faintest strokes, which
+            # are exactly the characters this is trying to rescue.
+            im = ImageOps.autocontrast(im, cutoff=1)
+            im = im.filter(ImageFilter.UnsharpMask(radius=2, percent=130, threshold=3))
+
         buf = io.BytesIO()
         im.save(buf, format="JPEG", quality=OCR_JPEG_QUALITY)
         return buf.getvalue()
-    except Exception:  # noqa: BLE001 - a failed crop just means we skip that look
+    except Exception:  # noqa: BLE001 - a failed zoom just means we skip that look
         return None
+
+
+def plan_zoom_bands(image_bytes: bytes, span: tuple[float, float] = (0.0, 1.0),
+                    max_bands: int | None = None) -> list[tuple[float, float]]:
+    """Split `span` into as many bands as it takes for each to be readable, and
+    no more. Returns a list of (start, end) fractions — always at least one.
+
+    The number falls out of the shape of the paper. A vision encoder resamples
+    whatever it is given into a fixed grid, so a band that is six times taller
+    than it is wide gets squeezed six times harder than a square one, and its
+    characters shrink accordingly. Bands are therefore sized towards
+    OCR_ZOOM_TARGET_ASPECT (~1.4:1): a normal till receipt needs two, a long
+    grocery roll three, and a short card slip one — one call each, so the count
+    is also the cost, which is why it is capped.
+
+    Bands overlap slightly. A line sliced through the middle is a line lost, and
+    the overlap is what `extraction.stitch_item_halves` matches on to drop the
+    rows two neighbours share."""
+    max_bands = max(1, max_bands if max_bands is not None else OCR_ZOOM_MAX_BANDS)
+    start, end = span
+    size = _image_size(image_bytes)
+    if not size or not (0.0 <= start < end <= 1.0):
+        return [span]
+    width, height = size
+    # Too short to slice: the whole thing already fits the grid.
+    if height < 2 * _MIN_CROP_HEIGHT or width <= 0:
+        return [span]
+
+    band_pixels = (end - start) * height
+    count = int(math.ceil(band_pixels / (width * _ZOOM_TARGET_ASPECT)))
+    count = max(1, min(count, max_bands))
+    if count == 1:
+        return [span]
+
+    step = (end - start) / count
+    overlap = step * _ZOOM_BAND_OVERLAP
+    bands = []
+    for index in range(count):
+        band_start = start + index * step - (overlap if index else 0.0)
+        band_end = start + (index + 1) * step + (overlap if index < count - 1 else 0.0)
+        bands.append((max(start, round(band_start, 4)), min(end, round(band_end, 4))))
+    return bands
+
+
+def crop_region(image_bytes: bytes, region: str) -> bytes | None:
+    """The named regions of a receipt — "top" / "bottom" / "items" — magnified by
+    `zoom_region`. None for an unknown region or an image not worth cropping."""
+    span = _REGION_BOX.get(region)
+    return zoom_region(image_bytes, span) if span else None
 
 
 def _is_pdf(image_bytes: bytes, content_type: str | None) -> bool:
@@ -1120,6 +1244,58 @@ def _recover_missing_fields(image_bytes: bytes, model: str, data: dict,
     return data
 
 
+def _item_relook(crop_source: bytes, image_bytes: bytes, model: str, data: dict,
+                 finding: dict, recipe: dict,
+                 fingerprint: str | None) -> tuple[list | None, dict]:
+    """Read the item block again at the highest resolution available, and return
+    (candidate item list, self-report) — or (None, {}) if the look failed.
+
+    Preferred form: the block magnified into as many overlapping bands as its
+    shape needs (`plan_zoom_bands` — two for a till receipt, three for a long
+    grocery roll), one call each, stitched back together
+    (`extraction.stitch_item_bands`). That is the only thing in the pipeline that
+    materially raises the pixels-per-line for a long receipt, which is what a
+    missed line usually comes down to — a full-block re-read is the same too-small
+    print that already failed, and at temperature 0 it comes back with the same
+    answer.
+
+    Falls back to a single magnified middle crop when the receipt is short enough
+    to read whole (or Pillow can't slice it).
+
+    The self-report that comes back is deliberately NOT carried over from a banded
+    read: no band saw the whole block, so none of them can say how many lines it
+    holds. The caller clears it rather than keeping the stale count from a list it
+    is replacing."""
+    bands = plan_zoom_bands(crop_source, _REGION_BOX["items"])
+    if len(bands) > 1:
+        lists = []
+        for index, band in enumerate(bands, start=1):
+            page = zoom_region(crop_source, band)
+            if page is None:
+                lists = []
+                break
+            prompt = build_recheck_prompt(finding, recipe, data,
+                                          region="items_band",
+                                          fingerprint=fingerprint,
+                                          band=(index, len(bands)))
+            lists.append((_ask_again(page, model, prompt) or {}).get("items"))
+        if lists:
+            stitched = stitch_item_bands(lists)
+            # Whatever the bands gave — including nothing — is this look's answer.
+            # No extra call on the whole block: that is the question the recovery
+            # pass already asked. `assess_item_coverage` falls back to the
+            # arithmetic, which is the honest basis for this list anyway.
+            return (stitched or None), {"items_printed_count": None,
+                                        "items_section_verified": None}
+
+    cropped = crop_region(crop_source, "items")
+    prompt = build_recheck_prompt(finding, recipe, data,
+                                  region="items" if cropped else None,
+                                  fingerprint=fingerprint)
+    patch = _ask_again(cropped or image_bytes, model, prompt) or {}
+    return patch.get("items"), patch
+
+
 def _recheck_arithmetic(image_bytes: bytes, model: str, data: dict,
                         fingerprint: str | None = None,
                         source_bytes: bytes | None = None) -> dict:
@@ -1147,10 +1323,12 @@ def _recheck_arithmetic(image_bytes: bytes, model: str, data: dict,
         same question about the same pixels returns the same answer, so a second
         identical attempt buys nothing.
 
-    The item look deliberately uses the middle-band crop rather than the full
-    image: the full-image re-read is what `_recover_missing_fields` already did, so
-    repeating it would be that same no-op question. A different framing is the
-    point.
+    The item look never re-uses the full image: that is the question
+    `_recover_missing_fields` already asked, and at temperature 0 asking it again
+    returns the same answer. It goes to `_item_relook` instead, which reads the
+    block in two enlarged halves — a genuinely different, higher-resolution look.
+    That look costs two calls but counts as one against the cap, because it is one
+    question.
     """
     tried: set[str] = set()
     looks = 0
@@ -1165,27 +1343,32 @@ def _recheck_arithmetic(image_bytes: bytes, model: str, data: dict,
         tried.add(recipe["target"])   # the question asked, not the check that failed
         looks += 1
 
-        region = recipe.get("region")
-        cropped = crop_region(crop_source, region) if region else None
-        prompt = build_recheck_prompt(finding, recipe, data,
-                                      region=region if cropped else None,
-                                      fingerprint=fingerprint)
-        if not prompt:
-            continue
-        patch = _ask_again(cropped or image_bytes, model, prompt)
-        if patch is None:
-            continue
-
         before = audit_score(data)
         candidate = json.loads(json.dumps(data))
+
         if recipe["kind"] == "items":
-            if not patch.get("items"):
+            new_items, report = _item_relook(crop_source, image_bytes, model, data,
+                                             finding, recipe, fingerprint)
+            if not new_items:
                 continue
-            merge_recovered_items(candidate, patch["items"])
+            rows_before = len(candidate.get("items") or [])
+            merge_recovered_items(candidate, new_items)
+            if len(candidate.get("items") or []) == rows_before:
+                continue          # the re-read didn't beat the list we already had
             for field in ("items_printed_count", "items_section_verified"):
-                if field in patch:
-                    candidate[field] = patch[field]
+                if field in report:
+                    candidate[field] = report[field]
         else:
+            region = recipe.get("region")
+            cropped = crop_region(crop_source, region) if region else None
+            prompt = build_recheck_prompt(finding, recipe, data,
+                                          region=region if cropped else None,
+                                          fingerprint=fingerprint)
+            if not prompt:
+                continue
+            patch = _ask_again(cropped or image_bytes, model, prompt)
+            if patch is None:
+                continue
             changed = False
             for field in recipe.get("fields", ()):
                 if field not in patch:

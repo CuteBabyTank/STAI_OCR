@@ -482,7 +482,15 @@ _REGION_DESCRIPTION = {
     "items": "the MIDDLE of the receipt (the line-item block). The merchant's "
              "header and part of the summary block have been cropped away so the "
              "item lines fill the frame",
+    # Filled in per band by `build_recheck_prompt`; see `core.plan_zoom_bands`.
+    "items_band": "PART {index} OF {count} of the receipt's line-item block, "
+                  "enlarged and sharpened. The other parts of the list are NOT in "
+                  "this image",
 }
+# A band carries only part of the list, so the "read it from the first line to the
+# last" instruction would be a lie — and a model told to find lines that aren't in
+# the frame will invent them.
+_PARTIAL_REGIONS = ("items_band",)
 
 
 def fields_in_region(fields, region: str) -> list[str]:
@@ -1351,19 +1359,81 @@ def _item_key(item: dict) -> str:
     return re.sub(r"[^a-z0-9]", "", str(item.get("description") or "").lower())
 
 
-def _covers(candidate: list[dict], current: list[dict]) -> bool:
-    """True when `candidate` contains at least as many of every named row as
-    `current` — i.e. it is a re-read that ADDS lines rather than a different,
-    contradictory reading of the same block."""
-    have: dict[str, int] = {}
-    for item in candidate:
-        key = _item_key(item)
-        have[key] = have.get(key, 0) + 1
-    need: dict[str, int] = {}
-    for item in current:
-        key = _item_key(item)
-        need[key] = need.get(key, 0) + 1
-    return all(have.get(key, 0) >= count for key, count in need.items())
+def _amounts(items: list[dict]) -> list[float]:
+    return [a for a in (_num(i.get("amount")) for i in items) if a is not None]
+
+
+def _kept_amounts(candidate: list[dict], current: list[dict]) -> int:
+    """How many of `current`'s line amounts the re-read found again.
+
+    Matching is on AMOUNTS, not on descriptions, and that is the whole point. A
+    thermal grocery receipt comes back with names like "GleegrtaJpste" and
+    "DelMontePttCrsprg"; two reads of that same line rarely produce the same
+    string, so a description-based comparison reports a genuine re-read of the
+    same block as a contradictory one and the better list gets discarded. Digits
+    in the price column are the part of a receipt OCR gets right — a re-read of
+    the same lines reproduces most of them, and a list of invented lines does not.
+
+    Greedy multiset match, so three lines at ₱128.00 need three matches.
+    """
+    pool = sorted(_amounts(candidate))
+    kept = 0
+    for amount in _amounts(current):
+        for idx, other in enumerate(pool):
+            if abs(other - amount) <= 0.01:
+                pool.pop(idx)
+                kept += 1
+                break
+    return kept
+
+
+def stitch_item_halves(upper, lower) -> list[dict]:
+    """Join two half-crop reads of ONE item block into a single list.
+
+    The crops overlap by design (a line sliced through the middle is a line
+    lost), so the last rows of the upper read and the first rows of the lower read
+    are the same printed lines. This finds the LONGEST run where the tail of one
+    matches the head of the other — on description AND amount — and drops it from
+    the second, which is the only place a duplicate can legitimately come from.
+    Repeated lines elsewhere on the receipt (the same product printed three times)
+    are untouched, because only a contiguous seam run is removed.
+
+    A seam line whose name garbled differently between the two reads survives
+    twice; the result then overshoots the printed total and is rejected by the
+    caller's arithmetic gate rather than silently inflating the receipt.
+    """
+    top = [i for i in (upper or []) if isinstance(i, dict)]
+    bottom = [i for i in (lower or []) if isinstance(i, dict)]
+    if not top:
+        return bottom
+    if not bottom:
+        return top
+
+    def _row_key(item: dict):
+        amount = _num(item.get("amount"))
+        return _item_key(item), None if amount is None else round(amount, 2)
+
+    keys_top = [_row_key(i) for i in top]
+    keys_bottom = [_row_key(i) for i in bottom]
+    for size in range(min(len(top), len(bottom)), 0, -1):
+        if keys_top[-size:] == keys_bottom[:size]:
+            return top + bottom[size:]
+    return top + bottom
+
+
+def stitch_item_bands(band_lists) -> list[dict]:
+    """Join N band-reads of one item block, in printed order, seam by seam.
+
+    A long receipt is read in three bands as readily as two (see
+    `core.plan_zoom_bands`), and the seams are independent: bands 1-2 share their
+    own overlap, bands 2-3 share a different one. Folding the pairwise stitch left
+    to right joins each seam against the list built so far, so a row that appears
+    in two neighbours is dropped once and a row repeated legitimately in band 1 and
+    band 3 survives twice."""
+    joined: list[dict] = []
+    for band in band_lists or []:
+        joined = stitch_item_halves(joined, band)
+    return joined
 
 
 def merge_recovered_items(data: dict, candidate) -> dict:
@@ -1375,9 +1445,21 @@ def merge_recovered_items(data: dict, candidate) -> dict:
     The re-read wins when its rows reach a printed anchor (the subtotal, or the
     total plus any discount) that the first list missed — and even then only if it
     is no shorter than the first list, so a single lucky row equal to the subtotal
-    can never displace eight real ones. With no anchor to judge by, it wins only
-    when it CONTAINS the whole first list and is longer, so a re-read can add the
-    lines that were missed but can never quietly swap in a different set of items.
+    can never displace eight real ones.
+
+    It also wins when neither list reaches the anchor but the re-read gets
+    materially CLOSER to it while keeping most of the amounts the first list
+    already had. That case is the common one on a long grocery receipt, where a
+    second look finds three of the four missed lines: demanding an exact hit on
+    the printed total would throw that away and leave the ledger with the shorter
+    list, which is the worse of the two by the receipt's own arithmetic. "Most of
+    the amounts" is the guard against a hallucinated replacement — a re-read of
+    the same block reproduces the price column, an invented list doesn't — and it
+    is checked on amounts rather than descriptions because product names garble
+    differently on every read (see `_kept_amounts`).
+
+    With no anchor to judge by there is nothing to be closer to, so the re-read
+    wins only by being longer while keeping most of the first list's amounts.
     """
     if not isinstance(candidate, list):
         return data
@@ -1404,7 +1486,9 @@ def merge_recovered_items(data: dict, candidate) -> dict:
         anchor = round(total + discount, 2) if total is not None and total > 0 else None
 
     sum_current, sum_candidate = _total(current), _total(cand)
-    covers = _covers(cand, current)
+    # A re-read of the same block reproduces most of the price column. Requiring a
+    # majority — not all — leaves room for the line the first read got wrong.
+    keeps_most = _kept_amounts(cand, current) * 2 >= len(current)
 
     if anchor is not None:
         tol = _tolerance(anchor)
@@ -1412,13 +1496,16 @@ def merge_recovered_items(data: dict, candidate) -> dict:
         candidate_ok = sum_candidate is not None and abs(sum_candidate - anchor) <= tol
         if candidate_ok and not current_ok and len(cand) >= len(current):
             data["items"] = cand
-        elif not current_ok and not candidate_ok and covers and len(cand) > len(current):
-            # Neither reaches the anchor, so both are short — the longer read that
-            # contains the other is still strictly more of the receipt.
-            data["items"] = cand
+        elif not current_ok and not candidate_ok and keeps_most and len(cand) >= len(current):
+            # Neither reaches the anchor, so both are short. Take the one that
+            # leaves less of the printed total unaccounted for.
+            gap_current = abs((sum_current or 0.0) - anchor)
+            gap_candidate = abs((sum_candidate or 0.0) - anchor)
+            if gap_candidate < gap_current - 0.5:
+                data["items"] = cand
         return data
 
-    if covers and len(cand) > len(current):
+    if keeps_most and len(cand) > len(current):
         data["items"] = cand
     return data
 
@@ -1827,9 +1914,14 @@ def next_recheck(findings: list[dict], already_tried) -> dict | None:
 
 def build_recheck_prompt(finding: dict, recipe: dict, data: dict,
                          region: str | None = None,
-                         fingerprint: str | None = None) -> str:
+                         fingerprint: str | None = None,
+                         band: tuple[int, int] | None = None) -> str:
     """The prompt for one check-driven re-read: what failed, what you said last
-    time, and where to look — with the arithmetic explicitly NOT the target."""
+    time, and where to look — with the arithmetic explicitly NOT the target.
+
+    `band` is (index, count) when the image is one magnified slice of a list read
+    in several — it tells the model which slice it has, so it reports what it can
+    see instead of reconstructing what it can't."""
     kind = recipe.get("kind")
     fields = [f for f in recipe.get("fields", ()) if f in _FIELD_HINTS]
     if kind != "items" and not fields:
@@ -1845,22 +1937,40 @@ def build_recheck_prompt(finding: dict, recipe: dict, data: dict,
     )
     lines.append(f"\nWhat failed: {finding.get('message', 'the receipt does not add up.')}")
     if region in _REGION_DESCRIPTION:
+        described = _REGION_DESCRIPTION[region]
+        if band:
+            described = described.format(index=band[0], count=band[1])
         lines.append(
-            f"\nThe image attached to this message is a CROP of "
-            f"{_REGION_DESCRIPTION[region]}. It is enlarged so the small print is "
-            f"legible."
+            f"\nThe image attached to this message is a CROP of {described}. It "
+            f"has been enlarged and sharpened so the small print is legible — read "
+            f"it carefully, including any line that looked too faint to read before."
         )
 
     if kind == "items":
+        if region in _PARTIAL_REGIONS:
+            lines.append(
+                "\nReturn EVERY product line VISIBLE IN THIS CROP, top to bottom, "
+                "one line at a time — including lines that repeat the same product "
+                "at the same price. This is only part of the list: do not try to "
+                "reconstruct the lines that are not in the image, and do not "
+                "return a line you cannot see. If a line is sliced through at the "
+                "top or bottom edge, include it only if you can read both its "
+                "description and its amount."
+            )
+        else:
+            lines.append(
+                "\nRead the item block again from its FIRST product line to its "
+                "LAST, one line at a time, and return EVERY line — including lines "
+                "that repeat the same product at the same price, and any line you "
+                "skipped last time."
+            )
         lines.append(
-            "\nRead the item block again from its FIRST product line to its LAST, "
-            "one line at a time, and return EVERY line — including lines that "
-            "repeat the same product at the same price, and any line you skipped "
-            "last time. Give each line its description as printed (sizes like "
-            "\"500ml\" stay in the description) and its amount from the right-hand "
-            "money column; quantity and unit_price only where that line prints "
-            "them. Summary lines (Subtotal, VAT, Discount, Total, Cash, Change) "
-            "are NOT items."
+            "Give each line its description as printed (sizes like \"500ml\" stay "
+            "in the description) and its amount from the right-hand money column; "
+            "quantity and unit_price only where that line prints them. A leading "
+            "standalone number in the receipt's own QTY column is the quantity — "
+            "put it in \"quantity\", not at the front of the description. Summary "
+            "lines (Subtotal, VAT, Discount, Total, Cash, Change) are NOT items."
         )
         keys = ["items", "items_printed_count", "items_section_verified"]
     else:

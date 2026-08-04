@@ -406,6 +406,117 @@ def test_the_batch_path_hands_the_original_upload_through(core, finance_fixture,
     assert got["page"] != original, "the model is still shown the preprocessed image"
 
 
+# --------------------------------------------------------------------------- #
+# The magnifier — `zoom_region` / `plan_zoom_bands`
+# --------------------------------------------------------------------------- #
+# Cropping alone was only half the fix: a band cut from an image already
+# downscaled to OCR_MAX_IMAGE_DIM came out SMALLER than the ceiling and used to be
+# passed through at that size, so a "zoomed" look was often no bigger than the
+# read that had already failed on it. These pin the enlargement.
+def _size(image_bytes):
+    from PIL import Image
+    import io
+
+    return Image.open(io.BytesIO(image_bytes)).size
+
+
+def test_a_small_band_is_enlarged_not_merely_cropped(core):
+    """The defect this function exists for: a crop below the pixel budget must be
+    scaled UP to fill it, or the small print stays small."""
+    source = _receipt_image(500, 1500)          # well under the 1600px ceiling
+    out = core.zoom_region(source, (0.5, 1.0))
+    assert out
+    width, height = _size(out)
+    assert width > 500, "the band was handed back at its original width"
+    assert max(width, height) <= core.OCR_MAX_IMAGE_DIM
+
+
+def test_enlargement_is_capped(core):
+    """Interpolation invents no detail; past the cap it only spends pixels."""
+    source = _receipt_image(200, 900)
+    width, _ = _size(core.zoom_region(source, (0.0, 1.0)))
+    assert width <= 200 * core.OCR_ZOOM_MAX_UPSCALE + 1
+
+
+def test_a_big_band_is_still_brought_down_to_the_budget(core):
+    out = core.zoom_region(_receipt_image(2400, 6000), (0.45, 1.0))
+    assert max(_size(out)) <= core.OCR_MAX_IMAGE_DIM
+
+
+def test_the_band_is_the_slice_it_was_asked_for(core):
+    source = _receipt_image(600, 2000)
+    top = core.zoom_region(source, (0.0, 0.25), enhance=False)
+    whole = core.zoom_region(source, (0.0, 1.0), enhance=False)
+    assert _size(top)[1] / _size(top)[0] < _size(whole)[1] / _size(whole)[0]
+
+
+def test_enhancement_produces_a_readable_grayscale_image(core):
+    from PIL import Image
+    import io
+
+    out = core.zoom_region(_receipt_image(600, 1800), (0.45, 1.0), enhance=True)
+    im = Image.open(io.BytesIO(out))
+    im.load()                      # decodes: a corrupt result would raise here
+    assert im.mode == "L", "a receipt is monochrome; the colour channels are noise"
+
+
+def test_zooming_declines_when_it_cannot_help(core):
+    assert core.zoom_region(_receipt_image(300, 200), (0.0, 1.0)) is None   # too short
+    assert core.zoom_region(b"not an image", (0.0, 1.0)) is None
+    assert core.zoom_region(_receipt_image(), (0.8, 0.2)) is None           # inverted
+    assert core.zoom_region(_receipt_image(), (0.0, 1.5)) is None           # out of range
+
+
+def test_a_long_receipt_is_planned_into_more_bands_than_a_short_one(core):
+    """The band count comes from the shape of the paper: a card slip is one look,
+    a till receipt two, a grocery roll three."""
+    slip = core.plan_zoom_bands(_receipt_image(600, 900), (0.0, 1.0))
+    till = core.plan_zoom_bands(_receipt_image(600, 1800), (0.10, 0.92))
+    roll = core.plan_zoom_bands(_receipt_image(600, 6000), (0.10, 0.92))
+    assert len(slip) == 1
+    assert len(till) == 2
+    assert len(roll) == core.OCR_ZOOM_MAX_BANDS, "the count is capped: each band is a call"
+
+
+def test_bands_cover_the_whole_span_and_overlap_their_neighbours(core):
+    bands = core.plan_zoom_bands(_receipt_image(600, 6000), (0.10, 0.92))
+    assert bands[0][0] == 0.10 and bands[-1][1] == 0.92
+    for earlier, later in zip(bands, bands[1:]):
+        assert later[0] < earlier[1], "a line falling on an un-overlapped seam is lost"
+
+
+def test_an_unreadable_image_plans_a_single_band(core):
+    assert core.plan_zoom_bands(b"not an image", (0.0, 1.0)) == [(0.0, 1.0)]
+
+
+def test_a_three_band_receipt_is_read_in_three_looks_and_stitched(core, monkeypatch):
+    """End to end: a long roll whose items don't add up is re-read band by band,
+    and the bands are joined back into one list."""
+    band_answers = [
+        {"items": [{"description": "Rice", "amount": 300.0}]},
+        {"items": [{"description": "Rice", "amount": 300.0},
+                   {"description": "Oil", "amount": 120.0}]},
+        {"items": [{"description": "Oil", "amount": 120.0},
+                   {"description": "Sugar", "amount": 80.0}]},
+    ]
+    prompts = _stub_chat(core, monkeypatch, [
+        {"vendor_name": "Mart", "currency": "PHP", "vendor_tin": "1",
+         "vendor_address": "Manila", "receipt_number": "OR-9",
+         "receipt_date_raw": "14/06/26",
+         "items": [{"description": "Rice", "amount": 300.0}],
+         "subtotal": 500.0, "total_amount": 500.0, "cash": 500.0, "change": 0.0},
+        *band_answers,
+    ])
+    monkeypatch.setattr(core, "OCR_RECOVERY_PASS", False)
+    data, _r, _c, _resp, _a = core._run_vision_model(_receipt_image(600, 6000), "m")
+
+    import re
+
+    banded = [p for p in prompts if re.search(r"PART \d+ OF 3", p)]
+    assert len(banded) == 3
+    assert [i.description for i in data.items] == ["Rice", "Oil", "Sugar"]
+
+
 def test_a_crop_is_the_part_of_the_receipt_it_says_it_is(core):
     from PIL import Image
     import io

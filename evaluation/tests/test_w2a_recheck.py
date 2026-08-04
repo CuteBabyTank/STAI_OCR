@@ -129,10 +129,26 @@ def test_line_items_short_of_the_subtotal_are_read_again(core, monkeypatch):
 
 def test_the_item_look_uses_a_different_framing_from_the_first_read(core, monkeypatch):
     """At temperature 0, asking the same question about the same pixels returns
-    the same answer. The re-read has to change something — here, the crop."""
+    the same answer. The re-read has to change something — here, the block is read
+    in two enlarged halves, which is also the only way to put more pixels on a
+    line without a bigger model."""
     prompts = _stub_chat(core, monkeypatch, _short_items(), then={})
     core._run_vision_model(_image(), "m")
+    assert "PART 1 OF 2" in prompts[1]
+    assert "PART 2 OF 2" in prompts[2]
+    assert "enlarged and sharpened" in prompts[1]
+    # No band may be told to read the list "from its first line to its last": the
+    # lines it cannot see are exactly what it would invent.
+    assert "FIRST product line" not in prompts[1]
+
+
+def test_a_short_receipt_falls_back_to_one_look_at_the_whole_block(core, monkeypatch):
+    """Halving a receipt that already fits the encoder's grid gains nothing and
+    risks slicing the list; the single middle crop is still the right look."""
+    prompts = _stub_chat(core, monkeypatch, _short_items(), then={})
+    core._run_vision_model(_image(600, 500), "m")
     assert "CROP of the MIDDLE" in prompts[1]
+    assert len(prompts) <= 3
 
 
 def test_a_misread_tax_figure_is_corrected(core, monkeypatch):
@@ -222,7 +238,9 @@ def test_a_receipt_that_never_reconciles_stops_at_the_cap(core, monkeypatch):
     forever — nor asked the same question twice."""
     prompts = _stub_chat(core, monkeypatch, _short_items(), then={"items": []})
     core._run_vision_model(_image(), "m")
-    assert len(prompts) <= 1 + core.OCR_RECONCILE_MAX_LOOKS
+    # An item look is two calls (the two halves) but one question, so the ceiling
+    # is two calls per look.
+    assert len(prompts) <= 1 + 2 * core.OCR_RECONCILE_MAX_LOOKS
 
 
 def test_the_same_question_is_never_asked_twice(core, monkeypatch):
@@ -241,7 +259,8 @@ def test_the_item_block_is_the_first_thing_looked_at(core, monkeypatch):
     broken = _short_items() | {"cash": 1000.0, "change": 100.0}  # payment fails too
     prompts = _stub_chat(core, monkeypatch, broken, then={})
     core._run_vision_model(_image(), "m")
-    assert len(prompts) == 2 and "item block" in prompts[1]
+    assert len(prompts) == 3, "one look: the item block in two halves"
+    assert "line-item block" in prompts[1]
 
 
 def test_the_pass_can_be_switched_off(core, monkeypatch):

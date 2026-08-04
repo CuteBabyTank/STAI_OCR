@@ -21,6 +21,7 @@ from extraction import (
     merge_recovered_items,
     missing_fields,
     normalize_receipt_date,
+    stitch_item_halves,
     undo_vat_added_to_total,
     undo_discount_omitted_from_total,
     vat_is_inside_subtotal,
@@ -505,6 +506,102 @@ def test_a_re_read_that_returns_nothing_leaves_the_first_list_alone():
     data = _read(_items(("Rice", 1, 300.0, 300.0)))
     for junk in ([], None, "no items", [{}]):
         assert len(merge_recovered_items(dict(data), junk)["items"]) == 1
+
+
+def test_a_re_read_that_gets_closer_wins_even_without_reaching_the_total():
+    """The grocery case. Six lines account for ₱469.25 of a ₱689.75 total; the
+    re-read finds two of the three missing lines and reaches ₱639.75. Demanding an
+    exact hit would throw that away and keep the shorter, more wrong list."""
+    data = _read(_items(("FemmeSu 2Ply 250", None, None, 68.75),
+                        ("MYSAN SkyFlakes", None, None, 60.50),
+                        ("NissinEggnig 130", None, None, 100.50),
+                        ("JohnDairy 81BryChsCk", None, None, 45.00),
+                        ("GleegrtaJpste 150", None, None, 79.75),
+                        ("DelMontePttCrsprg", None, None, 114.75)),
+                 total_amount=689.75)
+    found = list(data["items"]) + _items(("Lucky Me Pancit Canton", None, None, 85.00),
+                                         ("Datu Puti Suka 1L", None, None, 85.00))
+    out = merge_recovered_items(dict(data), found)
+    assert len(out["items"]) == 8
+
+
+def test_a_garbled_name_does_not_stop_a_better_re_read_being_adopted():
+    """Descriptions off a thermal receipt garble differently on every read, so the
+    match that decides "this is the same block, read again" is on AMOUNTS."""
+    data = _read(_items(("GleegrtaJpste 150", None, None, 79.75),
+                        ("DelMontePttCrsprg", None, None, 114.75)),
+                 total_amount=289.75)
+    reread = _items(("Glee Grated Jpaste 150", None, None, 79.75),
+                    ("DelMonte Ptt Crsprg", None, None, 114.75),
+                    ("Nescafe 3in1 10s", None, None, 95.00))
+    out = merge_recovered_items(dict(data), reread)
+    assert len(out["items"]) == 3
+
+
+def test_a_re_read_that_shares_almost_nothing_is_still_refused():
+    """The guard that survives the amount-based matching: a list that keeps none
+    of the prices we already read is a different receipt, not a better read."""
+    data = _read(_items(("Rice", None, None, 300.0), ("Oil", None, None, 200.0)),
+                 total_amount=900.0)
+    invented = _items(("Wine", None, None, 400.0), ("Cheese", None, None, 350.0))
+    assert len(merge_recovered_items(dict(data), invented)["items"]) == 2
+    assert [i["description"] for i in merge_recovered_items(dict(data), invented)["items"]] \
+        == ["Rice", "Oil"]
+
+
+def test_a_re_read_that_moves_further_from_the_total_is_refused():
+    data = _read(_items(("Rice", None, None, 300.0), ("Oil", None, None, 200.0)),
+                 total_amount=520.0)
+    worse = _items(("Rice", None, None, 300.0), ("Oil", None, None, 200.0),
+                   ("Rice", None, None, 300.0))
+    assert len(merge_recovered_items(dict(data), worse)["items"]) == 2
+
+
+# --------------------------------------------------------------------------- #
+# stitch_item_halves — two half-crops of one block, joined at the seam
+# --------------------------------------------------------------------------- #
+def test_the_overlap_between_two_halves_is_dropped_once():
+    upper = _items(("Rice", None, None, 300.0), ("Oil", None, None, 200.0),
+                   ("Sugar", None, None, 50.0))
+    lower = _items(("Oil", None, None, 200.0), ("Sugar", None, None, 50.0),
+                   ("Flour", None, None, 40.0))
+    out = stitch_item_halves(upper, lower)
+    assert [i["description"] for i in out] == ["Rice", "Oil", "Sugar", "Flour"]
+
+
+def test_halves_with_no_overlap_are_simply_joined():
+    upper = _items(("Rice", None, None, 300.0))
+    lower = _items(("Flour", None, None, 40.0))
+    assert len(stitch_item_halves(upper, lower)) == 2
+
+
+def test_a_repeated_product_away_from_the_seam_is_not_collapsed():
+    """Bench Boutique prints the same deodorant three times. Only a run at the
+    seam is an artifact of the crop; repeats elsewhere are real money."""
+    upper = _items(("Deo Body Spray", None, None, 128.0),
+                   ("Deo Body Spray", None, None, 128.0),
+                   ("Socks", None, None, 99.0))
+    lower = _items(("Socks", None, None, 99.0),
+                   ("Deo Body Spray", None, None, 128.0))
+    out = stitch_item_halves(upper, lower)
+    assert [i["amount"] for i in out] == [128.0, 128.0, 99.0, 128.0]
+
+
+def test_one_empty_half_returns_the_other():
+    upper = _items(("Rice", None, None, 300.0))
+    assert stitch_item_halves(upper, []) == upper
+    assert stitch_item_halves(None, upper) == upper
+    assert stitch_item_halves(None, None) == []
+
+
+def test_a_seam_line_read_differently_by_each_half_is_left_for_the_gate():
+    """The failure mode the stitch cannot fix: the shared line garbled two ways,
+    so it survives twice. It must overshoot visibly rather than be silently
+    de-duplicated by name alone — the caller's arithmetic gate rejects it."""
+    upper = _items(("Sugar 1kg", None, None, 50.0))
+    lower = _items(("Sugor 1kg", None, None, 50.0), ("Flour", None, None, 40.0))
+    out = stitch_item_halves(upper, lower)
+    assert len(out) == 3
 
 
 # --------------------------------------------------------------------------- #

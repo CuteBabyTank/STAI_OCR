@@ -74,13 +74,28 @@ export default function ReceiptDetail() {
     if (!status) return null;
     const printed = receipt?.items_printed_count as number | null | undefined;
     const counted = typeof printed === "number" ? ` of ${printed} printed` : "";
+    // The two ways an item list can be incomplete are different problems and the
+    // note has to say which one this is: lines the OCR never returned, or lines it
+    // returned that don't account for the money. Saying "only 6 of 6 were read"
+    // when the count matches reads as nonsense and hides the real gap.
+    const itemsSum = items.reduce((s, it) => s + (it.amount ?? 0), 0);
+    const total = receipt?.total_amount as number | null | undefined;
+    const shortBy =
+      typeof total === "number" && total > 0 && itemsSum > 0 && total - itemsSum > 0.5
+        ? total - itemsSum
+        : null;
+    const cur = receipt?.currency as string | null | undefined;
+    const gap =
+      shortBy === null
+        ? ""
+        : ` The lines add up to ${money(itemsSum, cur)} of the ${money(total as number, cur)} total — ${money(shortBy, cur)} is unaccounted for.`;
     switch (status) {
       case "complete":
         return { tone: "", label: "All lines captured",
                  hint: `${items.length} line${items.length === 1 ? "" : "s"}${counted}, and they account for the receipt's own total.` };
       case "incomplete":
         return { tone: "warn", label: "Lines may be missing",
-                 hint: `Only ${items.length} line${items.length === 1 ? "" : "s"}${counted} were read, or they don't add up to the printed total. Check the receipt image before trusting this list.` };
+                 hint: `${items.length} line${items.length === 1 ? "" : "s"}${counted} were read.${gap} Lines the model could not read are the usual cause — check the receipt image before trusting this list.` };
       case "empty":
         return { tone: "warn", label: "No lines captured",
                  hint: "The item block was not read at all." };
