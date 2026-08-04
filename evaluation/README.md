@@ -68,6 +68,8 @@ evaluation/
     ├── test_w2a_pdf_batch.py        W2-A — PDF page expansion, batch failure isolation
     ├── test_w2a_audit.py            W2-A — post-extraction arithmetic audit
     │                                    (items vs SUBTOTAL, VAT, payment, line math)
+    ├── test_w2a_recovery.py         W2-A — the second-pass re-read of empty fields
+    │                                    and half-read item blocks (may only ADD)
     ├── test_w2b_finance.py          W2-B/W2-E — finance components
     ├── test_w2b_budgets.py          W2-B — budget aggregation, periods, carry-forward
     ├── test_w2c_quick_python.py     W2-C — Python Quick Chat parser

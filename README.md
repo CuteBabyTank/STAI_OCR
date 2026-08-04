@@ -164,7 +164,10 @@ To run fully offline against a local Ollama, export all three:
 | Structured Outputs     | `core.ReceiptData` / `LineItem` — Pydantic-validated JSON from the model                                                                                                                                                                                                            |
 | Guardrails             | `core.validate_input` (file type/size) + `core.validate_output` (schema) + SQL-agent read-only query filter + agent `receipt_ids` scope                                                                                                                                             |
 | Disambiguation         | `core.needs_disambiguation` — flags missing totals/items/mismatched tax ID for human review instead of guessing                                                                                                                                                                     |
-| Arithmetic audit       | `extraction.audit_receipt` via `core.audit_extraction` — 9 structured checks run on the single shared extraction path after every read; `error` findings become review reasons, `warning`s are surfaced beside the receipt. Returned as `audit` by `/extract` and `/extract/batch`    |
+| Arithmetic audit       | `extraction.audit_receipt` via `core.audit_extraction` — 10 structured checks run on the single shared extraction path after every read; `error` findings become review reasons, `warning`s are surfaced beside the receipt. Returned as `audit` by `/extract` and `/extract/batch`    |
+| Item-block coverage    | `extraction.assess_item_coverage` — every read is graded `complete` / `incomplete` / `unverified` / `empty` by checking the model's own count of the printed lines (prompt rule 14b) against the rows it returned and the receipt's printed subtotal. Returned as `items_coverage`, stored in `receipts.items_status`, and an `incomplete` verdict holds the receipt for review instead of filing a half-read item list |
+| Date parsing           | `extraction.normalize_receipt_date` — the model transcribes the printed date verbatim (`receipt_date_raw`) and Python derives the ISO date, so ordering is a fixed, tested rule rather than something the model re-derives per receipt: spelled month → 4-digit year → any component >12 is the day → year-first (`26-06-14` is 14 Jun 2026), with MONTH/DAY/YEAR only as the last resort on a trailing 4-digit year |
+| Second-pass recovery   | `core._recover_missing_fields` — when the first read leaves fields empty or its item block doesn't check out, the same model is asked again about only those fields, with the place each one is printed named in the prompt. It may only FILL nulls, and a re-read item list replaces the first only when it beats it against the receipt's own figures. `OCR_RECOVERY_PASS=0` disables it |
 | VAT double-count guard | `extraction.undo_vat_added_to_total` — a VAT-inclusive receipt's tax breakdown decomposes the subtotal, so a model-computed `subtotal + VAT` total (and the change derived from it) is undone before saving; the `vat_added_to_total` audit check catches any that arrive by another route. `python repair_receipts.py [--apply]` backfills rows saved before the fix |
 | Memory                 | `core.save_receipt` / `list_receipts` — persistent SQLite ledger across sessions                                                                                                                                                                                                    |
 | RAG                    | `core.semantic_search` / `rag_answer` — embeds each receipt (`nomic-embed-text`) into `receipt_docs`, retrieves by cosine similarity, answers grounded in retrieved docs (keyword fallback if the embed model is absent)                                                            |
@@ -461,7 +464,9 @@ The extraction pipeline is built to ingest large drops of images or multi-hundre
 | `OCR_MAX_IMAGE_DIM` | `1600` | Longest-edge downscale target (px); `0` disables |
 | `OCR_JPEG_QUALITY` | `88` | Re-encode quality after preprocessing |
 | `OCR_CONCURRENCY` | `3` | Parallel vision calls per batch (match `OLLAMA_NUM_PARALLEL`) |
-| `OCR_NUM_CTX` / `OCR_NUM_PREDICT` | `8192` / `4096` | Ollama context / max output tokens |
+| `OCR_NUM_CTX` / `OCR_NUM_PREDICT` | `16384` / `4096` | Ollama context / max output tokens (the window must hold the ~5,200-token prompt, the image and the generated JSON) |
+| `OCR_RECOVERY_PASS` | `1` | Re-ask the model about fields the first read left empty (`0` disables) |
+| `OCR_RECOVERY_NUM_PREDICT` | `2048` | Max output tokens for that second call |
 | `OLLAMA_KEEP_ALIVE` | `30m` | Keep the model resident between requests |
 | `OCR_PDF_RENDER_SCALE` | `2.0` | PDF rasterization scale (~144 DPI) |
 | `OCR_MAX_IMAGE_BYTES` | `26214400` | Hard upload ceiling (25 MB) |
@@ -483,9 +488,14 @@ Two tables are created automatically in `ledger.db` on first run:
 
 **`receipts`** — one row per processed receipt  
 `id`, `source_file`, `processed_at`, `vendor_name`, `vendor_tin`, `vendor_address`,
-`receipt_number`, `receipt_date`, `subtotal`, `vatable_sales`, `vat_exempt_sales`,
-`zero_rated_sales`, `vat_amount`, `discount`, `discount_type`, `total_amount`,
-`cash`, `change`, `currency`, `flagged`
+`receipt_number`, `receipt_date`, `receipt_date_raw`, `subtotal`, `vatable_sales`,
+`vat_exempt_sales`, `zero_rated_sales`, `vat_amount`, `discount`, `discount_type`,
+`total_amount`, `cash`, `change`, `currency`, `flagged`, `items_status`,
+`items_printed_count`
+
+`receipt_date_raw` keeps the date exactly as printed beside the parsed ISO one, so
+a date that reads oddly can be checked without re-running OCR. `items_status` /
+`items_printed_count` record whether the item block was read end to end.
 
 **`line_items`** — one row per line item, linked by `receipt_id`  
 `id`, `receipt_id`, `description`, `quantity`, `unit_price`, `amount`

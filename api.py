@@ -58,6 +58,7 @@ from core import (
     get_receipt,
     get_receipt_items,
     iter_page_images,
+    missing_field_report,
     update_receipt,
     list_budgets,
     list_income,
@@ -207,6 +208,12 @@ async def extract(file: UploadFile = File(...), model: str = DEFAULT_MODEL):
         # numbers and their difference. `review_reasons` above is the `error` subset
         # rendered as prose; this carries the warnings too.
         "audit": audit,
+        # Was the item block actually read end to end? "complete" / "incomplete" /
+        # "unverified" / "empty", plus the evidence behind that verdict.
+        "items_coverage": data.items_coverage,
+        # Fields a receipt normally prints that are still empty after the second
+        # look — what a reviewer should check by eye, not a failed check.
+        "missing_fields": missing_field_report(data),
     }
 
 

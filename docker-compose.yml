@@ -50,7 +50,7 @@ services:
       # NOTE: VISION_MAX_DIM/VISION_NUM_CTX used to be set here but were never read by
       # the app. VISION_MAX_DIM=0 read as "no downscaling" while OCR_MAX_IMAGE_DIM=1600
       # below was doing the resizing all along. Use the OCR_* knobs; they are the live ones.
-      - OCR_NUM_CTX=${OCR_NUM_CTX:-8192}
+      - OCR_NUM_CTX=${OCR_NUM_CTX:-16384}
       - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-30m}
       - MLFLOW_TRACKING_URI=sqlite:////app/mlflow.db
       # Parallel vision calls per batch. Match this to how many concurrent requests

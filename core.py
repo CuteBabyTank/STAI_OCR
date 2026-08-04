@@ -140,13 +140,22 @@ from extraction import (
     DEFAULT_MODEL,
     EXTRACTION_PROMPT,
     _clean_items,
+    _clean_str,
     _coerce_json,
     _dedupe_items,
     _fix_payment_fields,
+    _normalize_blank_fields,
+    _normalize_dates,
+    _normalize_item_report,
     _num,
     _remap_summary_lines,
+    assess_item_coverage,
     audit_messages,
     audit_receipt,
+    build_recovery_prompt,
+    merge_recovered_items,
+    missing_fields,
+    normalize_receipt_date,
     reconcile,
 )
 
@@ -445,13 +454,33 @@ OLLAMA_KEEP_ALIVE = os.getenv("OLLAMA_KEEP_ALIVE", "30m")  # keep the model resi
 # 4,436-token prompt was 0.24s at 8k and 0.26s at 16k. See _HISTORY_BUDGET_CHARS.
 AGENT_NUM_CTX = _env_int("AGENT_NUM_CTX", 16384)
 AGENT_NUM_PREDICT = _env_int("AGENT_NUM_PREDICT", 512)
-OCR_NUM_CTX = _env_int("OCR_NUM_CTX", 8192)
+# Context window for a vision call. It has to hold the extraction prompt AND the
+# image AND everything the model generates, and Ollama truncates from the START of
+# the prompt on overflow — which silently eats the transcription rules and surfaces
+# as a badly-read receipt, not as an error.
+# 16384, not 8192: the extraction prompt is ~5,200 tokens, the image is ~256 on
+# gemma4 (but ~2,100 on qwen2.5vl, which the VISION_MODEL env var can select), and
+# OCR_NUM_PREDICT allows 4,096 of output. At 8k that is 9.5k of demand against an
+# 8.2k window on a long receipt, and even the shorter prompt this replaced sat one
+# percent under the ceiling. Headroom is cheap; a truncated rulebook is not.
+OCR_NUM_CTX = _env_int("OCR_NUM_CTX", 16384)
 # Output budget. A receipt with many line items easily exceeds 1024 tokens of
 # JSON: the response is then cut off mid-object and the whole extraction fails
 # on a parse error (observed with gemma4:12b on a 9-line receipt — 1024 tokens,
 # done_reason="length", unterminated JSON). Headroom is cheap; truncation is
 # total data loss.
 OCR_NUM_PREDICT = _env_int("OCR_NUM_PREDICT", 4096)
+# Second-pass recovery. When the first read leaves fields empty or its item block
+# doesn't check out, ask the SAME model about the SAME image again — but only for
+# the handful of fields that came back missing, with the place each one is printed
+# named in the prompt. A focused four-field question is a much easier one than the
+# twenty-field prompt, and the pass can only FILL nulls, never overwrite a value
+# that was already read. Costs one extra vision call on the receipts that need it
+# and nothing on the ones that don't; set OCR_RECOVERY_PASS=0 to turn it off.
+OCR_RECOVERY_PASS = _env_bool("OCR_RECOVERY_PASS", True)
+# Output cap for that second call. Small when only fields are asked for; the item
+# re-read is the case that needs room, so this matches the main budget.
+OCR_RECOVERY_NUM_PREDICT = _env_int("OCR_RECOVERY_NUM_PREDICT", 2048)
 # How many extractions to run concurrently against Ollama in a batch. The real
 # throughput ceiling is the server's OLLAMA_NUM_PARALLEL; match this to it.
 OCR_CONCURRENCY = max(1, _env_int("OCR_CONCURRENCY", 3))
@@ -596,7 +625,20 @@ class ReceiptData(BaseModel):
     vendor_address: Optional[str] = None
     receipt_number: Optional[str] = None
     receipt_date: Optional[str] = None
+    # The date exactly as printed, before it was reordered to YYYY-MM-DD. Kept so
+    # a date dispute can be settled against the paper without re-reading the
+    # image: `receipt_date` is derived from this by `extraction._normalize_dates`.
+    receipt_date_raw: Optional[str] = None
     items: list[LineItem] = Field(default_factory=list)
+    # Rule 14b: the model's own account of its reading of the item block — how
+    # many product lines it counted printed, and whether it read them all. These
+    # are self-reported and are treated as evidence, not truth; `items_coverage`
+    # below is the verdict after checking them against the extraction itself.
+    items_printed_count: Optional[int] = None
+    items_section_verified: Optional[bool] = None
+    # Computed, not extracted: see `extraction.assess_item_coverage`. Set on the
+    # extraction path once the data is clean; None on a record built elsewhere.
+    items_coverage: Optional[dict] = None
     subtotal: Optional[float] = None
     vatable_sales: Optional[float] = None
     vat_exempt_sales: Optional[float] = None
@@ -803,6 +845,18 @@ def audit_extraction(data: ReceiptData) -> list[dict]:
     return audit_receipt(data.model_dump())
 
 
+def missing_field_report(data: ReceiptData) -> list[str]:
+    """The fields a receipt normally prints that this extraction still has empty,
+    after the recovery pass has had its second look.
+
+    Deliberately NOT an audit finding: an absent field is not a failed check (a
+    receipt may genuinely print no TIN), and a warning on every one of those would
+    train the user to ignore all of them. It is reported alongside the extraction
+    so the UI can point at what to check, and traced so "which fields do we keep
+    missing?" is answerable across a batch."""
+    return missing_fields(data.model_dump(), _RECOVERY_FIELDS)
+
+
 def needs_disambiguation(data: ReceiptData, audit: list[dict] | None = None) -> list[str]:
     """Return reasons a record should be confirmed by a human before being
     saved to the ledger, instead of being auto-accepted.
@@ -831,6 +885,107 @@ def needs_disambiguation(data: ReceiptData, audit: list[dict] | None = None) -> 
 # --------------------------------------------------------------------------- #
 # 4. LLMOps Monitoring — MLflow-wrapped extraction
 # --------------------------------------------------------------------------- #
+# Fields worth a second look when the first pass leaves them empty. Deliberately
+# NOT every recoverable field: vat_exempt_sales, zero_rated_sales, discount and
+# discount_type are genuinely absent from most receipts, and asking after them on
+# every read is pressure to invent a figure for a line that was never printed.
+# These twelve are printed on almost every receipt, so an empty one is far more
+# likely to be a field that was never looked for than one that isn't there.
+_RECOVERY_FIELDS = (
+    "vendor_name", "vendor_address", "vendor_tin", "receipt_number",
+    "receipt_date_raw", "subtotal", "vatable_sales", "vat_amount",
+    "total_amount", "cash", "change", "currency",
+)
+_RECOVERY_NUMERIC = set(_TOP_LEVEL_NUMERIC_FIELDS)
+
+
+def _clean_extraction(raw: dict) -> dict:
+    """The full post-model cleanup chain, in the order it has to run.
+
+    Placeholders and dates are normalized FIRST so everything downstream — the
+    summary remapper, the payment repair, the coverage assessment, the recovery
+    pass — sees one representation of "not printed" instead of "", "N/A" and
+    null, and one date format instead of whatever the model reordered.
+
+    Every step only relocates, reshapes or drops values the model transcribed; no
+    step computes a figure. Running the chain twice is safe (the recovery pass
+    re-runs it over the merged result), because each step is idempotent on data it
+    has already cleaned."""
+    raw = _normalize_blank_fields(raw)
+    raw = _normalize_dates(raw)
+    raw = _normalize_item_report(raw)
+    raw = _fix_payment_fields(_dedupe_items(_remap_summary_lines(_clean_items(raw))))
+    return _coerce_numeric_fields(raw)
+
+
+def _recover_missing_fields(image_bytes: bytes, model: str, data: dict) -> dict:
+    """Second pass: ask the model again about only what the first read missed.
+
+    Two triggers, both evidence-based:
+      * a field in `_RECOVERY_FIELDS` came back empty, or
+      * `assess_item_coverage` says the item block was not fully read.
+    Neither triggers on a clean extraction, so a receipt the model read properly
+    costs exactly one call as before.
+
+    The result can only ADD: a recovered value is written only where the field is
+    still None, and a re-read item list replaces the first one only when it beats
+    it against the receipt's own printed figures (`merge_recovered_items`). Any
+    failure — a dead endpoint, unparseable JSON, a model that answers with prose —
+    leaves the first-pass extraction exactly as it was."""
+    fields = missing_fields(data, _RECOVERY_FIELDS)
+    coverage = assess_item_coverage(data)
+    want_items = coverage["status"] in ("empty", "incomplete")
+    prompt = build_recovery_prompt(fields, want_items, data)
+    if not prompt:
+        return data
+
+    try:
+        response = _chat(
+            model=model,
+            messages=[{"role": "user", "content": prompt, "images": [image_bytes]}],
+            format="json",
+            options={"temperature": 0, "num_predict": OCR_RECOVERY_NUM_PREDICT,
+                     "num_ctx": OCR_NUM_CTX},
+            keep_alive=OLLAMA_KEEP_ALIVE,
+        )
+        patch = _coerce_json(response["message"]["content"])
+    except Exception:  # noqa: BLE001 - a failed second look must never lose the first
+        return data
+    if not isinstance(patch, dict):
+        return data
+
+    filled: list[str] = []
+    for field in fields:
+        if field not in patch or data.get(field) is not None:
+            continue
+        value = (_num(patch[field]) if field in _RECOVERY_NUMERIC
+                 else _clean_str(patch[field]))
+        if value is None:
+            continue
+        data[field] = value
+        filled.append(field)
+
+    if want_items and patch.get("items"):
+        before = len(data.get("items") or [])
+        data = merge_recovered_items(data, patch["items"])
+        if len(data.get("items") or []) != before:
+            # The re-read replaced the list, so its own account of the item block
+            # describes the rows we are now keeping; the first pass's does not.
+            for field in ("items_printed_count", "items_section_verified"):
+                if field in patch:
+                    data[field] = patch[field]
+            filled.append("items")
+
+    # Metrics, not params: `extract_batch` opens ONE MLflow run for a whole import
+    # and this function runs once per page inside it. Re-logging a param key with a
+    # different value raises, and that exception would surface as a FAILED PAGE —
+    # telemetry losing a receipt. Metrics accumulate as a series, so they are safe
+    # to log once per page.
+    _mlog_metric("recovery_fields_requested", len(fields))
+    _mlog_metric("recovery_fields_filled", len(filled))
+    return data
+
+
 def _run_vision_model(
     image_bytes: bytes, model: str
 ) -> tuple[ReceiptData, list[str], dict, dict]:
@@ -881,10 +1036,18 @@ def _run_vision_model(
     # Keep a pristine copy of the model's own items (pre-cleanup) so confidence can
     # be aligned back to the values it actually printed.
     orig_json = json.loads(json.dumps(raw))
-    raw = _fix_payment_fields(_dedupe_items(_remap_summary_lines(_clean_items(raw))))
-    raw = _coerce_numeric_fields(raw)
+    raw = _clean_extraction(raw)
+    # Second look at whatever the first read left empty or half-read. Runs before
+    # validation so a recovered value goes through the same cleanup, coercion and
+    # schema checks as a first-pass one — there is no back door into the record.
+    if OCR_RECOVERY_PASS:
+        raw = _clean_extraction(_recover_missing_fields(image_bytes, model, raw))
     data = validate_output(raw)
     data.category = categorize(data)  # normalize to the fixed taxonomy
+    # The verdict on the item block: complete / incomplete / unverified / empty,
+    # with the evidence behind it. Computed after cleanup so it judges the rows
+    # that will actually be stored.
+    data.items_coverage = assess_item_coverage(data.model_dump())
 
     # The arithmetic audit runs HERE — once, on the single hot path both the
     # single-file and batch entry points go through, so no route can skip it. It is
@@ -929,6 +1092,10 @@ def extract_receipt_validated(
             _mlog_metric("prompt_eval_count", response.get("prompt_eval_count", 0))
             _mlog_metric("eval_count", response.get("eval_count", 0))
             _mlog_metric("items_extracted", len(data.items))
+            # Whether the item block was read in full, so "how often do we miss a
+            # line?" is answerable from the traces instead of by eye.
+            _mlog_param("items_status", (data.items_coverage or {}).get("status") or "unknown")
+            _mlog_param("missing_fields", ",".join(missing_field_report(data)) or "none")
             _mlog_metric("needs_disambiguation", int(bool(reasons)))
             # Traced so a run can be asked "how often does the OCR miss a line?"
             # without re-reading receipts: the codes are a fixed vocabulary.
@@ -1145,6 +1312,17 @@ def init_db() -> None:
             # not have run yet on a fresh ledger, and SQLite cannot add a FK to an
             # existing table anyway. update_receipt() validates the id instead.
             ("account_id", "INTEGER"),
+            # The date exactly as printed, kept beside the parsed ISO one so a
+            # date that reads oddly can be checked against the paper without
+            # re-running OCR — and so a future fix to the date parser can be
+            # replayed over the rows it already got wrong.
+            ("receipt_date_raw", "TEXT"),
+            # Whether the item block was read in full: "complete" / "incomplete" /
+            # "unverified" / "empty" (extraction.assess_item_coverage), plus the
+            # model's own count of the printed lines. Stored so a half-read
+            # receipt stays identifiable after the fact, not just at upload time.
+            ("items_status", "TEXT"),
+            ("items_printed_count", "INTEGER"),
         ]
         
         for col_name, col_type in columns_to_add:
@@ -1176,8 +1354,9 @@ def save_receipt(data: ReceiptData, source_file: str, flagged: bool,
                 vendor_address, receipt_number, receipt_date, subtotal, vatable_sales,
                 vat_exempt_sales, zero_rated_sales, vat_amount, discount, discount_type,
                 total_amount, cash, change, currency, category, flagged,
-                confidence, field_confidence)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                confidence, field_confidence, receipt_date_raw, items_status,
+                items_printed_count)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 source_file,
@@ -1202,6 +1381,9 @@ def save_receipt(data: ReceiptData, source_file: str, flagged: bool,
                 int(flagged),
                 overall_conf,
                 field_conf_json,
+                data.receipt_date_raw,
+                (data.items_coverage or {}).get("status"),
+                data.items_printed_count,
             ),
         )
         receipt_id = cur.lastrowid

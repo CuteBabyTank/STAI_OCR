@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from datetime import date as _date
 
 # --------------------------------------------------------------------------- #
 # Configuration
@@ -39,6 +40,25 @@ store, pharmacy, or any other merchant. Receipts come in every layout and from
 any country; some print a tax breakdown or a merchant tax ID, many do not. Your
 only job is to copy down values that are actually printed on the receipt — you
 are transcribing, not interpreting.
+
+HOW TO READ THE RECEIPT — work in these three passes, in this order, and finish
+all three before you write any JSON. Most mistakes on this task are lines that
+were never looked at, not lines that were read wrongly.
+  PASS 1 — THE ITEM BLOCK. Locate the FIRST product line (just under the header
+    or the first dashed rule) and the LAST one (directly above SUBTOTAL / TOTAL /
+    the tax block). Read every line between those two, top to bottom, one line at
+    a time. Do not skip, sample, summarise, merge or stop early — a 30-line
+    receipt needs 30 rows. Count the product lines as you read them: that count
+    is "items_printed_count", and the number of objects in "items" must equal it.
+  PASS 2 — THE SUMMARY BLOCK. Read the block beneath the items line by line:
+    subtotal, the tax breakdown, discounts, total, cash, change. Every printed
+    line goes into its own dedicated field.
+  PASS 3 — THE HEADER AND FOOTER. Merchant name, address, tax ID, receipt/OR
+    number, and the transaction date.
+  THEN — walk the key list at the bottom of this prompt ONE KEY AT A TIME. For
+    each key, find the printed text it comes from before you write it. If you
+    cannot point at printed text for that key, it is null. Never skip a key, and
+    never leave a key out of the object.
 
 STRICT RULES — follow exactly:
 1. ONLY record a value if it is clearly printed on the receipt. If a field is not
@@ -165,6 +185,21 @@ STRICT RULES — follow exactly:
     add up their quantities. The only rows to leave out are echoes of a line you
     have already recorded (the same line printed once but wrapped onto a
     continuation line).
+14b. REPORT ON YOUR OWN READING of the item block, so a partial read can be
+    caught instead of silently filed:
+    a. items_printed_count is how many product lines you counted printed in the
+       item block during PASS 1 — the receipt's own line count, not the number of
+       rows you managed to read. If the item block is cut off, unreadable, or you
+       genuinely cannot count it, use null.
+    b. items_section_verified is true ONLY if all three of these hold: you found
+       the start and the end of the item block, you read every line between them,
+       and "items" has one row per printed line. If any line was skipped, guessed,
+       unreadable, cropped out of frame, or if you are not sure you reached the
+       last one, it is false. false is a useful, honest answer — a wrong true
+       sends a half-read receipt straight into the books.
+    c. Never adjust items_printed_count to match how many rows you produced, and
+       never drop rows to match the count. Report both honestly and let them
+       disagree.
 15. currency is the currency actually shown on the receipt — read it from the
     symbol or code printed next to the amounts (₱/PHP, $/USD, €/EUR, £/GBP, ¥/JPY,
     ₹/INR, etc.). If no currency is indicated, return null.
@@ -187,18 +222,48 @@ STRICT RULES — follow exactly:
        until 2027"), warranty, return-policy and exchange deadlines, expiry or
        best-before dates, birth dates in a senior-citizen/PWD block, membership
        expiry, and anything printed in the small-print footer.
-    c. Output YYYY-MM-DD. Work out the field order from the receipt itself:
-       - A component greater than 12 MUST be the day: "25/06/2026" -> 2026-06-25.
+    c. FIRST copy the date into receipt_date_raw EXACTLY as printed — same
+       characters, same separators, same order, nothing rearranged: "2026-06-14",
+       "14/06/26", "JUN 14, 2026". This is a straight transcription and it is the
+       field that matters most; getting it right costs nothing because no
+       reordering is involved. Include the year even when it is only two digits.
+       If the printed date sits next to a time, copy only the date part.
+    d. THEN write the same date in receipt_date as YYYY-MM-DD. Work out which
+       component is which from the receipt itself:
        - A spelled or abbreviated month is decisive: "14 JUN 2026" -> 2026-06-14,
          "JUN 14, 2026" -> 2026-06-14, "2026-JUN-14" -> 2026-06-14.
        - A 4-digit component is the year. A 2-digit year "26" means 2026.
-       - Only if the order is still ambiguous (all numeric, both components 12 or
-         under) read it as MONTH/DAY/YEAR — the convention on Philippine and US
-         receipts: "03/08/2026" -> 2026-03-08.
-    d. Copy the digits as printed. Do not shift, swap, correct or "modernise" the
+       - A component greater than 12 MUST be the day: "25/06/2026" -> 2026-06-25.
+       - A leading component that is already the year keeps its order: these
+         receipts most often print YEAR-MONTH-DAY, so "2026-06-14" and "26-06-14"
+         are both 14 June 2026 — never re-read them as month-first.
+       - Only if the order is still ambiguous (a trailing year with both other
+         components 12 or under) read it as MONTH/DAY/YEAR — the convention on
+         Philippine and US receipts: "03/08/2026" -> 2026-03-08.
+    e. Copy the digits as printed. Do not shift, swap, correct or "modernise" the
        year, and never substitute today's date. If the transaction date is not
-       printed or not legible, receipt_date is null.
-    e. Put only the date in receipt_date — no time, no day name.
+       printed or not legible, BOTH date fields are null.
+    f. Put only the date in these fields — no time, no day name.
+18. NULL MEANS "I LOOKED AND IT IS NOT PRINTED". It never means "I did not check".
+    Before you answer null for a field, look for it in the place it is normally
+    printed:
+      - vendor_name, vendor_address, vendor_tin: the header block at the very top,
+        often in bold or larger type; the address is usually the 1-3 lines under
+        the name, and may be split across them.
+      - receipt_number: near the top or bottom, labeled "OR", "SI", "Invoice",
+        "Receipt No", "Trans", "Txn", "Bill", "Check", "Ref".
+      - receipt_date: header block, beside the receipt number, or on the same line
+        as the time of sale.
+      - subtotal, vat_amount, vatable_sales, discount, total_amount: the summary
+        block between the last item and the payment lines, and in the small tax
+        table that is often printed underneath it.
+      - cash, change: the payment lines at the bottom.
+      - currency: the symbol or code printed beside any amount.
+    Only after looking there and finding nothing may the field be null.
+19. Write a real null, not a stand-in. NEVER output an empty string "", "N/A",
+    "n/a", "-", "--", "none", "None", "null", "unknown", "not printed", "?" or 0
+    to mean "missing" — those read downstream as real values. The value is either
+    the printed text/number or null. A printed 0.00 is a real value and stays 0.00.
 
 Return ONLY a single valid JSON object — no prose, no markdown fences. Use these
 exact keys. Use null when a value is not present. Money values are plain numbers
@@ -209,6 +274,7 @@ exact keys. Use null when a value is not present. Money values are plain numbers
   "vendor_tin": string,            // merchant tax ID if labeled (TIN/GST/Tax ID/etc.); else null. NOT the receipt no.
   "vendor_address": string,
   "receipt_number": string,        // receipt / invoice / OR / SI no.
+  "receipt_date_raw": string,      // the date EXACTLY as printed, characters unchanged (rule 17c)
   "receipt_date": string,          // TRANSACTION date only, YYYY-MM-DD (rule 17). Not a
                                    // permit/ATP/valid-until/expiry date. null if not printed.
   "items": [
@@ -219,6 +285,9 @@ exact keys. Use null when a value is not present. Money values are plain numbers
       "amount": number             // the price from the right-hand money column; never a size/volume
     }
   ],
+  "items_printed_count": number,   // product lines you counted printed in the item block (rule 14b)
+  "items_section_verified": true,  // true only if you read the item block start-to-end and
+                                   // "items" has one row per printed line; else false (rule 14b)
   "subtotal": number,              // the subtotal / gross amount line, before tax and discounts
   "vatable_sales": number,         // EXACT printed taxable-sales figure; null if not printed. Never derived.
   "vat_exempt_sales": number,      // tax-exempt sales
@@ -235,20 +304,176 @@ exact keys. Use null when a value is not present. Money values are plain numbers
   "category": string               // EXACTLY one of: "Food", "Shopping", "Health", "Other"
 }
 
-Before you answer, check these five — they are where this task usually goes wrong:
-  1. Every item amount came from the right-hand price column. No size or volume
+Before you answer, check these eight — they are where this task usually goes wrong:
+  1. The item block was read from its first line to its last. len(items) equals
+     items_printed_count, and items_section_verified is false if it does not.
+  2. Every item amount came from the right-hand price column. No size or volume
      from a product name ("500ml", "1.5L", "60g", "2pc") was used as an amount,
      a unit_price or a quantity.
-  2. vat_amount is a printed money figure, not a percentage and not something you
+  3. vat_amount is a printed money figure, not a percentage and not something you
      worked out. If no tax amount was printed, it is null.
-  3. discount is a printed money figure, not a percentage, and it is null if no
+  4. discount is a printed money figure, not a percentage, and it is null if no
      discount line was printed.
-  4. change is exactly the number printed beside "CHANGE" — not cash minus total.
-  5. receipt_date is the transaction date, not a permit / valid-until / expiry
-     date, and its day and month are the right way round.
+  5. change is exactly the number printed beside "CHANGE" — not cash minus total.
+  6. receipt_date_raw is the date exactly as printed, and receipt_date is that
+     same date as YYYY-MM-DD — the transaction date, not a permit / valid-until /
+     expiry date, with its day and month the right way round.
+  7. Every key in the list above is present, and each null is a field you actually
+     looked for and could not find printed — not one you skipped. Go back over the
+     header block, the summary block and the payment lines once more for any field
+     still sitting at null.
+  8. No field holds "", "N/A", "-", "none" or "unknown" as a stand-in for missing.
 
 Remember: transcribe only what is printed. A missing value must be null, never a
 guess or a calculation. Return the JSON object only."""
+
+
+# --------------------------------------------------------------------------- #
+# Second-pass recovery — re-read only what came back empty
+# --------------------------------------------------------------------------- #
+# One prompt asking for twenty fields at once is where the empties come from: the
+# model spends its attention on the item block and the total, and quietly answers
+# null for the TIN, the address and the receipt number without ever looking for
+# them. Asking again for four named fields — with the place each one is printed —
+# is a much easier question, and it is the same image and the same model, so it
+# costs one more call and no new dependency.
+#
+# The recovery pass may only FILL fields that are empty. It never overwrites a
+# value the first pass read, so a second look can add information but can never
+# corrupt what was already transcribed. See `core._recover_missing_fields`.
+_FIELD_HINTS = {
+    "vendor_name": "the merchant's name — the largest text in the header block at "
+                   "the very top of the receipt",
+    "vendor_tin": "the merchant's tax ID in the header block, labeled TIN, VAT REG "
+                  "TIN, GST No, Tax ID, ABN or EIN. Not the receipt number, and "
+                  "null unless a number is explicitly labeled as a tax ID",
+    "vendor_address": "the merchant's street address, usually the 1-3 lines "
+                      "directly under the merchant name; join the lines with commas",
+    "receipt_number": "the receipt / invoice number near the top or bottom, labeled "
+                      "OR, SI, Invoice, Receipt No, Trans, Txn, Bill, Check or Ref",
+    "receipt_date_raw": "the transaction date EXACTLY as printed, characters and "
+                        "order unchanged — header block, beside the receipt number, "
+                        "or on the line with the time of sale. Not a permit, "
+                        "valid-until, accreditation or expiry date",
+    "subtotal": "the money figure beside SUBTOTAL / GROSS / AMOUNT, in the summary "
+                "block between the last item and the payment lines",
+    "vatable_sales": "the money figure beside VATable Sales / Taxable Sales / Amount "
+                     "Net of VAT, often in a small table under the total",
+    "vat_exempt_sales": "the money figure beside VAT-Exempt Sales (a printed 0.00 is "
+                        "a real value)",
+    "zero_rated_sales": "the money figure beside Zero-Rated Sales (a printed 0.00 is "
+                        "a real value)",
+    "vat_amount": "the money figure beside VAT / TAX / GST — never the percentage "
+                  "rate, and never a figure you work out yourself",
+    "discount": "the money figure on a line labeled Discount / Less Discount / SC "
+                "Disc / PWD / Promo — never a percentage rate",
+    "discount_type": "the word printed on the discount line (Senior Citizen, PWD, "
+                     "Promo, Loyalty, Employee, Coupon)",
+    "total_amount": "the final amount charged — the figure beside TOTAL / AMOUNT "
+                    "DUE, or the last summary figure above the payment lines",
+    "cash": "the money figure beside CASH / TENDERED / AMOUNT PAID at the bottom. "
+            "Card, GCash and Maya receipts usually print none — leave it null",
+    "change": "the money figure beside CHANGE / CHANGE DUE / SUKLI — copied exactly, "
+              "never cash minus the total. Null if no CHANGE line is printed",
+    "currency": "the currency symbol or code printed beside the amounts "
+                "(₱/PHP, $/USD, €/EUR, £/GBP, ¥/JPY, ₹/INR)",
+}
+
+# The fields a second look is worth making. `items` is requested separately (see
+# `build_recovery_prompt`) because it needs the whole item block re-read, not a
+# single value found.
+RECOVERABLE_FIELDS = tuple(_FIELD_HINTS)
+
+
+def missing_fields(data: dict, fields=RECOVERABLE_FIELDS) -> list[str]:
+    """Which of `fields` came back empty, in prompt order. Treats the placeholder
+    spellings ("", "N/A", "-") as empty, so this must run on data that has been
+    through `_normalize_blank_fields` or on raw model output either way."""
+    empty = []
+    for field in fields:
+        value = data.get(field)
+        if isinstance(value, str):
+            value = _clean_str(value)
+        if value is None:
+            empty.append(field)
+    return empty
+
+
+def build_recovery_prompt(fields: list[str], include_items: bool,
+                          context: dict | None = None) -> str:
+    """Build the focused second-pass prompt for `fields` (and, optionally, a full
+    re-read of the item block). Returns "" when there is nothing to ask for."""
+    fields = [f for f in fields if f in _FIELD_HINTS]
+    if not fields and not include_items:
+        return ""
+
+    context = context or {}
+    known = []
+    for label, key in (("merchant", "vendor_name"), ("date", "receipt_date"),
+                       ("total", "total_amount")):
+        value = context.get(key)
+        if value not in (None, ""):
+            known.append(f"{label}: {value}")
+
+    lines = [
+        "You already transcribed this receipt once. This is a SECOND look at the "
+        "SAME image, to recover what the first pass left empty.",
+    ]
+    if known:
+        lines.append(
+            "Context from the first pass (already recorded — do not return these): "
+            + "; ".join(known) + "."
+        )
+    lines.append("")
+
+    if fields:
+        lines.append(
+            "These fields came back empty. Take them ONE AT A TIME. For each one, "
+            "look at the part of the receipt named beside it before you answer:"
+        )
+        lines.extend(f"  - {f}: {_FIELD_HINTS[f]}" for f in fields)
+        lines.append("")
+
+    if include_items:
+        lines.append(
+            "The item block was not fully read. Read it again from the FIRST "
+            "product line (under the header) to the LAST one (directly above the "
+            "SUBTOTAL / TOTAL / tax block), one line at a time, and return EVERY "
+            "line — including lines that repeat the same product at the same "
+            "price. Give each line its description as printed (sizes like "
+            "\"500ml\" stay in the description), its amount from the right-hand "
+            "money column, and quantity/unit_price only when that line prints "
+            "them. Summary lines (Subtotal, VAT, Discount, Total, Cash, Change) "
+            "are NOT items."
+        )
+        lines.append("")
+
+    lines.extend([
+        "RULES:",
+        "  - Copy only what is printed. Never calculate, infer, estimate or guess.",
+        "  - A field you look for and cannot find printed is null. Never write "
+        "\"\", \"N/A\", \"-\", \"none\" or 0 to mean missing.",
+        "  - Money values are plain numbers: no currency symbols, no commas.",
+        "",
+    ])
+
+    keys = list(fields)
+    if include_items:
+        keys.append("items")
+        keys.append("items_printed_count")
+        keys.append("items_section_verified")
+    lines.append(
+        "Return ONLY a single JSON object with exactly these keys and no others: "
+        + ", ".join(keys) + "."
+    )
+    if include_items:
+        lines.append(
+            'The "items" value is a list of {"description", "quantity", '
+            '"unit_price", "amount"} objects, "items_printed_count" is how many '
+            'product lines you counted printed, and "items_section_verified" is '
+            "true only if you read the block from its first line to its last."
+        )
+    return "\n".join(lines)
 
 
 # --------------------------------------------------------------------------- #
@@ -272,6 +497,261 @@ def _num(value) -> float | None:
         return float(cleaned) if cleaned not in ("", "-", ".") else None
     except ValueError:
         return None
+
+
+# --------------------------------------------------------------------------- #
+# Placeholders — "" / "N/A" / "-" are missing values, not values
+# --------------------------------------------------------------------------- #
+# The prompt now forbids these (rule 19), but a small vision model still emits
+# them, and they are worse than a null: an empty string sails through Pydantic,
+# gets stored, and renders on the receipt page as a field that "exists but is
+# blank" — indistinguishable from a value the model genuinely could not find, and
+# invisible to every `IS NULL` check in the ledger and the agent's SQL.
+_NULLISH_STRINGS = {
+    "n/a", "na", "n.a", "n.a.", "none", "null", "nil", "nan", "undefined",
+    "unknown", "unspecified", "not printed", "not specified", "not available",
+    "not applicable", "no data", "missing", "blank", "empty", "tbd", "?", "??",
+}
+# Anything made only of placeholder punctuation ("---", "____", "...") or a run
+# of x's ("xxx", "XXXXXX"): the same non-answer in a different costume. The x-run
+# needs three characters — "X" on its own is a plausible short value (a size, an
+# initial), and eating it would invent a missing field rather than find one.
+_PLACEHOLDER_RE = re.compile(r"^(?:[\s\-_.·•*/\\]+|[xX]{3,}[\s\-_.·•*/\\]*)$")
+
+
+def _clean_str(value) -> str | None:
+    """Normalize a model string field: trim it, and turn every "missing" spelling
+    into a real None. Returns None for anything that carries no information."""
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, (list, tuple, set, dict)):
+        return None
+    s = re.sub(r"\s+", " ", str(value)).strip()
+    if not s:
+        return None
+    if s.lower() in _NULLISH_STRINGS or _PLACEHOLDER_RE.match(s):
+        return None
+    return s
+
+
+# Currency as printed -> ISO code. The receipt shows a symbol far more often than
+# a code, and an un-normalized "₱" flows into the ledger's currency column, where
+# it doesn't group with the "PHP" rows in any total or chart.
+_CURRENCY_ALIASES = {
+    "₱": "PHP", "P": "PHP", "PHP": "PHP", "PHP.": "PHP", "PESO": "PHP",
+    "PESOS": "PHP", "PHILIPPINE PESO": "PHP", "PISO": "PHP",
+    "$": "USD", "US$": "USD", "USD": "USD", "DOLLAR": "USD", "DOLLARS": "USD",
+    "€": "EUR", "EUR": "EUR", "EURO": "EUR", "EUROS": "EUR",
+    "£": "GBP", "GBP": "GBP", "POUND": "GBP", "POUNDS": "GBP",
+    "¥": "JPY", "JPY": "JPY", "YEN": "JPY", "CNY": "CNY", "RMB": "CNY",
+    "₩": "KRW", "KRW": "KRW", "WON": "KRW", "₹": "INR", "INR": "INR",
+    "RS": "INR", "RS.": "INR", "฿": "THB", "THB": "THB", "BAHT": "THB",
+    "₫": "VND", "VND": "VND", "S$": "SGD", "SGD": "SGD", "SG$": "SGD",
+    "A$": "AUD", "AUD": "AUD", "AU$": "AUD", "C$": "CAD", "CAD": "CAD",
+    "HK$": "HKD", "HKD": "HKD", "NT$": "TWD", "TWD": "TWD",
+    "RM": "MYR", "MYR": "MYR", "RP": "IDR", "IDR": "IDR",
+}
+
+_STRING_FIELDS = (
+    "vendor_name", "vendor_tin", "vendor_address", "receipt_number",
+    "receipt_date", "receipt_date_raw", "discount_type", "currency", "category",
+)
+
+
+def _normalize_currency(value) -> str | None:
+    """Map a printed currency symbol/name to its ISO code, leaving an unfamiliar
+    one as the model wrote it (uppercased) rather than dropping it."""
+    s = _clean_str(value)
+    if s is None:
+        return None
+    key = s.upper().strip()
+    if key in _CURRENCY_ALIASES:
+        return _CURRENCY_ALIASES[key]
+    # "PHP 545.00" / "₱545.00" — the code is often glued to the amount.
+    for alias, code in _CURRENCY_ALIASES.items():
+        if key.startswith(alias) and not key[len(alias):].strip(" .0123456789,"):
+            return code
+    return key
+
+
+def _normalize_blank_fields(data: dict) -> dict:
+    """Turn every placeholder string in the extraction into a real null, in place.
+
+    Runs before anything else in the cleanup chain so the rest of the pipeline
+    (the summary-line remapper, the audit, the recovery pass) sees one
+    representation of "not printed" instead of six."""
+    for field in _STRING_FIELDS:
+        if field in data:
+            data[field] = _clean_str(data[field])
+    if data.get("currency") is not None:
+        data["currency"] = _normalize_currency(data["currency"])
+    items = data.get("items")
+    if isinstance(items, list):
+        for item in items:
+            if isinstance(item, dict) and "description" in item:
+                item["description"] = _clean_str(item["description"])
+    return data
+
+
+# --------------------------------------------------------------------------- #
+# Dates — parsed here, deterministically, not by the model
+# --------------------------------------------------------------------------- #
+# The model is asked for the date twice: `receipt_date_raw` (a straight
+# transcription of the printed characters) and `receipt_date` (the same date
+# reordered to YYYY-MM-DD). Transcribing is what it is good at; reordering is
+# where it fails — "14/06/26" comes back as 2014-06-26, 2026-06-14 or 2026-14-06
+# depending on nothing in particular. So we re-derive the ISO date from the raw
+# string in Python, where the rule is fixed and testable, and only fall back to
+# the model's own ISO answer when the raw string can't be parsed.
+_MONTH_NAMES = {
+    "jan": 1, "january": 1, "feb": 2, "febr": 2, "february": 2, "mar": 3,
+    "march": 3, "apr": 4, "april": 4, "may": 5, "jun": 6, "june": 6, "jul": 7,
+    "july": 7, "aug": 8, "august": 8, "sep": 9, "sept": 9, "september": 9,
+    "oct": 10, "october": 10, "nov": 11, "november": 11, "dec": 12,
+    "december": 12,
+}
+_TIME_RE = re.compile(r"\b\d{1,2}:\d{2}(?::\d{2})?\s*(?:[AaPp]\.?[Mm]\.?)?")
+_DAY_NAME_RE = re.compile(
+    r"\b(?:mon|tue|tues|wed|weds|thu|thur|thurs|fri|sat|sun)[a-z]*\.?\b", re.I
+)
+# How far back a receipt date can plausibly sit. Used only to break a genuine
+# ambiguity between two readings of the same digits — never to reject a date.
+_DATE_LOOKBACK_YEARS = 10
+
+
+def _expand_year(token: str, today: _date) -> int:
+    """A 2-digit year is this century unless that lands in the future."""
+    year = int(token)
+    if len(token.strip()) > 2:
+        return year
+    century = year + 2000
+    return century if century <= today.year + 1 else year + 1900
+
+
+def _plausible_year(year: int, today: _date) -> bool:
+    return today.year - _DATE_LOOKBACK_YEARS <= year <= today.year + 1
+
+
+def _build(year: int, month: int, day: int) -> str | None:
+    """ISO string for a real calendar date, else None."""
+    try:
+        return _date(year, month, day).isoformat()
+    except ValueError:
+        return None
+
+
+def normalize_receipt_date(value, today: _date | None = None) -> str | None:
+    """Parse a printed receipt date into YYYY-MM-DD, or None if it can't be read.
+
+    Handles the layouts receipts actually print: "2026-06-14", "14/06/2026",
+    "06/14/26", "14 JUN 2026", "JUN 14, 2026", "20260614", and any of those with
+    a time or a day name attached.
+
+    Ordering rules, in priority order:
+      1. A spelled month decides itself.
+      2. A 4-digit component is the year; a leading one means YEAR-MONTH-DAY.
+      3. A component over 12 must be the day.
+      4. All-2-digit and still ambiguous: prefer YEAR-MONTH-DAY (what these
+         receipts print), and only fall back to MONTH/DAY/YEAR when the
+         year-first reading would put the receipt implausibly far in the past.
+    A trailing 4-digit year cannot be a YEAR-MONTH-DAY, so "03/08/2026" keeps the
+    documented MONTH/DAY/YEAR fallback and reads as 8 March 2026.
+    """
+    text = _clean_str(value)
+    if text is None:
+        return None
+    today = today or _date.today()
+    text = _TIME_RE.sub(" ", text)
+    text = _DAY_NAME_RE.sub(" ", text)
+    text = re.sub(r"[,]", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+
+    # ---- 1. a spelled or abbreviated month settles the order ---------------- #
+    word = re.search(r"[A-Za-z]{3,9}", text)
+    if word and word.group(0).lower().rstrip(".") in _MONTH_NAMES:
+        month = _MONTH_NAMES[word.group(0).lower().rstrip(".")]
+        nums = re.findall(r"\d{1,4}", text)
+        if len(nums) >= 2:
+            first, second = nums[0], nums[1]
+            if len(first) == 4 or int(first) > 31:
+                year, day = _expand_year(first, today), int(second)
+            else:
+                year, day = _expand_year(second, today), int(first)
+            iso = _build(year, month, day)
+            if iso:
+                return iso
+        elif len(nums) == 1:
+            return None  # a month and one number is not a date we can trust
+
+    # ---- 2. a compact YYYYMMDD stamp --------------------------------------- #
+    compact = re.search(r"\b(\d{4})(\d{2})(\d{2})\b", text)
+    if compact:
+        iso = _build(int(compact.group(1)), int(compact.group(2)),
+                     int(compact.group(3)))
+        if iso:
+            return iso
+
+    # ---- 3. three numeric components --------------------------------------- #
+    triple = re.search(r"(\d{1,4})\s*[-/.\s]\s*(\d{1,2})\s*[-/.\s]\s*(\d{1,4})", text)
+    if not triple:
+        return None
+    a, b, c = triple.group(1), triple.group(2), triple.group(3)
+    ai, bi, ci = int(a), int(b), int(c)
+
+    # A 4-digit component names the year outright.
+    if len(a) == 4:
+        return _build(ai, bi, ci) or _build(ai, ci, bi)
+    if len(c) == 4:
+        if ai > 12:                      # DD/MM/YYYY
+            return _build(ci, bi, ai)
+        if bi > 12:                      # MM/DD/YYYY
+            return _build(ci, ai, bi)
+        return _build(ci, ai, bi) or _build(ci, bi, ai)   # ambiguous -> MDY
+
+    # All components are short. Read the year off whichever end can only be one.
+    if ai > 31:
+        return _build(_expand_year(a, today), bi, ci)
+    if ci > 31:
+        if ai > 12:
+            return _build(_expand_year(c, today), bi, ai)
+        return _build(_expand_year(c, today), ai, bi)
+
+    # Genuinely ambiguous: YY-MM-DD against MM/DD/YY (or DD/MM/YY).
+    year_first = _expand_year(a, today)
+    year_last = _expand_year(c, today)
+    ymd = _build(year_first, bi, ci)
+    if ai > 12:                                   # a can't be a month -> DD/MM/YY
+        other = _build(year_last, bi, ai)
+    elif bi > 12:                                 # b can't be a month -> MM/DD/YY
+        other = _build(year_last, ai, bi)
+    else:
+        other = _build(year_last, ai, bi)
+
+    ymd_ok = bool(ymd) and _plausible_year(year_first, today)
+    other_ok = bool(other) and _plausible_year(year_last, today)
+    if ymd_ok:
+        return ymd
+    if other_ok:
+        return other
+    return ymd or other
+
+
+def _normalize_dates(data: dict) -> dict:
+    """Re-derive `receipt_date` as YYYY-MM-DD from the raw printed string.
+
+    The raw transcription wins when it parses, because it is the field the model
+    only had to copy. `receipt_date` is used as the fallback (and is itself
+    re-parsed, so a model answer of "14/06/2026" in an ISO-labelled field is still
+    fixed). Both end up None when neither can be read, so a bad date is visible as
+    missing instead of silently wrong."""
+    raw = _clean_str(data.get("receipt_date_raw"))
+    stated = _clean_str(data.get("receipt_date"))
+    parsed = normalize_receipt_date(raw) or normalize_receipt_date(stated)
+    data["receipt_date"] = parsed
+    data["receipt_date_raw"] = raw or stated
+    return data
 
 
 # --------------------------------------------------------------------------- #
@@ -609,6 +1089,220 @@ def _fix_payment_fields(data: dict) -> dict:
 
 
 # --------------------------------------------------------------------------- #
+# Item-block coverage — "was the item area actually read?"
+# --------------------------------------------------------------------------- #
+# A receipt whose items were half-read looks exactly like one with few items:
+# some rows, a total, no error anywhere. The ledger then carries a purchase whose
+# lines don't account for the money, and nothing says so. This is the field that
+# says so. It combines what the model reports about its own reading (rule 14b:
+# how many product lines it counted, and whether it read the block start to end)
+# with checks we can make ourselves (does every row carry an amount, do the rows
+# add up to a printed figure). The model's self-report is treated as evidence,
+# never as proof — a `true` with a count that disagrees with the rows still comes
+# out "incomplete".
+def _as_bool(value) -> bool | None:
+    """Read a model's boolean, which may arrive as a string ("true"/"yes")."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return bool(value)
+    s = _clean_str(value)
+    if s is None:
+        return None
+    low = s.lower()
+    if low in ("true", "yes", "y", "1", "complete", "verified"):
+        return True
+    if low in ("false", "no", "n", "0", "incomplete", "partial", "unverified"):
+        return False
+    return None
+
+
+def _normalize_item_report(data: dict) -> dict:
+    """Coerce the model's self-report (rule 14b) to the types the schema expects.
+
+    `items_printed_count` arrives as "12", 12.0 or "twelve or so"; whatever a
+    small model felt like emitting for `items_section_verified` ("yes", "true",
+    1) has to become a real bool or None. Doing it here means schema validation
+    never rejects a whole extraction over the shape of a self-report — losing a
+    correctly read receipt because its line count came back as a string would be
+    a far worse outcome than losing the count."""
+    if "items_printed_count" in data:
+        count = _num(data.get("items_printed_count"))
+        data["items_printed_count"] = (
+            int(round(count)) if count is not None and count >= 0 else None
+        )
+    if "items_section_verified" in data:
+        data["items_section_verified"] = _as_bool(data.get("items_section_verified"))
+    return data
+
+
+def assess_item_coverage(data: dict) -> dict:
+    """Report how completely the receipt's item block was transcribed.
+
+    `status` is the headline:
+      * "complete"    — the rows add up to a printed figure and/or match the
+                        model's own count of the printed lines, and every row has
+                        an amount.
+      * "incomplete"  — hard evidence that lines are missing or half-read: the
+                        model counted more printed lines than it returned, a row
+                        came back with no amount, or the rows don't reach the
+                        printed subtotal/total.
+      * "unverified"  — rows were extracted but there is nothing to check them
+                        against: no subtotal, no total, and no printed count.
+      * "empty"       — no line items at all.
+    The rest of the dict is the evidence behind that word, so the UI can show why
+    and a later eval can count statuses instead of parsing prose.
+    """
+    items = [i for i in (data.get("items") or []) if isinstance(i, dict)]
+    extracted = len(items)
+    amounts = [a for a in (_num(i.get("amount")) for i in items) if a is not None]
+    unpriced = extracted - len(amounts)
+    items_sum = round(sum(amounts), 2) if amounts else None
+
+    reported = _num(data.get("items_printed_count"))
+    reported = int(round(reported)) if reported is not None and reported >= 0 else None
+    model_verified = _as_bool(data.get("items_section_verified"))
+
+    subtotal = _num(data.get("subtotal"))
+    total = _num(data.get("total_amount"))
+    discount = _num(data.get("discount")) or 0.0
+    checked_against: str | None = None
+    sum_matches: bool | None = None
+    if items_sum is not None and subtotal is not None and subtotal > 0:
+        checked_against = "subtotal"
+        sum_matches = abs(items_sum - subtotal) <= _tolerance(subtotal)
+    elif items_sum is not None and total is not None and total > 0:
+        # No printed subtotal: the total is the next best anchor, allowing for a
+        # discount applied between the lines and the bottom line.
+        checked_against = "total"
+        tol = _tolerance(total)
+        sum_matches = (abs(items_sum - total) <= tol
+                       or abs(items_sum - discount - total) <= tol)
+
+    reasons: list[str] = []
+    if reported is not None and reported > extracted:
+        reasons.append(
+            f"The model counted {reported} printed line(s) but returned {extracted}."
+        )
+    elif reported is not None and reported < extracted:
+        reasons.append(
+            f"The model returned {extracted} row(s) for {reported} printed line(s)."
+        )
+    if unpriced:
+        reasons.append(f"{unpriced} line item(s) came back without an amount.")
+    if sum_matches is False:
+        reasons.append(
+            f"The line items add up to {items_sum:,.2f}, which doesn't reach the "
+            f"printed {checked_against}."
+        )
+    if model_verified is False:
+        reasons.append("The model reported it did not read the whole item block.")
+
+    # Objective evidence — things we can see for ourselves, independent of what
+    # the model claims about its own reading.
+    hard_evidence = bool(
+        (reported is not None and reported != extracted) or unpriced or sum_matches is False
+    )
+    if extracted == 0:
+        status = "empty"
+    elif hard_evidence or model_verified is False:
+        status = "incomplete"
+    elif sum_matches is True or (reported == extracted and model_verified is True):
+        status = "complete"
+    else:
+        status = "unverified"
+
+    return {
+        "status": status,
+        "complete": status == "complete",
+        "extracted_count": extracted,
+        "reported_count": reported,
+        "unpriced_count": unpriced,
+        "items_sum": items_sum,
+        "checked_against": checked_against,
+        "sum_matches": sum_matches,
+        "model_verified": model_verified,
+        "reasons": reasons,
+    }
+
+
+def _item_key(item: dict) -> str:
+    return re.sub(r"[^a-z0-9]", "", str(item.get("description") or "").lower())
+
+
+def _covers(candidate: list[dict], current: list[dict]) -> bool:
+    """True when `candidate` contains at least as many of every named row as
+    `current` — i.e. it is a re-read that ADDS lines rather than a different,
+    contradictory reading of the same block."""
+    have: dict[str, int] = {}
+    for item in candidate:
+        key = _item_key(item)
+        have[key] = have.get(key, 0) + 1
+    need: dict[str, int] = {}
+    for item in current:
+        key = _item_key(item)
+        need[key] = need.get(key, 0) + 1
+    return all(have.get(key, 0) >= count for key, count in need.items())
+
+
+def merge_recovered_items(data: dict, candidate) -> dict:
+    """Adopt a second-pass re-read of the item block, but only when it is
+    demonstrably better than what the first pass produced.
+
+    "Better" is decided against the receipt's own figures, never against row
+    count alone — a longer list can just as easily be a model repeating itself.
+    The re-read wins when its rows reach a printed anchor (the subtotal, or the
+    total plus any discount) that the first list missed — and even then only if it
+    is no shorter than the first list, so a single lucky row equal to the subtotal
+    can never displace eight real ones. With no anchor to judge by, it wins only
+    when it CONTAINS the whole first list and is longer, so a re-read can add the
+    lines that were missed but can never quietly swap in a different set of items.
+    """
+    if not isinstance(candidate, list):
+        return data
+    cand = [i for i in candidate if isinstance(i, dict)]
+    cand = _dedupe_items(_clean_items({"items": cand}))["items"]
+    cand = [i for i in cand
+            if _clean_str(i.get("description")) or _num(i.get("amount")) is not None]
+    if not cand:
+        return data
+
+    current = [i for i in (data.get("items") or []) if isinstance(i, dict)]
+    if not current:
+        data["items"] = cand
+        return data
+
+    def _total(items: list[dict]) -> float | None:
+        amounts = [a for a in (_num(i.get("amount")) for i in items) if a is not None]
+        return round(sum(amounts), 2) if amounts else None
+
+    anchor = _num(data.get("subtotal"))
+    if anchor is None or anchor <= 0:
+        total = _num(data.get("total_amount"))
+        discount = _num(data.get("discount")) or 0.0
+        anchor = round(total + discount, 2) if total is not None and total > 0 else None
+
+    sum_current, sum_candidate = _total(current), _total(cand)
+    covers = _covers(cand, current)
+
+    if anchor is not None:
+        tol = _tolerance(anchor)
+        current_ok = sum_current is not None and abs(sum_current - anchor) <= tol
+        candidate_ok = sum_candidate is not None and abs(sum_candidate - anchor) <= tol
+        if candidate_ok and not current_ok and len(cand) >= len(current):
+            data["items"] = cand
+        elif not current_ok and not candidate_ok and covers and len(cand) > len(current):
+            # Neither reaches the anchor, so both are short — the longer read that
+            # contains the other is still strictly more of the receipt.
+            data["items"] = cand
+        return data
+
+    if covers and len(cand) > len(current):
+        data["items"] = cand
+    return data
+
+
+# --------------------------------------------------------------------------- #
 # Reconciliation
 # --------------------------------------------------------------------------- #
 def reconcile(data: dict) -> list[str]:
@@ -844,6 +1538,67 @@ def audit_receipt(data: dict) -> list[dict]:
                 "negative_line_item", "warning",
                 f"\"{name}\" reads {cur}{amount:,.2f} — a negative line item.",
                 found=amount,
+            ))
+
+    # ---- 9. was the item block read all the way through? ------------------- #
+    # The arithmetic checks above only fire when the receipt printed a figure to
+    # check against. This one uses the model's own account of its reading, so a
+    # receipt with no subtotal and no total — the case where a dropped line is
+    # otherwise undetectable — still reports a partial read.
+    coverage = assess_item_coverage(data)
+    counted, got = coverage["reported_count"], coverage["extracted_count"]
+    if counted is not None and counted != got:
+        findings.append(_finding(
+            "items_incomplete", "error",
+            f"The item block holds {counted} printed line(s) but {got} were "
+            f"extracted — {abs(counted - got)} line(s) "
+            f"{'missing' if counted > got else 'too many'}.",
+            expected=counted, found=got,
+        ))
+    if coverage["unpriced_count"]:
+        findings.append(_finding(
+            "items_incomplete", "error",
+            f"{coverage['unpriced_count']} line item(s) were read without an "
+            f"amount, so the item total is short by an unknown figure.",
+            expected=got, found=got - coverage["unpriced_count"],
+        ))
+    if coverage["model_verified"] is False and coverage["status"] != "empty":
+        findings.append(_finding(
+            "items_unverified", "warning",
+            "The model reported it could not confirm it read the item block from "
+            "the first line to the last, so a line may be missing.",
+        ))
+
+    # ---- 10. the transaction date ----------------------------------------- #
+    # Only reported when there IS a date to judge: an absent date is handled as a
+    # missing field, not as a failed check (a warning on every dateless receipt
+    # would train the user to ignore all of them).
+    raw_date = _clean_str(data.get("receipt_date_raw"))
+    iso_date = _clean_str(data.get("receipt_date"))
+    if raw_date and not iso_date:
+        findings.append(_finding(
+            "date_unreadable", "warning",
+            f"The printed date \"{raw_date}\" could not be read as a calendar date.",
+        ))
+    elif iso_date:
+        parsed = normalize_receipt_date(iso_date)
+        today = _date.today()
+        if parsed is None:
+            findings.append(_finding(
+                "date_unreadable", "warning",
+                f"The receipt date \"{iso_date}\" is not a valid calendar date.",
+            ))
+        elif parsed > today.isoformat():
+            findings.append(_finding(
+                "date_implausible", "warning",
+                f"The receipt date {parsed} is in the future — it may be a "
+                f"valid-until or expiry date, or the day and month may be swapped.",
+            ))
+        elif int(parsed[:4]) < today.year - _DATE_LOOKBACK_YEARS:
+            findings.append(_finding(
+                "date_implausible", "warning",
+                f"The receipt date {parsed} is more than {_DATE_LOOKBACK_YEARS} "
+                f"years old — the year was probably misread.",
             ))
 
     return findings

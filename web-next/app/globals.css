@@ -1029,6 +1029,13 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance:none; margi
 .due-badge.today { background:color-mix(in srgb, var(--accent) 14%, transparent); color:var(--accent); }
 .status-pill { font-size:11px; font-weight:600; padding:2px 9px; border-radius:20px; background:color-mix(in srgb, var(--positive) 14%, transparent); color:var(--positive); }
 .status-pill.warn { background:color-mix(in srgb, var(--negative) 14%, transparent); color:var(--negative); }
+/* Neither good nor bad: "we could not check this". Reads as quiet on purpose —
+   an unverifiable item list is not a fault of the receipt. */
+.status-pill.muted { background:var(--sunken); color:var(--ink-3); }
+/* Spelled out under the list as well as in the pill's tooltip: the one state a
+   user has to act on is a list that may be missing lines, and a tooltip alone is
+   invisible on a phone. */
+.items-coverage-note { margin:12px 0 0; font-size:12.5px; line-height:1.5; color:var(--ink-2); }
 
 .plan-list { display:flex; flex-direction:column; gap:0; }
 .plan-row { display:flex; align-items:center; gap:14px; padding:14px 4px; border-bottom:1px solid var(--border); }

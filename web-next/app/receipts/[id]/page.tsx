@@ -66,6 +66,30 @@ export default function ReceiptDetail() {
       .catch(() => setAccounts([]));
   }, []);
 
+  // The stored verdict on how completely the item block was transcribed
+  // (receipts.items_status, written by extraction.assess_item_coverage). Null on
+  // receipts saved before that column existed, which render as they always did.
+  const coverage = (() => {
+    const status = receipt?.items_status as string | undefined;
+    if (!status) return null;
+    const printed = receipt?.items_printed_count as number | null | undefined;
+    const counted = typeof printed === "number" ? ` of ${printed} printed` : "";
+    switch (status) {
+      case "complete":
+        return { tone: "", label: "All lines captured",
+                 hint: `${items.length} line${items.length === 1 ? "" : "s"}${counted}, and they account for the receipt's own total.` };
+      case "incomplete":
+        return { tone: "warn", label: "Lines may be missing",
+                 hint: `Only ${items.length} line${items.length === 1 ? "" : "s"}${counted} were read, or they don't add up to the printed total. Check the receipt image before trusting this list.` };
+      case "empty":
+        return { tone: "warn", label: "No lines captured",
+                 hint: "The item block was not read at all." };
+      default:
+        return { tone: "muted", label: "Not verified",
+                 hint: "The receipt printed no subtotal or total to check these lines against, so we can't confirm they are all here." };
+    }
+  })();
+
   const accountName = (accountId: any) => {
     if (accountId === null || accountId === undefined || accountId === "") return null;
     const a = accounts.find((x) => String(x.id) === String(accountId));
@@ -203,27 +227,44 @@ export default function ReceiptDetail() {
               </table>
             </div>
 
-            {items.length > 0 && (
+            {(items.length > 0 || coverage) && (
               <div className="card">
-                <div className="card-head"><p className="card-title">Line items</p></div>
-                <table className="val-table items">
-                  <thead>
-                    <tr>
-                      <th>Description</th>
-                      <th className="num">Qty</th>
-                      <th className="num">Amount</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {items.map((it, i) => (
-                      <tr key={i}>
-                        <td>{it.description || "Item"}</td>
-                        <td className="num">{it.quantity ?? ""}</td>
-                        <td className="num">{money(it.amount ?? it.unit_price ?? 0, receipt.currency)}</td>
+                <div className="card-head">
+                  <p className="card-title">Line items</p>
+                  {/* Whether the item block was read end to end, decided at
+                      extraction time (extraction.assess_item_coverage). Without
+                      it a half-read receipt looks exactly like a short one. */}
+                  {coverage && (
+                    <span className={`status-pill ${coverage.tone}`} title={coverage.hint}>
+                      {coverage.label}
+                    </span>
+                  )}
+                </div>
+                {items.length > 0 ? (
+                  <table className="val-table items">
+                    <thead>
+                      <tr>
+                        <th>Description</th>
+                        <th className="num">Qty</th>
+                        <th className="num">Amount</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {items.map((it, i) => (
+                        <tr key={i}>
+                          <td>{it.description || "Item"}</td>
+                          <td className="num">{it.quantity ?? ""}</td>
+                          <td className="num">{money(it.amount ?? it.unit_price ?? 0, receipt.currency)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                ) : (
+                  <p className="empty-note">No line items were read from this receipt.</p>
+                )}
+                {coverage?.tone === "warn" && (
+                  <p className="items-coverage-note">{coverage.hint}</p>
+                )}
               </div>
             )}
           </>

@@ -88,7 +88,7 @@ Consumed by application code (`core.py`):
 | `OCR_JPEG_QUALITY` | `88` | — | Re-encode quality |
 | `OCR_PDF_RENDER_SCALE` | `2.0` (~144 DPI) | — | PDF rasterization |
 | `OCR_PDF_MAX_PAGES` | `1000` | — | PDF page ceiling |
-| `OCR_NUM_CTX` | `8192` | — | Ollama context |
+| `OCR_NUM_CTX` | `16384` | — | Ollama context: prompt (~5,200 tok) + image + output, truncated from the START on overflow |
 | `OCR_NUM_PREDICT` | `4096` | — | Max output tokens — **README says `1024`; README is stale** |
 | `OCR_CONCURRENCY` | `3` | `3` | Parallel vision calls per batch |
 | `OLLAMA_KEEP_ALIVE` | `30m` | `30m` | Model residency |
@@ -156,7 +156,10 @@ Code-derived, not proposals. Use these instead of copying numbers from lecture e
 | Ledger base currency | `LEDGER_BASE_CURRENCY`, default `PHP` | `core.LEDGER_BASE_CURRENCY` |
 | Audit tolerance | `max(₱1.00, amount × 2%)` | `extraction.AUDIT_ABS_TOLERANCE` / `AUDIT_REL_TOLERANCE` |
 | Audit VAT rate | `0.12` | `extraction.VAT_RATE` |
-| Audit finding codes | `items_vs_subtotal`, `items_vs_total`, `sales_breakdown_vs_subtotal`, `vat_rate`, `subtotal_vs_total`, `payment_vs_total`, `line_item_math`, `negative_total`, `negative_line_item` | `extraction.audit_receipt` |
+| Audit finding codes | `items_vs_subtotal`, `items_vs_total`, `sales_breakdown_vs_subtotal`, `vat_rate`, `subtotal_vs_total`, `payment_vs_total`, `line_item_math`, `negative_total`, `negative_line_item`, `items_incomplete`, `items_unverified`, `date_unreadable`, `date_implausible` | `extraction.audit_receipt` |
+| Item-coverage statuses | `complete` · `incomplete` · `unverified` · `empty` — stored in `receipts.items_status` | `extraction.assess_item_coverage` |
+| Date ordering | printed date parsed in Python, not by the model: spelled month → 4-digit year → component >12 → year-first (`26-06-14` = 14 Jun 2026); a trailing 4-digit year falls back to MONTH/DAY/YEAR | `extraction.normalize_receipt_date` |
+| Second-pass recovery | `OCR_RECOVERY_PASS`, default on; re-asks only for empty fields / a half-read item block, and may only FILL nulls | `core._recover_missing_fields` |
 | Repeat-call guard | cached on 1st repeat; force-finalize at `repeats >= 2` | `core.py:2963` |
 | History window | ≤30 messages, ≤1200 chars each, **≤8000 chars total** (the binding constraint), newest-first | `core._format_history` |
 | History placement | fenced, immediately before `Begin. Question:` — ~330 chars, not 2,368 behind the worked examples | `core._REACT_PROMPT` |

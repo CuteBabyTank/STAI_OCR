@@ -5,15 +5,28 @@ Bench Boutique and Uniqlo receipts, so a passing test means the pipeline handles
 what the model actually emits — not a hand-idealized version of it.
 """
 
+from datetime import date
+
 from extraction import (
+    _clean_str,
     _dedupe_items,
     _fix_payment_fields,
+    _normalize_blank_fields,
+    _normalize_dates,
+    _normalize_item_report,
     _remap_summary_lines,
+    assess_item_coverage,
     audit_receipt,
+    build_recovery_prompt,
+    merge_recovered_items,
+    missing_fields,
+    normalize_receipt_date,
     undo_vat_added_to_total,
     undo_discount_omitted_from_total,
     vat_is_inside_subtotal,
 )
+
+TODAY = date(2026, 8, 4)  # fixed, so the ambiguous-date rules are deterministic
 
 
 def _items(*rows):
@@ -231,3 +244,285 @@ def test_summary_line_moved_out_of_items():
     out = _remap_summary_lines(data)
     assert len(out["items"]) == 1
     assert out["vat_amount"] == 104.14
+
+
+# --------------------------------------------------------------------------- #
+# normalize_receipt_date — the ISO date is derived here, not by the model
+# --------------------------------------------------------------------------- #
+def test_iso_and_spelled_dates_read_as_printed():
+    for printed, expected in [
+        ("2026-06-14", "2026-06-14"),
+        ("2026/6/4", "2026-06-04"),
+        ("20260614", "2026-06-14"),
+        ("14 JUN 2026", "2026-06-14"),
+        ("JUN 14, 2026", "2026-06-14"),
+        ("JUNE 14 2026", "2026-06-14"),
+        ("2026-JUN-14", "2026-06-14"),
+    ]:
+        assert normalize_receipt_date(printed, TODAY) == expected, printed
+
+
+def test_a_component_over_twelve_is_the_day():
+    assert normalize_receipt_date("25/06/2026", TODAY) == "2026-06-25"
+    assert normalize_receipt_date("14/06/2026", TODAY) == "2026-06-14"
+
+
+def test_a_year_first_date_keeps_its_order():
+    """The format these receipts print most often. "26-06-14" must not come back
+    as 2014-06-26 or as June 26th."""
+    assert normalize_receipt_date("26-06-14", TODAY) == "2026-06-14"
+    assert normalize_receipt_date("26/08/04", TODAY) == "2026-08-04"
+
+
+def test_an_all_short_date_falls_back_when_the_year_first_reading_is_implausible():
+    """"08/04/26" can only be month-first: reading it year-first dates the receipt
+    to 2008, which is not a receipt anyone is filing."""
+    assert normalize_receipt_date("08/04/26", TODAY) == "2026-08-04"
+    assert normalize_receipt_date("14-06-26", TODAY) == "2026-06-14"
+
+
+def test_a_trailing_four_digit_year_keeps_the_month_day_fallback():
+    """A 4-digit year at the end rules out year-month-day, so the documented
+    Philippine/US convention applies: 03/08/2026 is 8 March."""
+    assert normalize_receipt_date("03/08/2026", TODAY) == "2026-03-08"
+
+
+def test_times_and_day_names_are_stripped():
+    assert normalize_receipt_date("06/14/26 14:32", TODAY) == "2026-06-14"
+    assert normalize_receipt_date("Wed 14/06/26", TODAY) == "2026-06-14"
+    assert normalize_receipt_date("06-14-2026 3:45 PM", TODAY) == "2026-06-14"
+
+
+def test_an_unreadable_date_is_none_not_a_guess():
+    for printed in ("", "N/A", "not printed", "31/02/2026", "June", None):
+        assert normalize_receipt_date(printed, TODAY) is None, printed
+
+
+def test_the_raw_printed_date_wins_over_the_models_own_iso_answer():
+    """The model only had to copy the raw string; the ISO field is where it does
+    the reordering that goes wrong. Here it read "14/06/26" and answered 2014."""
+    out = _normalize_dates({"receipt_date": "2014-06-26", "receipt_date_raw": "14/06/26"})
+    assert out["receipt_date"] == "2026-06-14"
+    assert out["receipt_date_raw"] == "14/06/26"
+
+
+def test_a_non_iso_date_in_the_iso_field_is_still_parsed():
+    out = _normalize_dates({"receipt_date": "14/06/2026", "receipt_date_raw": None})
+    assert out["receipt_date"] == "2026-06-14"
+
+
+def test_an_unparseable_date_is_reported_missing_rather_than_wrong():
+    out = _normalize_dates({"receipt_date": "31/02/2026", "receipt_date_raw": "31/02/2026"})
+    assert out["receipt_date"] is None
+    assert out["receipt_date_raw"] == "31/02/2026"   # kept for the audit to name
+
+
+def test_audit_flags_a_date_it_could_not_read():
+    codes = {f["code"] for f in audit_receipt(
+        {"receipt_date_raw": "31/02/2026", "receipt_date": None})}
+    assert "date_unreadable" in codes
+
+
+def test_audit_flags_a_future_date():
+    codes = {f["code"] for f in audit_receipt({"receipt_date": "2099-01-01"})}
+    assert "date_implausible" in codes
+
+
+# --------------------------------------------------------------------------- #
+# Placeholders — "" / "N/A" / "-" are missing values, not values
+# --------------------------------------------------------------------------- #
+def test_placeholder_strings_become_null():
+    for value in ("", "  ", "N/A", "n/a", "-", "---", "none", "NULL", "unknown",
+                  "not printed", "xxx", "...", "?"):
+        assert _clean_str(value) is None, value
+
+
+def test_a_short_real_value_is_not_mistaken_for_a_placeholder():
+    assert _clean_str("X") == "X"
+    assert _clean_str("0") == "0"
+    assert _clean_str("  Jollibee   Inc ") == "Jollibee Inc"
+
+
+def test_blank_fields_are_nulled_and_the_currency_normalized():
+    out = _normalize_blank_fields({
+        "vendor_name": "Pepper Lunch", "vendor_tin": "N/A", "vendor_address": "",
+        "receipt_number": "-", "currency": "₱",
+        "items": [{"description": "  Ramen  ", "amount": 545.0},
+                  {"description": "N/A", "amount": 120.0}],
+    })
+    assert out["vendor_tin"] is None
+    assert out["vendor_address"] is None
+    assert out["receipt_number"] is None
+    assert out["vendor_name"] == "Pepper Lunch"
+    assert out["currency"] == "PHP"
+    assert out["items"][0]["description"] == "Ramen"
+    assert out["items"][1]["description"] is None
+
+
+def test_missing_fields_lists_placeholders_as_missing():
+    data = {"vendor_name": "Mart", "vendor_tin": "N/A", "total_amount": None}
+    assert missing_fields(data, ("vendor_name", "vendor_tin", "total_amount")) == [
+        "vendor_tin", "total_amount"]
+
+
+# --------------------------------------------------------------------------- #
+# assess_item_coverage — the "was the item block actually read?" verdict
+# --------------------------------------------------------------------------- #
+def _read(items, **overrides):
+    data = {"items": items}
+    data.update(overrides)
+    return data
+
+
+def test_items_that_reach_the_subtotal_are_complete():
+    out = assess_item_coverage(_read(
+        _items(("Rice", 1, 300.0, 300.0), ("Oil", 2, 100.0, 200.0)),
+        subtotal=500.0, items_printed_count=2, items_section_verified=True))
+    assert out["status"] == "complete"
+    assert out["sum_matches"] is True and out["checked_against"] == "subtotal"
+
+
+def test_a_short_item_list_is_incomplete():
+    out = assess_item_coverage(_read(_items(("Rice", 1, 300.0, 300.0)),
+                                     subtotal=500.0))
+    assert out["status"] == "incomplete"
+    assert out["reasons"]
+
+
+def test_a_printed_count_higher_than_the_rows_is_incomplete():
+    """The check that works with no subtotal and no total — the case where a
+    dropped line is otherwise undetectable."""
+    out = assess_item_coverage(_read(_items(("Rice", 1, 300.0, 300.0)),
+                                     items_printed_count=7))
+    assert out["status"] == "incomplete"
+    assert out["reported_count"] == 7 and out["extracted_count"] == 1
+
+
+def test_a_row_with_no_amount_is_incomplete():
+    out = assess_item_coverage(_read(_items(("Rice", 1, 300.0, 300.0),
+                                            ("Oil", None, None, None))))
+    assert out["status"] == "incomplete"
+    assert out["unpriced_count"] == 1
+
+
+def test_items_with_nothing_to_check_against_are_unverified_not_complete():
+    """Silence is not confirmation: with no subtotal, no total and no count, we
+    cannot say the block was fully read — and must not imply it was."""
+    out = assess_item_coverage(_read(_items(("Rice", 1, 300.0, 300.0))))
+    assert out["status"] == "unverified"
+    assert out["complete"] is False
+
+
+def test_no_items_at_all_is_empty():
+    assert assess_item_coverage({"items": []})["status"] == "empty"
+    assert assess_item_coverage({})["status"] == "empty"
+
+
+def test_a_model_claim_of_completeness_cannot_override_the_arithmetic():
+    out = assess_item_coverage(_read(_items(("Rice", 1, 300.0, 300.0)),
+                                     subtotal=500.0, items_printed_count=1,
+                                     items_section_verified=True))
+    assert out["status"] == "incomplete"
+
+
+def test_the_self_report_is_coerced_from_whatever_the_model_emits():
+    out = _normalize_item_report({"items_printed_count": "7",
+                                  "items_section_verified": "yes"})
+    assert out["items_printed_count"] == 7
+    assert out["items_section_verified"] is True
+    junk = _normalize_item_report({"items_printed_count": "lots",
+                                   "items_section_verified": "maybe"})
+    assert junk["items_printed_count"] is None
+    assert junk["items_section_verified"] is None
+
+
+def test_audit_reports_a_partially_read_item_block():
+    findings = {f["code"]: f for f in audit_receipt(
+        _read(_items(("Rice", 1, 300.0, 300.0)), items_printed_count=7))}
+    assert findings["items_incomplete"]["severity"] == "error"
+    assert findings["items_incomplete"]["expected"] == 7
+
+
+def test_audit_reports_the_models_own_doubt_as_a_warning_only():
+    """An unconfirmed read is worth showing, but on its own it is not evidence
+    that anything is wrong — it must not hold up an otherwise clean receipt."""
+    findings = {f["code"]: f for f in audit_receipt(
+        _read(_items(("Rice", 1, 300.0, 300.0)), subtotal=300.0,
+              items_printed_count=1, items_section_verified=False))}
+    assert findings["items_unverified"]["severity"] == "warning"
+    assert "items_incomplete" not in findings
+
+
+def test_audit_stays_silent_on_a_receipt_that_reports_nothing_about_its_items():
+    """Most receipts arrive with no self-report at all. A finding on every one of
+    them would train the user to ignore the ones that matter."""
+    codes = {f["code"] for f in audit_receipt(
+        _read(_items(("Rice", 1, 300.0, 300.0)), subtotal=300.0))}
+    assert "items_incomplete" not in codes and "items_unverified" not in codes
+
+
+# --------------------------------------------------------------------------- #
+# merge_recovered_items — a second look may add lines, never swap them out
+# --------------------------------------------------------------------------- #
+def test_a_re_read_that_reaches_the_subtotal_replaces_a_short_list():
+    data = _read(_items(("Rice", 1, 300.0, 300.0)), subtotal=500.0)
+    out = merge_recovered_items(data, _items(("Rice", 1, 300.0, 300.0),
+                                             ("Oil", 2, 100.0, 200.0)))
+    assert [i["description"] for i in out["items"]] == ["Rice", "Oil"]
+
+
+def test_a_shorter_re_read_never_displaces_the_first_list():
+    """One lucky row equal to the subtotal must not delete the real ones."""
+    data = _read(_items(("Rice", 1, 300.0, 300.0), ("Oil", 2, 100.0, 200.0)),
+                 subtotal=500.0)
+    out = merge_recovered_items(data, _items(("Groceries", None, None, 500.0)))
+    assert [i["description"] for i in out["items"]] == ["Rice", "Oil"]
+
+
+def test_a_re_read_that_agrees_with_the_receipt_is_not_replaced():
+    data = _read(_items(("Rice", 1, 300.0, 300.0), ("Oil", 2, 100.0, 200.0)),
+                 subtotal=500.0)
+    out = merge_recovered_items(data, _items(("Rice", 1, 300.0, 300.0)))
+    assert len(out["items"]) == 2
+
+
+def test_with_no_anchor_only_a_re_read_containing_the_first_list_wins():
+    data = _read(_items(("Rice", 1, 300.0, 300.0)))
+    kept = merge_recovered_items(dict(data), _items(("Sugar", 1, 50.0, 50.0),
+                                                    ("Flour", 1, 40.0, 40.0)))
+    assert [i["description"] for i in kept["items"]] == ["Rice"]
+    grown = merge_recovered_items(dict(data), _items(("Rice", 1, 300.0, 300.0),
+                                                     ("Sugar", 1, 50.0, 50.0)))
+    assert [i["description"] for i in grown["items"]] == ["Rice", "Sugar"]
+
+
+def test_an_empty_first_list_takes_whatever_the_re_read_found():
+    out = merge_recovered_items(_read([]), _items(("Rice", 1, 300.0, 300.0)))
+    assert len(out["items"]) == 1
+
+
+def test_a_re_read_that_returns_nothing_leaves_the_first_list_alone():
+    data = _read(_items(("Rice", 1, 300.0, 300.0)))
+    for junk in ([], None, "no items", [{}]):
+        assert len(merge_recovered_items(dict(data), junk)["items"]) == 1
+
+
+# --------------------------------------------------------------------------- #
+# build_recovery_prompt — the focused second-pass question
+# --------------------------------------------------------------------------- #
+def test_the_recovery_prompt_asks_only_for_what_is_missing():
+    prompt = build_recovery_prompt(["vendor_tin", "change"], False,
+                                   {"vendor_name": "Pepper Lunch"})
+    assert "vendor_tin" in prompt and "change" in prompt
+    assert "subtotal" not in prompt.split("RULES")[0]
+    assert "Pepper Lunch" in prompt          # context, so it knows the receipt
+    assert "items" not in prompt.split("RULES")[-1]
+
+
+def test_the_recovery_prompt_asks_for_the_item_block_when_it_was_half_read():
+    prompt = build_recovery_prompt([], True, {})
+    assert "items" in prompt and "items_printed_count" in prompt
+
+
+def test_there_is_no_recovery_prompt_when_nothing_is_missing():
+    assert build_recovery_prompt([], False, {"vendor_name": "Mart"}) == ""
