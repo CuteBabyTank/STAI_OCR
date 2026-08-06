@@ -1781,6 +1781,13 @@ def init_db() -> None:
             # Provenance: it is what distinguishes "two receipts read from two
             # different photos" from "the same file filed twice".
             ("image_sha256", "TEXT"),
+            # How this row got here. NULL = read from an image by the vision model;
+            # "chat" = the user told the assistant what they spent (log_manual_receipt).
+            # Kept so a figure the model READ is never confused with one a human
+            # ASSERTED: a chat row has no image behind it and no measured confidence,
+            # so "unverified" means something different for it than for a low-scoring
+            # OCR read.
+            ("entry_source", "TEXT"),
         ]
 
         for col_name, col_type in columns_to_add:
@@ -1803,14 +1810,18 @@ def init_db() -> None:
 
 
 def save_receipt(data: ReceiptData, source_file: str, flagged: bool,
-                 confidence: dict | None = None, index: bool = True) -> int:
+                 confidence: dict | None = None, index: bool = True,
+                 entry_source: str | None = None) -> int:
     """Persist a receipt + its line items (and its measured confidence) and return
     the new id.
 
     `index=True` also embeds the receipt for semantic search inline. Bulk imports
     pass `index=False` to skip the per-receipt embedding call (a meaningful cost at
     thousands of pages); ensure_index() then backfills the embeddings lazily on the
-    next semantic search, so nothing is lost."""
+    next semantic search, so nothing is lost.
+
+    `entry_source` records how the row got here — None for a vision-model reading,
+    "chat" for one the user dictated (see log_manual_receipt)."""
     init_db()
     overall_conf = (confidence or {}).get("overall")
     field_conf_json = json.dumps(confidence) if confidence else None
@@ -1822,8 +1833,8 @@ def save_receipt(data: ReceiptData, source_file: str, flagged: bool,
                 vat_exempt_sales, zero_rated_sales, vat_amount, discount, discount_type,
                 total_amount, cash, change, currency, category, flagged,
                 confidence, field_confidence, receipt_date_raw, items_status,
-                items_printed_count, image_sha256)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                items_printed_count, image_sha256, entry_source)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 source_file,
@@ -1852,6 +1863,7 @@ def save_receipt(data: ReceiptData, source_file: str, flagged: bool,
                 (data.items_coverage or {}).get("status"),
                 data.items_printed_count,
                 data.image_sha256,
+                entry_source,
             ),
         )
         receipt_id = cur.lastrowid
@@ -1870,6 +1882,39 @@ def save_receipt(data: ReceiptData, source_file: str, flagged: bool,
         except Exception:  # noqa: BLE001
             pass
     return receipt_id
+
+
+def log_manual_receipt(vendor: str | None, amount: float,
+                       category: str | None = None, date: str | None = None,
+                       currency: str | None = None) -> int:
+    """Record spending the user dictated, as a receipt rather than a transaction.
+
+    The Spending overview reads the `receipts` table, so this is what makes
+    "i spent 10k on food in TGI Fridays" show up there. Being a receipt is also
+    what lets it skip the account: a receipt is a record of a purchase, not a
+    movement of money out of a named account, so nothing has to be guessed and no
+    balance moves. `account_id` stays NULL until the user attaches one through the
+    existing post-to-ledger bridge.
+
+    No confidence is stored. Confidence here means "how sure was the model of what
+    it READ", and nothing was read — the user asserted these numbers.
+    """
+    data = ReceiptData(
+        vendor_name=(vendor or None),
+        # `datetime.now().date()`, not `date.today()`: the `date` parameter above
+        # shadows the module-level `date` import for the whole function body.
+        receipt_date=(date or datetime.now().date().isoformat()),
+        subtotal=amount,
+        total_amount=amount,
+        currency=currency,
+        category=category,
+    )
+    # `flagged=False`: a dictated figure has no OCR audit to fail, so flagging it
+    # would put a "needs review" marker on the one kind of row a human already
+    # confirmed. categorize() inside save_receipt still validates `category`
+    # against VALID_CATEGORIES, so an off-taxonomy guess cannot reach the dashboard.
+    return save_receipt(data, source_file=None, flagged=False,
+                        confidence=None, entry_source="chat")
 
 
 def receipts_from_same_image(image_sha256: str | None,
@@ -3572,9 +3617,14 @@ READ-ONLY TOOLS
 
 WRITE TOOLS — these CHANGE the user's data. Action Input is one line of key=value
 pairs separated by semicolons.
-- add_expense: money going OUT.
+- add_expense: money going OUT of a NAMED account.
     amount=1000; account=BDO; category=Food; note=lunch; date=yesterday
   Requires amount and account. Omit date for today.
+- log_spend: the user said what they spent but named NO account. Files it as a
+  receipt so it counts in their spending overview. No account is touched.
+    amount=10000; vendor=TGI Fridays; category=Food; date=yesterday
+  Requires amount only. Use this instead of add_expense whenever no account was
+  mentioned — do NOT ask which account first, and do NOT guess one.
 - add_income: money coming IN. Same fields. The account must be a cash/debit
   account, not a credit card.
     amount=30000; account=BPI; category=Salary
@@ -3630,7 +3680,10 @@ RECORDING vs ASKING — decide this FIRST, before anything else:
 - NEVER use a write tool to answer a question, and never use a read tool to record.
 
 Picking the right WRITE tool:
-- Money left an account for a purchase → add_expense.
+- A purchase, and the user NAMED an account → add_expense.
+- A purchase, and the user named NO account → log_spend. "I spent 10k on food at
+  TGI Fridays" names no account, so it is log_spend, not add_expense. Record it and
+  move on: do not ask which account, and do not pick one for them.
 - Money arrived → add_income.
 - Money moved between two of the user's own accounts → transfer_money. "I moved
   5000 from BPI to Cash" is NOT an expense; nothing was spent.
@@ -3779,8 +3832,21 @@ Final Answer: Recorded 500.00 on your UnionBank Credit card under Other. That ac
 
 Example:
 Question: i spent 300 on groceries
-Thought: They want this recorded but named no account, and which account it hits changes the balances, so I must not pick one.
-Clarification: Which account should I charge the 300 to?
+Thought: A statement of a purchase with no account named. That is log_spend — it files a receipt without touching any account, so nothing has to be guessed.
+Action: log_spend
+Action Input: amount=300; category=groceries
+Observation: Logged receipt #58: 300.00, filed under Food, dated {today}. It counts in the spending overview. No account was charged — say which account to also record it in the ledger.
+Thought: It was recorded.
+Final Answer: Logged 300.00 under Food. Tell me which account it came from if you want it in your ledger too.
+
+Example:
+Question: i spent 10k on food in tgi fridays
+Thought: A purchase with a vendor but no account, so log_spend, and "10k" is 10000.
+Action: log_spend
+Action Input: amount=10000; vendor=TGI Fridays; category=Food
+Observation: Logged receipt #59: 10,000.00 at TGI Fridays, filed under Food, dated {today}. It counts in the spending overview. No account was charged — say which account to also record it in the ledger.
+Thought: It was recorded.
+Final Answer: Logged 10,000.00 at TGI Fridays under Food. Tell me which account it came from if you want it in your ledger too.
 
 Example:
 Question: how much did that cost?
@@ -3915,6 +3981,10 @@ _NEGATIVE_AMOUNT_RE = re.compile(r"-\s*(?:₱|php|\$)?\s*[\d,]", re.I)
 _TOOL_INPUT_KEYS = (
     "amount", "account", "category", "note", "date", "raw", "structured",
     "from", "to", "fee", "type", "action", "target", "name", "due", "delete",
+    # Where the money was spent, for `log_spend`. This is a RECEIPT field (it
+    # becomes `vendor_name`), not an account — the two are easy to conflate and
+    # only one of them can move a balance.
+    "vendor",
 )
 # What a model writes -> the key it means.
 _TOOL_INPUT_ALIASES = {
@@ -3925,6 +3995,8 @@ _TOOL_INPUT_ALIASES = {
     "title": "name", "rename": "name", "goal": "target", "debt": "target",
     "receivable": "target", "plan": "target", "due_date": "due",
     "target_date": "due", "target_amount": "amount", "total_amount": "amount",
+    "merchant": "vendor", "store": "vendor", "shop": "vendor", "place": "vendor",
+    "vendor_name": "vendor", "at": "vendor",
 }
 
 # An explicit calendar date the user or model spelled out, with its year. Handled
@@ -4044,13 +4116,14 @@ def _canonical_tool_key(tool: str, tool_input: str) -> tuple:
     return (tool, *(
         str(p.get(k) or "").strip().lower()
         for k in ("amount", "account", "category", "date", "note", "from", "to",
-                  "fee", "type", "action", "target", "name", "due", "delete")
+                  "fee", "type", "action", "target", "name", "due", "delete",
+                  "vendor")
     ), "" if p["structured"] else p["raw"].strip().lower())
 
 
 _WRITE_TOOL_NAMES = frozenset({
     "add_expense", "add_income", "transfer_money",
-    "record_activity", "create_plan", "update_plan",
+    "record_activity", "create_plan", "update_plan", "log_spend",
 })
 
 
@@ -4236,15 +4309,19 @@ def _resolve_date(parsed: dict) -> str:
             or (finance._parse_date(src) if src else date.today().isoformat()))
 
 
-def _guard_duplicate(fingerprint: tuple, describe: str):
+def _guard_duplicate(fingerprint: tuple, describe: str, kind: str = "txn"):
     """Refuse a write this run has already performed. The loop's text-level repeat
     guard misses a re-phrased duplicate; this keys on what actually reaches the
-    ledger, so no phrasing can slip a second identical entry through."""
+    ledger, so no phrasing can slip a second identical entry through.
+
+    `kind` names what was written, so the id comes back under the key the caller's
+    other payloads use ("txn" -> transaction_id, "receipt" -> receipt_id)."""
     if fingerprint in _EXPENSE_WRITES_THIS_RUN:
         prior = _EXPENSE_WRITES_THIS_RUN[fingerprint]
+        id_key = "receipt_id" if kind == "receipt" else "transaction_id"
         return (f"Already recorded in this turn as #{prior} — {describe}. NOT "
                 "recorded again. Reply now starting with 'Final Answer:'.",
-                {"kind": "txn", "transaction_id": prior, "duplicate": True})
+                {"kind": kind, id_key: prior, "duplicate": True})
     return None
 
 
@@ -4331,6 +4408,63 @@ def _tool_add_expense(tool_input: str, user_text: str = "") -> tuple[str, dict]:
         "occurred_at": occurred_at, "note": note, "balance": balance,
         "currency": currency,
         "currency_mismatch": currency != LEDGER_BASE_CURRENCY,
+    }
+
+
+def _tool_log_spend(tool_input: str, user_text: str = "") -> tuple[str, dict]:
+    """Record spending as a RECEIPT, for when the user named no account.
+
+    The counterpart to `add_expense`, not a replacement for it. `add_expense` moves
+    money out of a named account and therefore refuses to guess which one; that
+    refusal is deliberate and stays. But most people say "i spent 10k on food at
+    TGI Fridays" and never mention an account, and refusing that outright left the
+    spending unrecorded and invisible on the dashboard.
+
+    A receipt is the honest record of that sentence: it says a purchase happened,
+    without claiming to know which account paid. So there is NO account guard here
+    — there is nothing to guess, and no balance moves.
+    """
+    parsed = _parse_expense_input(tool_input)
+
+    amount, refusal = _guard_amount(parsed)
+    if refusal:
+        return refusal
+    receipt_date = _resolve_date(parsed)
+    vendor = parsed.get("vendor") or None
+
+    # NOT _guard_category: that resolves against the finance `categories` table
+    # (Bills, Transport, Entertainment, …), which is a different taxonomy from the
+    # four-way one receipts use. Passing its answer through would store a category
+    # `categorize()` then rejects anyway. `categorize()` is the receipt taxonomy's
+    # own resolver — it validates the stated category and, failing that, infers one
+    # from the vendor name, which is exactly the fallback wanted here.
+    category_name = parsed.get("category") or None
+    fingerprint = ("receipt", amount, vendor, category_name, receipt_date)
+    dup = _guard_duplicate(fingerprint,
+                           f"{amount:,.2f}{f' at {vendor}' if vendor else ''}, "
+                           f"dated {receipt_date}", kind="receipt")
+    if dup:
+        return dup
+
+    receipt_id = log_manual_receipt(
+        vendor=vendor, amount=amount, category=category_name, date=receipt_date,
+    )
+    _EXPENSE_WRITES_THIS_RUN[fingerprint] = receipt_id
+
+    # Read the stored category back rather than echoing the input: save_receipt runs
+    # it through categorize(), so an unstated or off-taxonomy one is resolved there
+    # and the observation must report what was actually filed.
+    stored = get_receipt(receipt_id) or {}
+    filed_category = stored.get("category")
+    where = f" at {vendor}" if vendor else ""
+    obs = (f"Logged receipt #{receipt_id}: {amount:,.2f}{where}, filed under "
+           f"{filed_category}, dated {receipt_date}. It counts in the spending "
+           f"overview. No account was charged — say which account to also record "
+           f"it in the ledger.")
+    return obs, {
+        "kind": "receipt", "action": "log_spend", "receipt_id": receipt_id,
+        "amount": amount, "vendor": vendor, "category": filed_category,
+        "receipt_date": receipt_date,
     }
 
 
@@ -4834,6 +4968,7 @@ def _ungrounded_numbers(answer: str, steps: list[dict], question: str = "") -> s
 # read from here, so a tool can never exist in one and not the others.
 _WRITE_TOOLS = {
     "add_expense": _tool_add_expense,
+    "log_spend": _tool_log_spend,
     "add_income": _tool_add_income,
     "transfer_money": _tool_transfer_money,
     "record_activity": _tool_record_activity,
@@ -5240,7 +5375,10 @@ def agent_stream(question: str, model: str = AGENT_MODEL,
             obs_text, payload = _run_agent_tool(tool, tool_input, model, receipt_ids,
                                                 user_text=user_text)
             seen[key] = obs_text
-            if payload.get("kind") == "txn" and not payload.get("duplicate"):
+            # "receipt" counts as a write as much as "txn" does: log_spend moves no
+            # money, but it inserts a row that every spending panel reads, and the UI
+            # refreshes those panels only when this list is non-empty.
+            if payload.get("kind") in ("txn", "receipt") and not payload.get("duplicate"):
                 writes.append(payload)
             yield {"type": "observation", "tool": tool, "text": obs_text, "data": payload}
             steps.append(

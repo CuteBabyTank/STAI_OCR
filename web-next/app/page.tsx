@@ -4,13 +4,14 @@
 // now lives at /scan; this view is the money overview.
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import type { Account, Analytics, NetWorth, Transaction } from "./lib/types";
+import type { Account, Analytics, Granularity, NetWorth, Transaction } from "./lib/types";
 import { money, signedMoney, fmtDate, acctMeta } from "./lib/format";
 import { listAccounts, getNetWorth, listTransactions } from "./lib/api";
 import { useRefresh } from "./lib/useRefresh";
 import StatTiles from "./components/StatTiles";
 import CashflowChart from "./components/CashflowChart";
 import TopVendors from "./components/TopVendors";
+import PeriodControl from "./components/PeriodControl";
 
 function greeting(hour: number) {
   if (hour < 12) return "Good morning";
@@ -34,6 +35,23 @@ export default function Home() {
   const [greet, setGreet] = useState("Welcome"); // set client-side to avoid SSR/tz mismatch
   const [loading, setLoading] = useState(true);
 
+  // Which month the Spending overview is scoped to. `null` = let the API pick its
+  // default (the latest period with activity), which is what should be on screen
+  // before the user has touched the arrows. Once they step, this holds their choice.
+  const [periodSel, setPeriodSel] = useState<
+    { granularity: Granularity; year: number; month: number } | null
+  >(null);
+
+  const loadAnalytics = useCallback(() => {
+    const qs = periodSel
+      ? `?granularity=${periodSel.granularity}&year=${periodSel.year}&month=${periodSel.month}`
+      : "";
+    fetch(`/api/analytics${qs}`)
+      .then((r) => r.json())
+      .then(setAnalytics)
+      .catch(() => {});
+  }, [periodSel]);
+
   const load = useCallback(() => {
     Promise.all([listAccounts(), getNetWorth(), listTransactions({ limit: 8 })])
       .then(([a, n, t]) => {
@@ -43,12 +61,15 @@ export default function Home() {
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-    // Receipt-based spending analytics (the former Scan dashboard stats).
-    fetch("/api/analytics")
-      .then((r) => r.json())
-      .then(setAnalytics)
-      .catch(() => {});
   }, []);
+
+  // Analytics loads on its own, keyed to the selected period: stepping months must
+  // not re-pull accounts, net worth and transactions, none of which it scopes — and
+  // `load` must not re-pull analytics, or mounting would fetch it twice.
+  useEffect(() => {
+    loadAnalytics();
+  }, [loadAnalytics]);
+  useRefresh(loadAnalytics); // a receipt logged from chat changes these panels too
   useEffect(() => {
     load();
     setName(localStorage.getItem("profile-name") || "");
@@ -171,7 +192,18 @@ export default function Home() {
         {/* Spending overview (receipt analytics — moved here from the scan page) */}
         <div className="card-head" style={{ marginBottom: -6 }}>
           <p className="card-title">Spending overview</p>
-          <Link href="/receipts" className="link">Receipts</Link>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            {/* Scopes the three panels below only. The "This month out/in" cards
+                above stay on the real current month, so their labels stay true. */}
+            {analytics && (
+              <PeriodControl
+                period={analytics.period}
+                monthOnly
+                onChange={(next) => setPeriodSel(next)}
+              />
+            )}
+            <Link href="/receipts" className="link">Receipts</Link>
+          </div>
         </div>
         <StatTiles a={analytics} />
         <div className="band">

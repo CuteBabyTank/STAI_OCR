@@ -93,6 +93,9 @@ evaluation/
     │                                    resuming a clarified request
     ├── test_w2k_account_attribution.py  W2-K — a write may only land on an account
     │                                    the USER named, not one the model invented
+    ├── test_w2l_log_spend.py        W2-L — logging spending from chat as a receipt
+    │                                    when no account was named; reaches the
+    │                                    spending overview, moves no balance
     ├── test_w3_trajectory.py        W3 — the harness itself
     ├── test_w5_retrieval.py         W5 — retrieval mechanism (synthetic vectors)
     ├── test_w6_performance.py       W6 — structural only (no timing assertions)

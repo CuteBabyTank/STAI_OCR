@@ -148,8 +148,9 @@ Code-derived, not proposals. Use these instead of copying numbers from lecture e
 | Constant | Value | Location |
 |---|---|---|
 | `_MAX_AGENT_STEPS` | `4` | `core._MAX_AGENT_STEPS` |
-| Registered tools | read: `sql_ledger`, `search_receipts`, `list_accounts`, `list_plans` · write: `add_expense`, `add_income`, `transfer_money`, `record_activity`, `create_plan`, `update_plan` | `core.KNOWN_TOOLS` |
-| Write-capable tools | `add_expense`, `add_income`, `transfer_money`, `record_activity`, `create_plan`, `update_plan` — every other tool is read-only | `core._WRITE_TOOLS` |
+| Registered tools | read: `sql_ledger`, `search_receipts`, `list_accounts`, `list_plans` · write: `add_expense`, `log_spend`, `add_income`, `transfer_money`, `record_activity`, `create_plan`, `update_plan` | `core.KNOWN_TOOLS` |
+| Write-capable tools | `add_expense`, `log_spend`, `add_income`, `transfer_money`, `record_activity`, `create_plan`, `update_plan` — every other tool is read-only | `core._WRITE_TOOLS` |
+| `log_spend` | Records a purchase as a **receipt** when the user named no account. Writes no transaction and moves no balance, so it needs no account; the row reaches the spending overview because that reads `receipts`. Added 2026-08-06 alongside the ACT-003 revision. | `core._tool_log_spend` |
 | Observation sanitizer | ReAct control tokens and instruction-override phrasing are defanged in all tool output | `core._sanitize_observation` |
 | Grounding guardrail | a data claim with no tool call is replaced; ungrounded figures set `grounded=False` | `core._ungrounded_numbers` |
 | Single-expense ceiling | `ADD_EXPENSE_MAX_AMOUNT`, default `1000000` | `core.ADD_EXPENSE_MAX_AMOUNT` |

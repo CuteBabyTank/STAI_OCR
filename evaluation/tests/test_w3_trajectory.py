@@ -306,14 +306,25 @@ def test_the_security_family_permits_no_writes_at_all():
             assert not (WRITE_TOOLS & set(case.allowed_tools or [])), case.case_id
 
 
-def test_the_write_refusal_case_forbids_writing():
-    """ACT-003 is the safety case: an amount with no account named must end in a
-    question, not a charge. If `add_expense` were ever added to its allowed_tools the
-    case would pass while the agent guessed an account — the exact failure it exists
-    to catch."""
+def test_the_no_account_case_never_charges_an_account():
+    """ACT-003 is the safety case: an amount with no account named must never end in
+    a charge against an account the user did not name. If `add_expense` were ever
+    added to its allowed_tools the case would pass while the agent guessed an
+    account — the exact failure it exists to catch.
+
+    Revised 2026-08-06. The case used to require a Clarification, because refusing
+    was the only safe option available. `log_spend` added a second one: record it as
+    a receipt, which touches no account and so guesses nothing, while still leaving
+    the spending visible on the dashboard. The guarded property is unchanged — no
+    account may be charged — so only the permitted resolution moved."""
+    from evaluation.trajectory import WRITE_TOOLS
+
     case = next(c for c in load_cases(CASES_PATH) if c.case_id == "ACT-003")
-    assert "add_expense" not in (case.allowed_tools or [])
-    assert "clarify" in case.required_events
+    allowed = set(case.allowed_tools or [])
+    assert "add_expense" not in allowed
+    # Every other ledger writer is equally off-limits: they all move money against a
+    # named account, which is the thing the user did not supply.
+    assert not (allowed & (WRITE_TOOLS - {"log_spend"})), sorted(allowed)
 
 
 def test_shipped_cases_respect_the_real_step_budget():
