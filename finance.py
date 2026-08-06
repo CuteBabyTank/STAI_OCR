@@ -336,8 +336,42 @@ def net_worth(include_credit: bool = True, show_liabilities: bool = True) -> dic
 # --------------------------------------------------------------------------- #
 # Accounts CRUD
 # --------------------------------------------------------------------------- #
+DEFAULT_CASH_NAME = "Cash"
+
+
+def ensure_default_cash_account() -> int:
+    """Guarantee a debit account named Cash exists for the wallet UI and as the
+    catch-all when spending is logged with no account named.
+
+    Idempotent: returns the existing non-archived Cash id, un-archives a soft-
+    deleted Cash if that is all that remains, or creates a fresh one at ₱0.
+    """
+    init_finance_schema()
+    with _connect() as con:
+        row = con.execute(
+            "SELECT id FROM accounts WHERE lower(name) = lower(?) AND archived = 0",
+            (DEFAULT_CASH_NAME,),
+        ).fetchone()
+        if row:
+            return int(row[0])
+        archived = con.execute(
+            "SELECT id FROM accounts WHERE lower(name) = lower(?) AND archived = 1 "
+            "ORDER BY id LIMIT 1",
+            (DEFAULT_CASH_NAME,),
+        ).fetchone()
+        if archived:
+            con.execute(
+                "UPDATE accounts SET archived = 0 WHERE id = ?", (archived[0],)
+            )
+            con.commit()
+            return int(archived[0])
+    return create_account(DEFAULT_CASH_NAME, "debit", opening_balance=0.0)
+
+
 def list_accounts(include_archived: bool = False) -> list[dict]:
     init_finance_schema()
+    # Wallet always shows Cash by default (Matthew: "add it here by default").
+    ensure_default_cash_account()
     bal = _balances()
 
     with _connect() as con:

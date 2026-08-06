@@ -4,13 +4,13 @@ W2-L — logging spending from chat as a receipt (`log_spend`).
 Why this file exists
 --------------------
 The Spending overview is driven by the `receipts` table; the agent's `add_expense`
-writes a `transactions` row. So spending logged in chat could never appear in the
-overview, and `add_expense` refuses outright when the user names no account — which
-is most of how people actually talk ("i spent 10k on food in TGI Fridays").
+writes a `transactions` row and requires a named account. Most people say
+"i spent 10k on food in TGI Fridays" with no account.
 
-`log_spend` closes that gap by recording a receipt instead of a transaction. It
-touches no account, so it needs no account, and the receipt-driven panels pick it up
-with no changes to them.
+`log_spend` files a receipt (so spending overview picks it up) and posts it as an
+expense against the default Cash wallet account. `add_expense` still refuses to
+guess BPI/BDO/etc. when no account is named — Cash is the product default for
+this path only.
 
 What is and is not being measured
 ---------------------------------
@@ -23,7 +23,7 @@ given sentence — that is a routing question, declared in
 `datasets/trajectory_cases.json` (ACT-003) and only answerable on a live run.
 
 The last test here is a guard, not a feature: `add_expense` must keep refusing to
-guess an account. `log_spend` exists so that refusal never had to be weakened.
+guess a non-default account. `log_spend` is what applies the Cash default.
 """
 
 from __future__ import annotations
@@ -68,8 +68,8 @@ def test_a_manually_logged_receipt_keeps_an_explicit_date(core, finance_fixture)
 
 
 def test_a_manually_logged_receipt_carries_no_account_and_no_confidence(core, finance_fixture):
-    """It is not an OCR reading and it has not been charged anywhere, so claiming
-    either would be a fabrication: no confidence score, no account."""
+    """The primitive alone does not charge an account — posting to Cash is the
+    tool's job. Confidence stays null because nothing was OCR'd."""
     receipt_id = core.log_manual_receipt(vendor="TGI Fridays", amount=10000.0)
 
     row = core.get_receipt(receipt_id)
@@ -117,23 +117,22 @@ def test_a_chat_logged_receipt_lands_in_the_month_it_is_dated(core, finance_fixt
 # --------------------------------------------------------------------------- #
 # The agent tool
 # --------------------------------------------------------------------------- #
-def test_log_spend_records_a_receipt_with_no_accounts_configured(core, finance_fixture, finance):
-    """The whole reason this tool exists: a ledger with zero usable accounts must
-    still be able to record what the user spent.
-
-    Archived rather than deleted because the seeded accounts carry transactions and
-    are delete-protected (PRD §22). Archiving reaches the same state that matters:
-    `list_accounts()` is the pool the account guard draws from, and it is now empty
-    — exactly the ledger on which `add_expense` reports "there are no accounts"."""
+def test_log_spend_records_a_receipt_even_when_other_accounts_are_archived(
+    core, finance_fixture, finance
+):
+    """Archiving every seeded account must not block logging: Cash is restored as
+    the default and the spend is charged there."""
     for account in finance.list_accounts():
         finance.update_account(account["id"], {"archived": True})
-    assert finance.list_accounts() == []
 
     obs, data = core._tool_log_spend("amount=10000; vendor=TGI Fridays; category=Food")
 
+    accounts = finance.list_accounts()
+    assert any(a["name"].lower() == "cash" for a in accounts)
     assert data["kind"] == "receipt"
     assert data["amount"] == 10000.0
     assert data["vendor"] == "TGI Fridays"
+    assert data["account"].lower() == "cash"
     assert core.get_receipt(data["receipt_id"])["total_amount"] == 10000.0
 
 
@@ -151,21 +150,29 @@ def test_log_spend_refuses_without_an_amount(core, finance_fixture):
     assert data["error"] == "no_amount"
 
 
-def test_log_spend_leaves_every_account_balance_untouched(core, finance_fixture, finance):
-    before = {a["id"]: a["balance"] for a in finance.list_accounts()}
+def test_log_spend_debits_the_default_cash_account(core, finance_fixture, finance):
+    cash = next(a for a in finance.list_accounts() if a["name"].lower() == "cash")
+    before = cash["balance"]
 
     core._tool_log_spend("amount=10000; vendor=TGI Fridays; category=Food")
 
-    after = {a["id"]: a["balance"] for a in finance.list_accounts()}
-    assert after == before
+    after = finance.get_account(cash["id"])["balance"]
+    assert after == pytest.approx(before - 10000.0)
 
 
-def test_log_spend_writes_no_transaction(core, finance_fixture, finance):
+def test_log_spend_writes_a_transaction_linked_to_the_receipt(
+    core, finance_fixture, finance
+):
     before = len(finance.list_transactions(limit=5000))
 
-    core._tool_log_spend("amount=10000; vendor=TGI Fridays")
+    _obs, data = core._tool_log_spend("amount=10000; vendor=TGI Fridays")
 
-    assert len(finance.list_transactions(limit=5000)) == before
+    txns = finance.list_transactions(limit=5000)
+    assert len(txns) == before + 1
+    linked = next(t for t in txns if t["receipt_id"] == data["receipt_id"])
+    assert linked["kind"] == "expense"
+    assert linked["amount"] == pytest.approx(10000.0)
+    assert linked["account_name"].lower() == "cash"
 
 
 def test_log_spend_falls_back_to_a_valid_category(core, finance_fixture):
@@ -187,6 +194,11 @@ def test_log_spend_refuses_an_immediate_duplicate(core, finance_fixture):
 
     assert data["duplicate"] is True
     assert data["receipt_id"] == first["receipt_id"]
+
+
+def test_list_accounts_ensures_a_default_cash_account(finance_fixture, finance):
+    names = [a["name"].lower() for a in finance.list_accounts()]
+    assert "cash" in names
 
 
 # --------------------------------------------------------------------------- #
@@ -243,7 +255,7 @@ def test_a_logged_receipt_is_reported_in_the_turns_writes(core, finance_fixture,
 def test_add_expense_still_refuses_when_no_account_is_named(core, finance_fixture):
     """`log_spend` exists precisely so this refusal could stay intact. If adding it
     ever makes `add_expense` start guessing an account, that is a regression in the
-    one tool that moves real money."""
+    one tool that moves real money when an account was supposed to be named."""
     obs, data = core._tool_add_expense(
         "amount=1000; category=Food", user_text="i spent 1000 on food"
     )

@@ -3621,10 +3621,11 @@ pairs separated by semicolons.
     amount=1000; account=BDO; category=Food; note=lunch; date=yesterday
   Requires amount and account. Omit date for today.
 - log_spend: the user said what they spent but named NO account. Files it as a
-  receipt so it counts in their spending overview. No account is touched.
+  receipt (so the spending overview counts it) and charges the default Cash
+  wallet account.
     amount=10000; vendor=TGI Fridays; category=Food; date=yesterday
   Requires amount only. Use this instead of add_expense whenever no account was
-  mentioned — do NOT ask which account first, and do NOT guess one.
+  mentioned — do NOT ask which account first, and do NOT invent BPI/BDO/etc.
 - add_income: money coming IN. Same fields. The account must be a cash/debit
   account, not a credit card.
     amount=30000; account=BPI; category=Salary
@@ -3682,8 +3683,8 @@ RECORDING vs ASKING — decide this FIRST, before anything else:
 Picking the right WRITE tool:
 - A purchase, and the user NAMED an account → add_expense.
 - A purchase, and the user named NO account → log_spend. "I spent 10k on food at
-  TGI Fridays" names no account, so it is log_spend, not add_expense. Record it and
-  move on: do not ask which account, and do not pick one for them.
+  TGI Fridays" names no account, so it is log_spend, not add_expense. It charges
+  the default Cash account — do not ask which account, and do not invent BPI/BDO.
 - Money arrived → add_income.
 - Money moved between two of the user's own accounts → transfer_money. "I moved
   5000 from BPI to Cash" is NOT an expense; nothing was spent.
@@ -3832,21 +3833,21 @@ Final Answer: Recorded 500.00 on your UnionBank Credit card under Other. That ac
 
 Example:
 Question: i spent 300 on groceries
-Thought: A statement of a purchase with no account named. That is log_spend — it files a receipt without touching any account, so nothing has to be guessed.
+Thought: A statement of a purchase with no account named. That is log_spend — it files a receipt and charges the default Cash account.
 Action: log_spend
 Action Input: amount=300; category=groceries
-Observation: Logged receipt #58: 300.00, filed under Food, dated {today}. It counts in the spending overview. No account was charged — say which account to also record it in the ledger.
-Thought: It was recorded.
-Final Answer: Logged 300.00 under Food. Tell me which account it came from if you want it in your ledger too.
+Observation: Logged receipt #58: 300.00, filed under Food, dated {today}. Charged to Cash (default) as expense #42.
+Thought: It was recorded on Cash.
+Final Answer: Logged 300.00 under Food on your Cash account.
 
 Example:
 Question: i spent 10k on food in tgi fridays
 Thought: A purchase with a vendor but no account, so log_spend, and "10k" is 10000.
 Action: log_spend
 Action Input: amount=10000; vendor=TGI Fridays; category=Food
-Observation: Logged receipt #59: 10,000.00 at TGI Fridays, filed under Food, dated {today}. It counts in the spending overview. No account was charged — say which account to also record it in the ledger.
-Thought: It was recorded.
-Final Answer: Logged 10,000.00 at TGI Fridays under Food. Tell me which account it came from if you want it in your ledger too.
+Observation: Logged receipt #59: 10,000.00 at TGI Fridays, filed under Food, dated {today}. Charged to Cash (default) as expense #43.
+Thought: It was recorded on Cash.
+Final Answer: Logged 10,000.00 at TGI Fridays under Food on your Cash account.
 
 Example:
 Question: how much did that cost?
@@ -4412,18 +4413,15 @@ def _tool_add_expense(tool_input: str, user_text: str = "") -> tuple[str, dict]:
 
 
 def _tool_log_spend(tool_input: str, user_text: str = "") -> tuple[str, dict]:
-    """Record spending as a RECEIPT, for when the user named no account.
+    """Record spending when the user named no account.
 
-    The counterpart to `add_expense`, not a replacement for it. `add_expense` moves
-    money out of a named account and therefore refuses to guess which one; that
-    refusal is deliberate and stays. But most people say "i spent 10k on food at
-    TGI Fridays" and never mention an account, and refusing that outright left the
-    spending unrecorded and invisible on the dashboard.
-
-    A receipt is the honest record of that sentence: it says a purchase happened,
-    without claiming to know which account paid. So there is NO account guard here
-    — there is nothing to guess, and no balance moves.
+    Still files a receipt so the Spending overview counts it, then posts that
+    receipt as an expense against the default Cash wallet account. `add_expense`
+    continues to refuse when no account is named — Cash is the product default
+    for this path only, not a free guess of BPI/BDO/etc.
     """
+    import finance
+
     parsed = _parse_expense_input(tool_input)
 
     amount, refusal = _guard_amount(parsed)
@@ -4451,18 +4449,23 @@ def _tool_log_spend(tool_input: str, user_text: str = "") -> tuple[str, dict]:
     )
     _EXPENSE_WRITES_THIS_RUN[fingerprint] = receipt_id
 
+    cash_id = finance.ensure_default_cash_account()
+    txn_id = finance.post_receipt_as_expense(receipt_id, cash_id)
+    cash = finance.get_account(cash_id) or {"name": finance.DEFAULT_CASH_NAME}
+
     # Read the stored category back rather than echoing the input: save_receipt runs
     # it through categorize(), so an unstated or off-taxonomy one is resolved there
     # and the observation must report what was actually filed.
     stored = get_receipt(receipt_id) or {}
     filed_category = stored.get("category")
     where = f" at {vendor}" if vendor else ""
+    cash_name = cash.get("name") or finance.DEFAULT_CASH_NAME
     obs = (f"Logged receipt #{receipt_id}: {amount:,.2f}{where}, filed under "
-           f"{filed_category}, dated {receipt_date}. It counts in the spending "
-           f"overview. No account was charged — say which account to also record "
-           f"it in the ledger.")
+           f"{filed_category}, dated {receipt_date}. Charged to {cash_name} "
+           f"(default) as expense #{txn_id}.")
     return obs, {
         "kind": "receipt", "action": "log_spend", "receipt_id": receipt_id,
+        "transaction_id": txn_id, "account": cash_name, "account_id": cash_id,
         "amount": amount, "vendor": vendor, "category": filed_category,
         "receipt_date": receipt_date,
     }
@@ -5375,9 +5378,9 @@ def agent_stream(question: str, model: str = AGENT_MODEL,
             obs_text, payload = _run_agent_tool(tool, tool_input, model, receipt_ids,
                                                 user_text=user_text)
             seen[key] = obs_text
-            # "receipt" counts as a write as much as "txn" does: log_spend moves no
-            # money, but it inserts a row that every spending panel reads, and the UI
-            # refreshes those panels only when this list is non-empty.
+            # "receipt" counts as a write as much as "txn" does: log_spend inserts
+            # a receipt the spending panels read (and now also posts it to Cash),
+            # and the UI refreshes those panels only when this list is non-empty.
             if payload.get("kind") in ("txn", "receipt") and not payload.get("duplicate"):
                 writes.append(payload)
             yield {"type": "observation", "tool": tool, "text": obs_text, "data": payload}

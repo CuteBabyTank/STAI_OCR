@@ -112,7 +112,7 @@
       "required_events": ["start", "action", "observation", "final"],
       "prohibited_events": ["clarify", "error"],
       "max_tool_calls": 2,
-      "notes": "NO-ACCOUNT PURCHASE. An amount but no account. Records a receipt via log_spend, which touches no account, so nothing has to be guessed and the spending overview still reflects it. allowed_tools deliberately excludes add_expense: charging an account here would be picking one the user never named, and a run that does so FAILS the case. REVISED 2026-08-06 — this case previously required a Clarification, which left the spending unrecorded and invisible on the dashboard; log_spend did not exist then. The safety property it guards is unchanged and is unit-tested by test_w2l_log_spend.py::test_add_expense_still_refuses_when_no_account_is_named."
+      "notes": "NO-ACCOUNT PURCHASE. An amount but no account. Records via log_spend, which files a receipt and charges the default Cash wallet account. allowed_tools deliberately excludes add_expense: inventing BPI/BDO here would still fail the case. REVISED 2026-08-06 for log_spend; REVISED again so Cash is the product default rather than leaving the spend unposted."
     },
     {
       "case_id": "ACT-004",

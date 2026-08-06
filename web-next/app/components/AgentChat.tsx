@@ -64,8 +64,8 @@ function obsSummary(ev: any): string {
       d.category ? ` · ${d.category}` : ""
     }`;
   }
-  // log_spend: a receipt, not a ledger entry. Says "logged", and names no account,
-  // because none was charged — reporting one would imply money left it.
+  // log_spend: a receipt posted to the default Cash account. Says "logged", and
+  // names Cash so the dashboard can show which wallet was charged.
   if (d.kind === "receipt") {
     const amt = Number(d.amount || 0).toLocaleString(undefined, {
       minimumFractionDigits: 2,
@@ -73,7 +73,7 @@ function obsSummary(ev: any): string {
     });
     return `logged receipt #${d.receipt_id} · ${amt}${
       d.vendor ? ` at ${d.vendor}` : ""
-    }${d.category ? ` · ${d.category}` : ""}`;
+    }${d.account ? ` on ${d.account}` : ""}${d.category ? ` · ${d.category}` : ""}`;
   }
   if (d.kind === "note") return "already had that result";
   return String(ev.text || "").slice(0, 120);

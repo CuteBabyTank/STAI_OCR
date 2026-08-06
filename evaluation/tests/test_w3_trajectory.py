@@ -314,7 +314,7 @@ def test_the_no_account_case_never_charges_an_account():
 
     Revised 2026-08-06. The case used to require a Clarification, because refusing
     was the only safe option available. `log_spend` added a second one: record it as
-    a receipt, which touches no account and so guesses nothing, while still leaving
+    a receipt posted to the default Cash account, while still leaving
     the spending visible on the dashboard. The guarded property is unchanged — no
     account may be charged — so only the permitted resolution moved."""
     from evaluation.trajectory import WRITE_TOOLS
