@@ -2,12 +2,13 @@
 // Home (PRD §3): the budget-tracker dashboard — greeting, this-month in/out,
 // wallet groupings, and recent ledger activity. The receipt-OCR command center
 // now lives at /scan; this view is the money overview.
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import type { Account, Analytics, Granularity, NetWorth, Transaction } from "./lib/types";
+import type { Account, Analytics, Granularity, NetWorth, Receipt, Transaction } from "./lib/types";
 import { money, signedMoney, fmtDate, acctMeta } from "./lib/format";
 import { listAccounts, getNetWorth, listTransactions, listReceipts } from "./lib/api";
 import { computePeriodTotals } from "./lib/periodTotals";
+import { mergeRecentActivity } from "./lib/recentActivity";
 import { useRefresh } from "./lib/useRefresh";
 import StatTiles from "./components/StatTiles";
 import CashflowChart from "./components/CashflowChart";
@@ -30,7 +31,11 @@ const GROUPS: { key: string; label: string; types: string[] }[] = [
 export default function Home() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [nw, setNw] = useState<NetWorth | null>(null);
-  const [txns, setTxns] = useState<Transaction[]>([]);
+  // The full stores, not just the 8-row recent slice: both the "Recent
+  // transactions" feed and the top out/in tiles need to merge in receipts
+  // that were logged from chat and never became a transaction.
+  const [allTxns, setAllTxns] = useState<Transaction[]>([]);
+  const [allReceipts, setAllReceipts] = useState<Receipt[]>([]);
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
   const [name, setName] = useState("");
   const [greet, setGreet] = useState("Welcome"); // set client-side to avoid SSR/tz mismatch
@@ -54,11 +59,12 @@ export default function Home() {
   }, [periodSel]);
 
   const load = useCallback(() => {
-    Promise.all([listAccounts(), getNetWorth(), listTransactions({ limit: 8 })])
-      .then(([a, n, t]) => {
+    Promise.all([listAccounts(), getNetWorth(), listTransactions({ limit: 2000 }), listReceipts(2000)])
+      .then(([a, n, t, r]) => {
         setAccounts(a);
         setNw(n);
-        setTxns(t);
+        setAllTxns(t);
+        setAllReceipts(r);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
@@ -82,17 +88,17 @@ export default function Home() {
   // calendar year depending on topGranularity. Defaults to year. Merges the
   // transactions and receipts stores (see computePeriodTotals) so a receipt
   // logged from chat — which never becomes a transaction — still counts here,
-  // matching the Spending overview panel below. Fetched over a wider window
-  // than the 8-row recent list so the totals are accurate.
+  // matching the Spending overview panel below.
   const [topGranularity, setTopGranularity] = useState<"month" | "year">("year");
-  const [periodTotals, setPeriodTotals] = useState({ inn: 0, out: 0 });
-  useEffect(() => {
-    Promise.all([listTransactions({ limit: 2000 }), listReceipts(2000)])
-      .then(([txns, receipts]) => {
-        setPeriodTotals(computePeriodTotals(txns, receipts, topGranularity));
-      })
-      .catch(() => {});
-  }, [accounts, topGranularity]);
+  const periodTotals = useMemo(
+    () => computePeriodTotals(allTxns, allReceipts, topGranularity),
+    [allTxns, allReceipts, topGranularity]
+  );
+
+  // Same merge for the "Recent transactions" feed: a chat-logged receipt has
+  // no account, so it can't move a wallet balance, but it should still show
+  // up as an entry (see mergeRecentActivity).
+  const txns = useMemo(() => mergeRecentActivity(allTxns, allReceipts, 8), [allTxns, allReceipts]);
 
   return (
     <>
@@ -192,8 +198,8 @@ export default function Home() {
                 return (
                   <div key={t.id} className="ledger-row" style={{ padding: "9px 0" }}>
                     <div className="ledger-main">
-                      <div className="ledger-title">{t.note || t.category_name || (t.kind === "transfer" ? "Transfer" : "Transaction")}</div>
-                      <div className="ledger-sub">{t.account_name || "—"} · {fmtDate(t.occurred_at?.slice(0, 10))}</div>
+                      <div className="ledger-title">{t.title}</div>
+                      <div className="ledger-sub">{t.subtitle} · {fmtDate(t.date?.slice(0, 10))}</div>
                     </div>
                     <div className={"ledger-amt " + cls}>
                       {t.kind === "transfer" ? money(t.amount) : signedMoney(t.amount, null, sign)}
