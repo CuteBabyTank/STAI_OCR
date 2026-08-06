@@ -77,22 +77,27 @@ export default function Home() {
   }, [load]);
   useRefresh(load); // reload after the shared FAB saves a transaction
 
-  // This-month in/out, scoped strictly to the current calendar month. Fetched
-  // over a wider window than the 8-row recent list so the totals are accurate.
-  const [monthTotals, setMonthTotals] = useState({ inn: 0, out: 0 });
+  // In/out for the current period, scoped to this calendar month or this
+  // calendar year depending on topGranularity. Defaults to year. Fetched over
+  // a wider window than the 8-row recent list so the totals are accurate.
+  const [topGranularity, setTopGranularity] = useState<"month" | "year">("year");
+  const [periodTotals, setPeriodTotals] = useState({ inn: 0, out: 0 });
   useEffect(() => {
     listTransactions({ limit: 2000 }).then((all) => {
       const now = new Date();
-      const key = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+      const key = topGranularity === "year"
+        ? String(now.getFullYear())
+        : `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+      const keyLen = key.length;
       let inn = 0, out = 0;
       for (const t of all) {
-        if (!t.occurred_at || t.occurred_at.slice(0, 7) !== key) continue;
+        if (!t.occurred_at || t.occurred_at.slice(0, keyLen) !== key) continue;
         if (t.kind === "income") inn += t.amount;
         else if (t.kind === "expense") out += t.amount;
       }
-      setMonthTotals({ inn, out });
+      setPeriodTotals({ inn, out });
     }).catch(() => {});
-  }, [accounts]);
+  }, [accounts, topGranularity]);
 
   return (
     <>
@@ -110,15 +115,31 @@ export default function Home() {
           )}
         </header>
 
-        {/* Month summary */}
+        {/* Period summary */}
+        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
+          <div className="seg">
+            <button
+              className={"seg-btn" + (topGranularity === "month" ? " on" : "")}
+              onClick={() => setTopGranularity("month")}
+            >
+              Month
+            </button>
+            <button
+              className={"seg-btn" + (topGranularity === "year" ? " on" : "")}
+              onClick={() => setTopGranularity("year")}
+            >
+              Year
+            </button>
+          </div>
+        </div>
         <div className="stat-grid" style={{ gridTemplateColumns: "1fr 1fr" }}>
           <div className="card">
-            <p className="stat-label">This month out</p>
-            <div className="stat-value" style={{ color: "var(--negative)" }}>{money(monthTotals.out)}</div>
+            <p className="stat-label">This {topGranularity} out</p>
+            <div className="stat-value" style={{ color: "var(--negative)" }}>{money(periodTotals.out)}</div>
           </div>
           <div className="card">
-            <p className="stat-label">This month in</p>
-            <div className="stat-value" style={{ color: "var(--positive)" }}>{money(monthTotals.inn)}</div>
+            <p className="stat-label">This {topGranularity} in</p>
+            <div className="stat-value" style={{ color: "var(--positive)" }}>{money(periodTotals.inn)}</div>
           </div>
         </div>
 
