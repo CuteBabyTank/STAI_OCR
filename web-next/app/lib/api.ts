@@ -9,6 +9,7 @@ import type {
   Goal,
   Installment,
   NetWorth,
+  Receipt,
   Receivable,
   ReceivableActivityRow,
   Recurring,
@@ -122,6 +123,9 @@ export const postReceiptAsExpense = (receiptId: number, accountId: number) =>
   send(`/api/receipts/${receiptId}/post`, "POST", { account_id: accountId }).then(
     (d) => d.transaction as Transaction
   );
+
+export const listReceipts = (limit = 500) =>
+  get(`/api/receipts?limit=${limit}`).then((d) => d.receipts as Receipt[]);
 
 // ---- Categories & tags -----------------------------------------------------
 export const listCategories = () =>

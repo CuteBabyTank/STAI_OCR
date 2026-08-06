@@ -6,7 +6,8 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import type { Account, Analytics, Granularity, NetWorth, Transaction } from "./lib/types";
 import { money, signedMoney, fmtDate, acctMeta } from "./lib/format";
-import { listAccounts, getNetWorth, listTransactions } from "./lib/api";
+import { listAccounts, getNetWorth, listTransactions, listReceipts } from "./lib/api";
+import { computePeriodTotals } from "./lib/periodTotals";
 import { useRefresh } from "./lib/useRefresh";
 import StatTiles from "./components/StatTiles";
 import CashflowChart from "./components/CashflowChart";
@@ -78,25 +79,19 @@ export default function Home() {
   useRefresh(load); // reload after the shared FAB saves a transaction
 
   // In/out for the current period, scoped to this calendar month or this
-  // calendar year depending on topGranularity. Defaults to year. Fetched over
-  // a wider window than the 8-row recent list so the totals are accurate.
+  // calendar year depending on topGranularity. Defaults to year. Merges the
+  // transactions and receipts stores (see computePeriodTotals) so a receipt
+  // logged from chat — which never becomes a transaction — still counts here,
+  // matching the Spending overview panel below. Fetched over a wider window
+  // than the 8-row recent list so the totals are accurate.
   const [topGranularity, setTopGranularity] = useState<"month" | "year">("year");
   const [periodTotals, setPeriodTotals] = useState({ inn: 0, out: 0 });
   useEffect(() => {
-    listTransactions({ limit: 2000 }).then((all) => {
-      const now = new Date();
-      const key = topGranularity === "year"
-        ? String(now.getFullYear())
-        : `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-      const keyLen = key.length;
-      let inn = 0, out = 0;
-      for (const t of all) {
-        if (!t.occurred_at || t.occurred_at.slice(0, keyLen) !== key) continue;
-        if (t.kind === "income") inn += t.amount;
-        else if (t.kind === "expense") out += t.amount;
-      }
-      setPeriodTotals({ inn, out });
-    }).catch(() => {});
+    Promise.all([listTransactions({ limit: 2000 }), listReceipts(2000)])
+      .then(([txns, receipts]) => {
+        setPeriodTotals(computePeriodTotals(txns, receipts, topGranularity));
+      })
+      .catch(() => {});
   }, [accounts, topGranularity]);
 
   return (
