@@ -13,7 +13,11 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 900;
 
-const API_BASE = process.env.API_BASE || "http://api:8000";
+// Same fallback as next.config.js's rewrite, deliberately: "api" only resolves
+// inside the compose network, so defaulting to it here made plain local dev fail
+// with ENOTFOUND api on this route while the rewrite-served routes worked. Compose
+// sets API_BASE explicitly (build arg + runtime), so both paths agree there too.
+const API_BASE = process.env.API_BASE || "http://localhost:8001";
 
 export async function POST(req: NextRequest): Promise<Response> {
   const body = await req.text();

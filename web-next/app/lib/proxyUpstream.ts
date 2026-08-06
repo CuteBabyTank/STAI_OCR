@@ -15,7 +15,11 @@ import { slog, serr, nextReqId, errFields, connHint } from "./serverLog";
 // IMPORTANT: array-form rewrites are checked BEFORE dynamic routes, so a
 // catch-all (`[[...path]]`) route handler here would still lose to the rewrite.
 // Each endpoint needs its own STATIC route file (/api/extract, /api/extract/batch).
-const API_BASE = process.env.API_BASE || "http://api:8000";
+// Same fallback as next.config.js's rewrite, deliberately: "api" only resolves
+// inside the compose network, so defaulting to it here made plain local dev fail
+// with ENOTFOUND api on this route while the rewrite-served routes worked. Compose
+// sets API_BASE explicitly (build arg + runtime), so both paths agree there too.
+const API_BASE = process.env.API_BASE || "http://localhost:8001";
 
 // Printed once when the module first loads, so the very first line in the log
 // says where this process will send extractions. API_BASE is read at RUNTIME here
@@ -24,7 +28,7 @@ const API_BASE = process.env.API_BASE || "http://api:8000";
 // only on this path while the rest of the app looks healthy. Make it observable.
 slog("extract-proxy", "upstream configured", {
   API_BASE,
-  from: process.env.API_BASE ? "env" : "default (compose-only hostname)",
+  from: process.env.API_BASE ? "env" : "default (local-dev fallback)",
 });
 
 export function proxyPostUntimed(req: NextRequest, upstreamPath: string): Promise<Response> {
