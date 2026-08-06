@@ -1,4 +1,5 @@
 import type { Receipt, Transaction, TxnKind } from "./types";
+import { periodKey, type TopGranularity } from "./periodKey";
 
 export interface ActivityEntry {
   id: string;
@@ -7,37 +8,40 @@ export interface ActivityEntry {
   subtitle: string;
   amount: number;
   date: string | null;
-  // True for a chat-logged receipt with no linked transaction: it has no
-  // account, so it's shown but can't be treated as a real ledger movement.
   isReceiptOnly: boolean;
 }
 
-// Folds unposted receipts into the transactions feed so a receipt logged from
-// chat (log_spend, which touches no account) still shows up in "Recent
-// transactions" — skipping any receipt already posted into a transaction
-// (transactions.receipt_id -> receipts.id) so it isn't shown twice.
 export function mergeRecentActivity(
   transactions: Transaction[],
   receipts: Receipt[],
-  limit = 8
+  limit = 8,
+  granularity?: TopGranularity,
+  now: Date = new Date()
 ): ActivityEntry[] {
+  const key = granularity ? periodKey(granularity, now) : null;
+  const keyLen = key ? key.length : 0;
+  const inPeriod = (date: string | null | undefined) =>
+    !key || (!!date && date.slice(0, keyLen) === key);
+
   const postedReceiptIds = new Set<number>();
   for (const t of transactions) {
     if (t.receipt_id != null) postedReceiptIds.add(t.receipt_id);
   }
 
-  const fromTxns: ActivityEntry[] = transactions.map((t) => ({
-    id: `txn-${t.id}`,
-    kind: t.kind,
-    title: t.note || t.category_name || (t.kind === "transfer" ? "Transfer" : "Transaction"),
-    subtitle: t.account_name || "—",
-    amount: t.amount,
-    date: t.occurred_at,
-    isReceiptOnly: false,
-  }));
+  const fromTxns: ActivityEntry[] = transactions
+    .filter((t) => inPeriod(t.occurred_at))
+    .map((t) => ({
+      id: `txn-${t.id}`,
+      kind: t.kind,
+      title: t.note || t.category_name || (t.kind === "transfer" ? "Transfer" : "Transaction"),
+      subtitle: t.account_name || "—",
+      amount: t.amount,
+      date: t.occurred_at,
+      isReceiptOnly: false,
+    }));
 
   const fromReceipts: ActivityEntry[] = receipts
-    .filter((r) => !postedReceiptIds.has(r.id))
+    .filter((r) => !postedReceiptIds.has(r.id) && inPeriod(r.receipt_date))
     .map((r) => ({
       id: `receipt-${r.id}`,
       kind: "expense" as const,

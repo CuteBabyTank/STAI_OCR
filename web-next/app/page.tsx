@@ -98,7 +98,10 @@ export default function Home() {
   // Same merge for the "Recent transactions" feed: a chat-logged receipt has
   // no account, so it can't move a wallet balance, but it should still show
   // up as an entry (see mergeRecentActivity).
-  const txns = useMemo(() => mergeRecentActivity(allTxns, allReceipts, 8), [allTxns, allReceipts]);
+  const txns = useMemo(
+    () => mergeRecentActivity(allTxns, allReceipts, 8, topGranularity),
+    [allTxns, allReceipts, topGranularity]
+  );
 
   return (
     <>
@@ -190,7 +193,11 @@ export default function Home() {
             {loading ? (
               <div className="empty-note">Loading…</div>
             ) : txns.length === 0 ? (
-              <div className="empty-note">No transactions yet. Use the + button to add one.</div>
+              <div className="empty-note">
+                {allTxns.length === 0 && allReceipts.length === 0
+                  ? "No transactions yet. Use the + button to add one."
+                  : `No transactions this ${topGranularity}.`}
+              </div>
             ) : (
               txns.map((t) => {
                 const sign = t.kind === "income" ? "+" : t.kind === "expense" ? "-" : undefined;

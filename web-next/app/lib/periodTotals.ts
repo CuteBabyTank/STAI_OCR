@@ -1,12 +1,5 @@
-import type { Granularity, Receipt, Transaction } from "./types";
-
-type TopGranularity = Extract<Granularity, "month" | "year">;
-
-function periodKey(granularity: TopGranularity, now: Date): string {
-  const year = now.getFullYear();
-  if (granularity === "year") return String(year);
-  return `${year}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-}
+import type { Receipt, Transaction } from "./types";
+import { periodKey, type TopGranularity } from "./periodKey";
 
 // Merges the transactions and receipts stores into one in/out total for the
 // dashboard's top tiles, without double-counting a receipt that has already

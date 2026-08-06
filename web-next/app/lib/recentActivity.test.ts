@@ -90,3 +90,57 @@ describe("mergeRecentActivity", () => {
     expect(mergeRecentActivity(txns, [], 3)).toHaveLength(3);
   });
 });
+
+const now = new Date(2026, 7, 6); // 6 Aug 2026 local
+
+describe("mergeRecentActivity period filter", () => {
+  it("month mode keeps only current-month rows", () => {
+    const txns = [
+      txn({ id: 1, note: "TGI fridays", account_name: "BDO", amount: 10000, occurred_at: "2026-08-01" }),
+      txn({ id: 2, note: "old", account_name: "BDO", amount: 100, occurred_at: "2026-06-15" }),
+    ];
+    const receipts = [
+      receipt({ id: 13, vendor_name: "uniqlo", total_amount: 2500, receipt_date: "2026-08-06" }),
+      receipt({ id: 14, vendor_name: "Pepper Lunch", total_amount: 545, receipt_date: "2026-06-26" }),
+    ];
+
+    const entries = mergeRecentActivity(txns, receipts, 8, "month", now);
+
+    expect(entries.map((e) => e.title)).toEqual(["uniqlo", "TGI fridays"]);
+  });
+
+  it("year mode keeps all months of the current year", () => {
+    const txns = [
+      txn({ id: 1, note: "Aug", occurred_at: "2026-08-01" }),
+      txn({ id: 2, note: "Jun", occurred_at: "2026-06-15" }),
+      txn({ id: 3, note: "last year", occurred_at: "2025-12-01" }),
+    ];
+
+    const entries = mergeRecentActivity(txns, [], 8, "year", now);
+
+    expect(entries.map((e) => e.title)).toEqual(["Aug", "Jun"]);
+  });
+
+  it("applies limit after filtering", () => {
+    const txns = Array.from({ length: 10 }, (_, i) =>
+      txn({
+        id: i,
+        note: `d${i}`,
+        occurred_at: `2026-08-${String(i + 1).padStart(2, "0")}`,
+      })
+    );
+    // one out-of-period row that would otherwise compete for the limit
+    txns.push(txn({ id: 99, note: "jun", occurred_at: "2026-06-01" }));
+
+    const entries = mergeRecentActivity(txns, [], 3, "month", now);
+
+    expect(entries).toHaveLength(3);
+    expect(entries.every((e) => (e.date || "").startsWith("2026-08"))).toBe(true);
+    expect(entries.map((e) => e.title)).not.toContain("jun");
+  });
+
+  it("returns empty when nothing matches the period", () => {
+    const txns = [txn({ id: 1, note: "jun", occurred_at: "2026-06-01" })];
+    expect(mergeRecentActivity(txns, [], 8, "month", now)).toEqual([]);
+  });
+});
