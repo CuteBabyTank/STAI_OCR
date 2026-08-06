@@ -201,6 +201,30 @@ def test_list_accounts_ensures_a_default_cash_account(finance_fixture, finance):
     assert "cash" in names
 
 
+def test_cash_does_not_resolve_to_gcash(finance_fixture, finance):
+    """'cash' used to substring-match GCash ('cash' in 'gcash') and steal the
+    default. Exact Cash must win; bare 'cash' must never land on GCash."""
+    finance.create_account("GCash", "debit", 0.0, "PHP")
+    cash_id = finance.ensure_default_cash_account()
+
+    res = finance.resolve_account("cash")
+    assert res["status"] == "ok"
+    assert res["account"]["id"] == cash_id
+    assert res["account"]["name"].lower() == "cash"
+
+    gcash = finance.resolve_account("gcash")
+    assert gcash["status"] == "ok"
+    assert gcash["account"]["name"] == "GCash"
+
+
+def test_list_accounts_puts_cash_before_gcash(finance_fixture, finance):
+    finance.create_account("GCash", "debit", 0.0, "PHP")
+    finance.ensure_default_cash_account()
+    names = [a["name"] for a in finance.list_accounts()]
+    assert names[0].lower() == "cash"
+    assert "GCash" in names
+
+
 # --------------------------------------------------------------------------- #
 # The turn must announce the write, or the dashboard silently goes stale
 # --------------------------------------------------------------------------- #

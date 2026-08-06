@@ -19,6 +19,12 @@ function debitOnly(accounts: Account[]) {
   return accounts.filter((a) => a.type === "debit" && !a.archived);
 }
 
+function defaultAccountId(accounts: Account[]) {
+  const cash = accounts.find((a) => a.name.toLowerCase() === "cash" && !a.archived);
+  if (cash) return cash.id;
+  return accounts.find((a) => !a.archived)?.id ?? 0;
+}
+
 // --------------------------------------------------------------------------- //
 // Expense
 // --------------------------------------------------------------------------- //
@@ -38,7 +44,7 @@ export function ExpenseModal({
   const usable = accounts.filter((a) => !a.archived);
   const expenseCats = categories.filter((c) => c.kind === "expense");
   const [amount, setAmount] = useState(edit ? String(edit.amount) : "");
-  const [accountId, setAccountId] = useState(edit?.account_id ?? usable[0]?.id ?? 0);
+  const [accountId, setAccountId] = useState(edit?.account_id ?? defaultAccountId(usable));
   const [categoryId, setCategoryId] = useState(edit?.category_id ?? expenseCats[0]?.id ?? 0);
   const [when, setWhen] = useState(edit?.occurred_at?.slice(0, 16) || nowLocal());
   const [note, setNote] = useState(edit?.note || "");
@@ -129,7 +135,7 @@ export function IncomeModal({
 }) {
   const debit = debitOnly(accounts);
   const [amount, setAmount] = useState(edit ? String(edit.amount) : "");
-  const [accountId, setAccountId] = useState(edit?.account_id ?? debit[0]?.id ?? 0);
+  const [accountId, setAccountId] = useState(edit?.account_id ?? defaultAccountId(debit));
   const [when, setWhen] = useState(edit?.occurred_at?.slice(0, 16) || nowLocal());
   const [note, setNote] = useState(edit?.note || "");
   const [err, setErr] = useState<string | null>(null);
@@ -204,8 +210,10 @@ export function TransferModal({
 }) {
   const debit = debitOnly(accounts);
   const [amount, setAmount] = useState("");
-  const [fromId, setFromId] = useState(debit[0]?.id ?? 0);
-  const [toId, setToId] = useState(debit[1]?.id ?? 0);
+  const [fromId, setFromId] = useState(defaultAccountId(debit));
+  const [toId, setToId] = useState(
+    () => debit.find((a) => a.id !== defaultAccountId(debit))?.id ?? 0
+  );
   const [fee, setFee] = useState("");
   const [when, setWhen] = useState(nowLocal());
   const [note, setNote] = useState("");

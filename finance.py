@@ -379,8 +379,10 @@ def list_accounts(include_archived: bool = False) -> list[dict]:
         sql = "SELECT * FROM accounts"
         if not include_archived:
             sql += " WHERE archived = 0"
-        sql += " ORDER BY id"
-        rows = con.execute(sql).fetchall()
+        sql += (
+            " ORDER BY CASE WHEN lower(name) = lower(?) THEN 0 ELSE 1 END, id"
+        )
+        rows = con.execute(sql, (DEFAULT_CASH_NAME,)).fetchall()
     out = []
     for r in rows:
         d = dict(r)
@@ -585,7 +587,12 @@ def _match_by_name(query: str, rows: list[dict], noise: frozenset[str]) -> list[
 
     def tier_substring(r):
         n = r["name"].lower()
-        return q in n or n in q
+        # Short name inside a longer query is fine ("BDO" in "the BDO card").
+        if n in q:
+            return True
+        # Query inside the account name must be a WHOLE TOKEN, not a character
+        # infix — otherwise "cash" confidently resolves to "GCash".
+        return q in _tokens(r["name"])
 
     def tier_meaningful_tokens(r):
         # drop filler words and require what's left: "my bdo" -> "bdo"

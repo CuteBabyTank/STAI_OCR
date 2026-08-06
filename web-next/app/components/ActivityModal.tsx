@@ -25,7 +25,9 @@ export default function ActivityModal({
   const debit = accounts.filter((a) => a.type === "debit" && !a.archived);
   const [amount, setAmount] = useState("");
   const [type, setType] = useState<ActivityType>(types[0].value);
-  const [accountId, setAccountId] = useState(debit[0]?.id ?? 0);
+  const [accountId, setAccountId] = useState(
+    () => debit.find((a) => a.name.toLowerCase() === "cash")?.id ?? debit[0]?.id ?? 0
+  );
   const [when, setWhen] = useState(new Date().toISOString().slice(0, 10));
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
