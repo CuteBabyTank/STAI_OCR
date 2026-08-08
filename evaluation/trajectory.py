@@ -46,13 +46,16 @@ KNOWN_TOOLS = frozenset({
     # read-only
     "sql_ledger", "search_receipts", "list_accounts", "list_plans",
     # writes — a case allowing one of these mutates the ledger when it runs
-    "add_expense", "add_income", "transfer_money",
+    "add_expense", "log_spend", "add_income", "transfer_money",
     "record_activity", "create_plan", "update_plan",
 })
 # Kept separate so a case file can be checked for "does this case let the agent
 # change data?" without hardcoding the list in three places.
+#
+# `log_spend` counts as a write even though it moves no money: it inserts a receipt
+# row, which changes what every spending panel reports.
 WRITE_TOOLS = frozenset({
-    "add_expense", "add_income", "transfer_money",
+    "add_expense", "log_spend", "add_income", "transfer_money",
     "record_activity", "create_plan", "update_plan",
 })
 

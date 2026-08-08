@@ -127,18 +127,25 @@ export function parseQuick(
     }
   }
 
-  // Account by name match; default to first debit for income/transfer, first usable otherwise.
+  // Account by name match; longest name wins so "gcash" picks GCash over Cash.
+  // When nothing is named, fall back to the default Cash wallet account.
   const debit = accounts.filter((a) => a.type === "debit" && !a.archived);
   const usable = accounts.filter((a) => !a.archived);
-  const matchAccount = (pool: Account[]) =>
-    pool.find((a) => lower.includes(a.name.toLowerCase()))?.id ?? null;
+  const preferCashId = (pool: Account[]) =>
+    pool.find((a) => a.name.toLowerCase() === "cash")?.id ?? pool[0]?.id ?? null;
+  const matchAccount = (pool: Account[]) => {
+    const hits = pool.filter((a) => lower.includes(a.name.toLowerCase()));
+    if (!hits.length) return null;
+    hits.sort((a, b) => b.name.length - a.name.length);
+    return hits[0].id;
+  };
 
   let accountId: number | null;
   let toAccountId: number | null = null;
   if (kind === "income" || kind === "transfer") {
-    accountId = matchAccount(debit) ?? debit[0]?.id ?? null;
+    accountId = matchAccount(debit) ?? preferCashId(debit);
   } else {
-    accountId = matchAccount(usable) ?? usable[0]?.id ?? null;
+    accountId = matchAccount(usable) ?? preferCashId(usable);
   }
   if (kind === "transfer") {
     toAccountId = debit.find((a) => a.id !== accountId)?.id ?? null;

@@ -4,7 +4,14 @@ services:
   # hits same-origin /api/* which Next rewrites to http://api:8000 (see
   # web-next/next.config.js), so there's no CORS to configure.
   web:
-    build: ./web-next
+    build:
+      context: ./web-next
+      # Must be a BUILD arg as well as a runtime variable below: the /api/:path*
+      # rewrite is baked into the build (see web-next/Dockerfile), while the
+      # /api/extract and /api/agent/stream route handlers read it at runtime.
+      # Both need to agree, so both are set from the same value.
+      args:
+        - API_BASE=${API_BASE:-http://api:8000}
     # Published on 7860 to match the VM's NAT forward (external 2148 -> 7860).
     # Override for a different host with WEB_PORT, e.g. WEB_PORT=8502 for local.
     ports:

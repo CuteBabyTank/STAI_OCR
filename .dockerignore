@@ -1,0 +1,34 @@
+# Build context for the API image (Dockerfile at the repo root, `COPY . .`).
+#
+# Without this file the context is ~1.5 GB and nearly all of it is waste that also
+# lands in the image: a macOS-built virtualenv that a python:3.11-slim Linux image
+# can never use, the frontend's node_modules (the web image builds from ./web-next
+# with its own .dockerignore), and the git history.
+#
+# Deliberately NOT ignored: ledger.db, because the api service's start command seeds
+# the named volume from /app/ledger.db on first boot, and mlflow.db, which backs the
+# MLFLOW_TRACKING_URI sqlite store.
+
+# Virtualenv — 962 MB, platform-specific, reinstalled from requirements.txt anyway.
+.venv/
+venv/
+
+# Frontend — built by web-next/Dockerfile, not needed by the API image.
+web-next/node_modules/
+web-next/.next/
+
+# VCS and editor state.
+.git/
+.gitignore
+.DS_Store
+.claude/
+
+# Python bytecode and test caches.
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Evaluation outputs — regenerated, never read by the running API.
+evaluation/results/
+mlruns/

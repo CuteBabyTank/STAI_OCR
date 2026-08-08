@@ -53,8 +53,8 @@ function obsSummary(ev: any): string {
     const n = (d.accounts || []).length;
     return `looked up accounts · ${n} account${n === 1 ? "" : "s"}`;
   }
-  // The one tool that writes: name the amount, the account and the transaction id,
-  // so a recorded expense is never a silent side effect of a chat message.
+  // The tools that write: name the amount and the id, so a recorded expense is
+  // never a silent side effect of a chat message.
   if (d.kind === "txn") {
     const amt = Number(d.amount || 0).toLocaleString(undefined, {
       minimumFractionDigits: 2,
@@ -63,6 +63,17 @@ function obsSummary(ev: any): string {
     return `recorded expense #${d.transaction_id} · ${amt} on ${d.account}${
       d.category ? ` · ${d.category}` : ""
     }`;
+  }
+  // log_spend: a receipt posted to the default Cash account. Says "logged", and
+  // names Cash so the dashboard can show which wallet was charged.
+  if (d.kind === "receipt") {
+    const amt = Number(d.amount || 0).toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+    return `logged receipt #${d.receipt_id} · ${amt}${
+      d.vendor ? ` at ${d.vendor}` : ""
+    }${d.account ? ` on ${d.account}` : ""}${d.category ? ` · ${d.category}` : ""}`;
   }
   if (d.kind === "note") return "already had that result";
   return String(ev.text || "").slice(0, 120);

@@ -108,9 +108,15 @@ export default function WalletPage() {
             {shown.map((a) => {
               const meta = acctMeta(a.type);
               const neg = a.balance < 0;
+              const isDefaultCash = a.name.trim().toLowerCase() === "cash" && a.type === "debit";
               return (
                 <div key={a.id} className="acct-card" style={{ ["--acct-c" as any]: meta.color }}>
-                  <span className="acct-type-pill" style={{ background: meta.color }}>{meta.label}</span>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                    <span className="acct-type-pill" style={{ background: meta.color }}>{meta.label}</span>
+                    {isDefaultCash && (
+                      <span className="acct-type-pill" style={{ background: "var(--ink-3)" }}>Default</span>
+                    )}
+                  </div>
                   <div>
                     <p className="acct-name">{a.name}</p>
                     <div className="acct-bal" style={{ color: neg ? "var(--negative)" : "var(--ink)" }}>
@@ -118,6 +124,7 @@ export default function WalletPage() {
                     </div>
                     <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>
                       {a.currency || "PHP"}
+                      {isDefaultCash && " · default for receipts with no account"}
                       {!a.include_in_totals && " · excluded from totals"}
                     </div>
                   </div>

@@ -3,11 +3,18 @@ import type { Granularity, Period } from "../lib/types";
 
 // Top-of-dashboard period selector: a Month/Year granularity toggle plus ◀ ▶ to
 // scroll through periods. Drives the scope of every panel below it.
+//
+// `monthOnly` drops the granularity toggle and keeps just the ◀ label ▶ nav, for
+// callers that scope a single section to one month at a time (the home dashboard's
+// Spending overview). The stepping, year-rollover and bounds logic below is shared
+// rather than reimplemented there — getting "December → January" wrong in a second
+// copy is exactly the kind of bug that hides until New Year.
 export default function PeriodControl({
-  period, onChange,
+  period, onChange, monthOnly = false,
 }: {
   period: Period;
   onChange: (next: { granularity: Granularity; year: number; month: number }) => void;
+  monthOnly?: boolean;
 }) {
   const { granularity, year, month, label, min_year, max_year } = period;
 
@@ -31,11 +38,13 @@ export default function PeriodControl({
 
   return (
     <div className="period-bar">
-      <div className="seg">
-        <button className={"seg-btn" + (granularity === "all" ? " on" : "")} onClick={() => setGran("all")}>All time</button>
-        <button className={"seg-btn" + (granularity === "month" ? " on" : "")} onClick={() => setGran("month")}>Month</button>
-        <button className={"seg-btn" + (granularity === "year" ? " on" : "")} onClick={() => setGran("year")}>Year</button>
-      </div>
+      {!monthOnly && (
+        <div className="seg">
+          <button className={"seg-btn" + (granularity === "all" ? " on" : "")} onClick={() => setGran("all")}>All time</button>
+          <button className={"seg-btn" + (granularity === "month" ? " on" : "")} onClick={() => setGran("month")}>Month</button>
+          <button className={"seg-btn" + (granularity === "year" ? " on" : "")} onClick={() => setGran("year")}>Year</button>
+        </div>
+      )}
       <div className="period-nav">
         {granularity === "all" ? (
           // All-time spans everything — nothing to scroll through, just the label.

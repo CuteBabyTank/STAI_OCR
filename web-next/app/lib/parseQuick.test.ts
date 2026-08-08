@@ -242,6 +242,23 @@ describe("account matching", () => {
     expect(parse("250 lunch")?.accountId).toBe(1);
   });
 
+  it("prefers Cash over GCash when nothing is named", () => {
+    const withGCash = [
+      { id: 9, name: "GCash", type: "debit", archived: false },
+      { id: 1, name: "Cash", type: "debit", archived: false },
+      { id: 2, name: "BPI Checking", type: "debit", archived: false },
+    ] as unknown as Account[];
+    expect(parseQuick("250 lunch", withGCash, CATEGORIES, REF)?.accountId).toBe(1);
+  });
+
+  it("picks GCash over Cash when the text says gcash", () => {
+    const withGCash = [
+      { id: 1, name: "Cash", type: "debit", archived: false },
+      { id: 9, name: "GCash", type: "debit", archived: false },
+    ] as unknown as Account[];
+    expect(parseQuick("250 lunch gcash", withGCash, CATEGORIES, REF)?.accountId).toBe(9);
+  });
+
   it("never selects an archived account", () => {
     expect(parse("250 lunch old wallet")?.accountId).not.toBe(4);
   });

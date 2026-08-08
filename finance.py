@@ -336,8 +336,42 @@ def net_worth(include_credit: bool = True, show_liabilities: bool = True) -> dic
 # --------------------------------------------------------------------------- #
 # Accounts CRUD
 # --------------------------------------------------------------------------- #
+DEFAULT_CASH_NAME = "Cash"
+
+
+def ensure_default_cash_account() -> int:
+    """Guarantee a debit account named Cash exists for the wallet UI and as the
+    catch-all when spending is logged with no account named.
+
+    Idempotent: returns the existing non-archived Cash id, un-archives a soft-
+    deleted Cash if that is all that remains, or creates a fresh one at ₱0.
+    """
+    init_finance_schema()
+    with _connect() as con:
+        row = con.execute(
+            "SELECT id FROM accounts WHERE lower(name) = lower(?) AND archived = 0",
+            (DEFAULT_CASH_NAME,),
+        ).fetchone()
+        if row:
+            return int(row[0])
+        archived = con.execute(
+            "SELECT id FROM accounts WHERE lower(name) = lower(?) AND archived = 1 "
+            "ORDER BY id LIMIT 1",
+            (DEFAULT_CASH_NAME,),
+        ).fetchone()
+        if archived:
+            con.execute(
+                "UPDATE accounts SET archived = 0 WHERE id = ?", (archived[0],)
+            )
+            con.commit()
+            return int(archived[0])
+    return create_account(DEFAULT_CASH_NAME, "debit", opening_balance=0.0)
+
+
 def list_accounts(include_archived: bool = False) -> list[dict]:
     init_finance_schema()
+    # Wallet always shows Cash by default (Matthew: "add it here by default").
+    ensure_default_cash_account()
     bal = _balances()
 
     with _connect() as con:
@@ -345,8 +379,10 @@ def list_accounts(include_archived: bool = False) -> list[dict]:
         sql = "SELECT * FROM accounts"
         if not include_archived:
             sql += " WHERE archived = 0"
-        sql += " ORDER BY id"
-        rows = con.execute(sql).fetchall()
+        sql += (
+            " ORDER BY CASE WHEN lower(name) = lower(?) THEN 0 ELSE 1 END, id"
+        )
+        rows = con.execute(sql, (DEFAULT_CASH_NAME,)).fetchall()
     out = []
     for r in rows:
         d = dict(r)
@@ -551,7 +587,12 @@ def _match_by_name(query: str, rows: list[dict], noise: frozenset[str]) -> list[
 
     def tier_substring(r):
         n = r["name"].lower()
-        return q in n or n in q
+        # Short name inside a longer query is fine ("BDO" in "the BDO card").
+        if n in q:
+            return True
+        # Query inside the account name must be a WHOLE TOKEN, not a character
+        # infix — otherwise "cash" confidently resolves to "GCash".
+        return q in _tokens(r["name"])
 
     def tier_meaningful_tokens(r):
         # drop filler words and require what's left: "my bdo" -> "bdo"
