@@ -18,19 +18,28 @@ leaves your machine.
 
 ## Architecture
 
-```
-web-next/              Next.js frontend (drag-and-drop scan, dashboard,
-                        streaming chat agent, measured OCR confidence)
-extraction.py          Pure extraction primitives: prompt, JSON coercion +
-                        clean-up, reconciliation (no UI, no heavy deps)
-core.py                Backend pipeline: schema validation, guardrails,
-                        disambiguation, confidence scoring, SQLite memory,
-                        RAG retriever, SQL agent, ReAct agent, MLflow logging
-api.py                  FastAPI REST API the frontend calls
-ledger.db               SQLite memory + vector store, created on first run
-Dockerfile               API container (backend)
-docker-compose.yml       web + api + ollama + mlflow, wired together
-```
+Responsibilities first — the file that happens to hold each one is in the last
+column. A slide-ready version of this diagram lives in
+[`docs/presentation/`](docs/presentation/).
+
+| Component | Responsibility | Lives in |
+| --------- | -------------- | -------- |
+| **Web application server** | Serves the UI and proxies same-origin `/api/*`, so there is no CORS | `web-next/` |
+| **Receipt scanner** | Drag-and-drop / camera / PDF upload, confidence badges, review table | `web-next/app/` |
+| **REST API server** | ~70 typed endpoints across receipts, dashboard, budget modules and agents | `api.py` |
+| **Extraction pipeline** | Guardrails → vision call → post-processing → audit → review gate | `core.py` |
+| **Extraction primitives** | Prompt, JSON coercion, clean-up, arithmetic audit (no UI, no heavy deps) | `extraction.py` |
+| **Agent runtime** | ReAct loop over ten tools, streamed, with its write guards | `core.py` |
+| **Query planner** | Natural language → validated read-only SQL, run against a scoped copy | `core.py` |
+| **Retrieval index builder** | Composes, embeds and stores one document per receipt | `core.py` |
+| **Finance engine** | Accounts, transactions, budgets, goals, debts, receivables | `finance.py` |
+| **Statement reconciler** | Matches receipts against a bank/card CSV. Deterministic, no model | `reconciliation.py` |
+| **Trace recorder** | One traced run per model call: latency, tokens, tools, grounding | `core.py` |
+| **Ledger store** | 18 tables — receipts, line items, and the whole budget schema | `ledger.db` |
+| **Vector store** | One embedding per receipt, for semantic search | `ledger.db` |
+| **Trace store** | Every recorded run | `mlflow.db` |
+| **Local inference server** | Serves the vision, planner and embedding models | Ollama |
+| **Packaging** | Web · API · traces · inference, up with one command | `Dockerfile`, `docker-compose.yml` |
 
 **Three models, all local via Ollama.** These are the defaults in `core.py` /
 `extraction.py`; each is overridable by env var:

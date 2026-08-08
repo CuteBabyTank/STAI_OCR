@@ -1,0 +1,99 @@
+{
+  "total_runs": 216,
+  "traced_latency": 202,
+  "grounded_n": 64,
+  "grounded_rate": 1.0,
+  "ungrounded_n": 64,
+  "ungrounded_total": 0.0,
+  "steps_mean": 1.9823008849557522,
+  "steps_n": 113,
+  "clarify_rate": 0.32926829268292684,
+  "clarify_n": 82,
+  "hold_rate": 0.15384615384615385,
+  "hold_n": 39,
+  "confidence_mean": 0.9620939036468287,
+  "confidence_min": 0.9266889959737233,
+  "confidence_n": 10,
+  "prompt_tokens_median": 4241.0,
+  "output_tokens_median": 279.0,
+  "trajectory": {
+    "cases": 7,
+    "passed": 6,
+    "failed": 1,
+    "pass_rate": 0.8571428571428571,
+    "checks": {
+      "required_events": {
+        "passed": 7,
+        "total": 7,
+        "failed_cases": [],
+        "rate": 1.0
+      },
+      "prohibited_events": {
+        "passed": 7,
+        "total": 7,
+        "failed_cases": [],
+        "rate": 1.0
+      },
+      "allowed_tools": {
+        "passed": 5,
+        "total": 5,
+        "failed_cases": [],
+        "rate": 1.0
+      },
+      "expected_tools": {
+        "passed": 4,
+        "total": 4,
+        "failed_cases": [],
+        "rate": 1.0
+      },
+      "max_tool_calls": {
+        "passed": 7,
+        "total": 7,
+        "failed_cases": [],
+        "rate": 1.0
+      },
+      "no_repeated_tool_calls": {
+        "passed": 7,
+        "total": 7,
+        "failed_cases": [],
+        "rate": 1.0
+      },
+      "reached_terminal_state": {
+        "passed": 7,
+        "total": 7,
+        "failed_cases": [],
+        "rate": 1.0
+      },
+      "final_supported_by_observation": {
+        "passed": 5,
+        "total": 6,
+        "failed_cases": [
+          "RCT-006"
+        ],
+        "rate": 0.8333333333333334
+      }
+    },
+    "failed_case_ids": [
+      "RCT-006"
+    ]
+  },
+  "uom": {
+    "php_per_hour": 156.25,
+    "php_per_min": 2.6041666666666665,
+    "manual_h": 10.0,
+    "manual_php": 1562.5,
+    "machine_h": 1.2416666666666667,
+    "held": 46.2,
+    "review_h": 0.385,
+    "review_php": 60.15625,
+    "power_php": 3.8802083333333335,
+    "capex_php": 1666.6666666666667,
+    "hours_saved": 9.615,
+    "time_factor": 25.974025974025974,
+    "php_saved_month": 1498.4635416666667,
+    "php_saved_year": 17981.5625,
+    "per_receipt_manual": 5.208333333333333,
+    "per_receipt_snag": 0.2134548611111111,
+    "breakeven": 333.6751186110773
+  }
+}
