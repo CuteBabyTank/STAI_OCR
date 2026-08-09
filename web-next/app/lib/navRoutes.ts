@@ -55,6 +55,7 @@ export const ICON_PATHS = {
   sun: "M12 3v2m0 14v2M5.6 5.6l1.4 1.4m10 10 1.4 1.4M3 12h2m14 0h2M5.6 18.4 7 17m10-10 1.4-1.4M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z",
   moon: "M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z",
   more: "M5 12h.01M12 12h.01M19 12h.01",
+  plus: "M12 5v14M5 12h14",
 };
 
 /**
@@ -73,22 +74,27 @@ export function activeHref(path: string): string | null {
   return hits.reduce((best, h) => (h.length > best.length ? h : best));
 }
 
-export type TabId = "home" | "history" | "wallet" | "receipts" | "more";
+export type TabId = "home" | "history" | "scan" | "receipts" | "more";
 
 /**
  * Which of the phone tab bar's five slots owns `path`.
  *
- * Wallet keeps its children (Payments is a row on the Wallet page, not its own
- * tab). Everything the bar has no slot for — Plan, Lending, Statistics,
- * Settings, Scan — belongs to More, as does an unrecognised route: leaving the
- * bar with nothing lit reads as a broken screen, and More is the honest answer
+ * The centre slot is the camera, not a destination in the usual sense — it is
+ * the one thing this app exists to do, and burying it two taps deep in More
+ * made the common case the expensive one. It costs Wallet its slot: five is
+ * what fits a thumb's reach across a phone, and Wallet is the tab whose work
+ * (reading balances) is least often the reason someone opens the app.
+ *
+ * Everything with no slot of its own — Wallet, Plan, Lending, Statistics,
+ * Settings — belongs to More, as does an unrecognised route: leaving the bar
+ * with nothing lit reads as a broken screen, and More is the honest answer
  * since that is where those destinations actually live.
  */
 export function tabForPath(path: string): TabId {
   const href = activeHref(path);
   if (href === "/") return "home";
   if (href === "/history") return "history";
-  if (href === "/wallet" || href?.startsWith("/wallet/")) return "wallet";
+  if (href === "/scan") return "scan";
   if (href === "/receipts") return "receipts";
   return "more";
 }

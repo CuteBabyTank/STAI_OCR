@@ -36,15 +36,22 @@ describe("activeHref", () => {
 });
 
 describe("tabForPath", () => {
-  it("maps the four direct tabs", () => {
+  it("maps the four navigable tabs", () => {
     expect(tabForPath("/")).toBe("home");
     expect(tabForPath("/history")).toBe("history");
-    expect(tabForPath("/wallet")).toBe("wallet");
     expect(tabForPath("/receipts")).toBe("receipts");
+    expect(tabForPath("/settings")).toBe("more");
   });
 
-  it("keeps a wallet child on the wallet tab", () => {
-    expect(tabForPath("/wallet/payments")).toBe("wallet");
+  it("gives the camera the centre slot rather than folding it into More", () => {
+    // The whole point of the centre bubble: /scan owns a slot of its own, so
+    // More does not light up while the camera is on screen.
+    expect(tabForPath("/scan")).toBe("scan");
+  });
+
+  it("sends Wallet to More, since the centre slot took its place", () => {
+    expect(tabForPath("/wallet")).toBe("more");
+    expect(tabForPath("/wallet/payments")).toBe("more");
   });
 
   it("folds everything else into More, so the bar is never fully unlit", () => {
@@ -52,7 +59,6 @@ describe("tabForPath", () => {
     expect(tabForPath("/lending/debts")).toBe("more");
     expect(tabForPath("/statistics")).toBe("more");
     expect(tabForPath("/settings")).toBe("more");
-    expect(tabForPath("/scan")).toBe("more");
     expect(tabForPath("/nope")).toBe("more");
   });
 });

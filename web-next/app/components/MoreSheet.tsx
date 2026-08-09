@@ -1,21 +1,24 @@
 "use client";
 // The tab bar's fifth slot. Four tabs cannot hold ~20 routes, so everything
-// without a slot of its own lives here: the Plan and Lending groups, plus the
-// three standalone destinations and the theme toggle that would otherwise be
+// without a slot of its own lives here: the Wallet, Plan and Lending groups,
+// plus the standalone destinations and the theme toggle that would otherwise be
 // stranded in a sidebar the phone tier can no longer open.
 //
-// Scan is listed first among the standalone rows because until now the camera
-// flow — the thing this app is for — had no persistent entry point at all; it
-// was reachable only from an empty-state CTA on Home.
+// Wallet is first and carries a glyph because it was demoted out of the bar
+// when the camera took the centre slot — it is the one group here a reader may
+// arrive looking for by name, having watched its tab disappear.
+//
+// Scan is deliberately absent: it owns the centre bubble now, and a second
+// entry point in this list would be a row that duplicates the button the reader
+// just tapped past.
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import Sheet from "./Sheet";
-import { ICON_PATHS, LENDING, PLAN, activeHref } from "../lib/navRoutes";
+import { ICON_PATHS, LENDING, PLAN, WALLET, activeHref } from "../lib/navRoutes";
 import type { NavItem } from "../lib/navRoutes";
 import { useTheme } from "../lib/useTheme";
 
 const STANDALONE: (NavItem & { icon: string })[] = [
-  { href: "/scan", label: "Scan a receipt", icon: ICON_PATHS.scan },
   { href: "/statistics", label: "Statistics", icon: ICON_PATHS.stats },
   { href: "/settings", label: "Settings", icon: ICON_PATHS.settings },
 ];
@@ -46,6 +49,13 @@ export default function MoreSheet({ onClose }: { onClose: () => void }) {
 
   return (
     <Sheet title="More" onClose={onClose}>
+      <div className="more-group">
+        <Row href="/wallet" label="Wallet" icon={ICON_PATHS.wallet} />
+        {WALLET.filter((i) => i.href !== "/wallet").map((i) => (
+          <Row key={i.href} href={i.href} label={i.label} />
+        ))}
+      </div>
+
       <div className="more-group">
         {STANDALONE.map((i) => (
           <Row key={i.href} href={i.href} label={i.label} icon={i.icon} />
