@@ -1648,6 +1648,26 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance:none; margi
 
 /* ---- ≤640px: phone. Single column, bottom-sheet dialogs, 16px inputs. -- */
 @media (max-width:640px) {
+  /* ---- Nav bar ------------------------------------------------------- */
+  /* The page's own <header> becomes the nav bar. No NavBar component is
+     introduced: twenty routes already render a header with an h1, and this way
+     none of them need touching. Sticky works here because html uses
+     `overflow-x:clip` rather than `hidden` — chosen originally for exactly this
+     reason, since `hidden` would make html a scroll container and break every
+     position:sticky descendant.
+     The negative margins cancel .shell's padding so the glass reaches both
+     edges; the right padding reserves the chat launcher's 44px corner. */
+  main > header {
+    position:sticky; top:0; z-index:100;
+    margin:-16px calc(-14px - env(safe-area-inset-right)) 0 calc(-14px - env(safe-area-inset-left));
+    padding:calc(10px + env(safe-area-inset-top)) calc(64px + env(safe-area-inset-right))
+            10px calc(14px + env(safe-area-inset-left));
+    background:var(--glass);
+    -webkit-backdrop-filter:saturate(180%) blur(20px);
+    backdrop-filter:saturate(180%) blur(20px);
+    border-bottom:1px solid var(--glass-border);
+  }
+
   /* Paired and four-up tiles stay side by side on a phone. Each holds one short
      figure, so a full-width row per tile bought nothing but scroll — the home
      view ran past 2000px and the headline numbers fell below the fold. The
@@ -1661,7 +1681,7 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance:none; margi
   .stat-value { font-size:24px; margin:8px 0 6px; }
   .nw-figure { font-size:27px; }
   .tile-num { font-size:22px; }
-  h1 { font-size:19px; }
+  h1 { font-size:var(--t-title); }
   main { gap:18px; }
 
   /* Header actions go full width rather than crowding the title. The 150px
@@ -1676,7 +1696,7 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance:none; margi
   /* The headline figure gets bigger on the phone, not smaller: it is the first
      thing worth reading and it no longer competes with a right-hand column. */
   .header-figure-num { font-size:40px; }
-  .header-figure-sub { font-size:12.5px; }
+  .header-figure-sub { font-size:var(--t-caption); }
   /* Title takes its own line; the stepper and link share the next one, so the
      month never gets clipped between them. */
   .ov-head { flex-direction:column; align-items:flex-start; }
@@ -1791,8 +1811,20 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance:none; margi
   }
   .bt-modal-foot > * { flex:1 1 130px; justify-content:center; }
 
-  /* The receipt-app modal keeps its centred placement but stops assuming 520px. */
-  .modal { width:calc(100vw - 24px); max-height:86dvh; padding:20px; }
+  /* The scan page's past-receipts dialog. Not routed through <Sheet>: it is
+     always mounted and toggled by an .open class, so it would need converting
+     to conditional rendering first. It gets the sheet's shape and a handle so
+     it does not read as a stray centred box among real sheets. */
+  .modal {
+    top:auto; bottom:0; left:0; transform:translateY(12px); width:100%;
+    max-height:86dvh; padding:20px 20px calc(20px + env(safe-area-inset-bottom));
+    border-radius:22px 22px 0 0;
+  }
+  .modal.open { transform:none; }
+  .modal::before {
+    content:""; display:block; width:38px; height:5px; border-radius:3px;
+    background:var(--border-strong); margin:-6px auto 12px;
+  }
 
   /* 16px is the threshold below which iOS Safari zooms the page on focus, and
      it never zooms back out. Every focusable text field has to clear it. */
@@ -1830,6 +1862,12 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance:none; margi
   /* The card head has to wrap before it clips the cashflow legend. */
   .card-head { flex-wrap:wrap; gap:8px; }
   .cf-legend { gap:12px; font-size:12px; }
+
+  /* Phone-tier body copy on the rem scale, so it answers Safari's per-site Text
+     Size control. Desktop rules keep their px values — this is scoped to the
+     phone tier along with everything else in this block. */
+  .subhead, .stat-label { font-size:var(--t-small); }
+  .nav-item, .more-row, .btn-primary, .chip { font-size:var(--t-body); }
 }
 
 /* ---- ≤400px: small phones (iPhone SE and friends). ------------------- */
@@ -1884,6 +1922,6 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance:none; margi
    content is just unreadable, so the chrome goes opaque instead. ---------- */
 @supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))) {
   @media (max-width:640px) {
-    .tabbar { background:var(--surface); }
+    .tabbar, main > header { background:var(--surface); }
   }
 }
