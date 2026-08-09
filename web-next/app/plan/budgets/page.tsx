@@ -7,6 +7,7 @@ import { money } from "../../lib/format";
 import { listBudgetPlans, createBudgetPlan, deleteBudgetPlan, listCategories } from "../../lib/api";
 import { useRefresh } from "../../lib/useRefresh";
 import { Modal, Field, TextInput, Select, Button, Progress, FormError } from "../../components/ui";
+import EmptyState from "../../components/empty";
 
 export default function BudgetsPage() {
   const [budgets, setBudgets] = useState<BudgetPlan[]>([]);
@@ -36,7 +37,11 @@ export default function BudgetsPage() {
 
         <div className="card">
           {budgets.length === 0 ? (
-            <div className="empty-note">No budgets yet.</div>
+            <EmptyState
+              glyphs={["gauge", "tag", "coins", "chart"]}
+              title="No budgets yet"
+              sub="Cap a category and watch it through the month."
+            />
           ) : (
             <div className="plan-list">
               {budgets.map((b) => {

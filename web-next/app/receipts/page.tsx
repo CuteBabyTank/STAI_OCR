@@ -7,8 +7,19 @@ import type { Receipt } from "../lib/types";
 import { catMeta, fmtDate, money } from "../lib/format";
 import ConfidenceBadge from "../components/ConfidenceBadge";
 import ReceiptUpload from "../components/ReceiptUpload";
+import dynamic from "next/dynamic";
 import { useRefresh } from "../lib/useRefresh";
 import { Select } from "../components/ui";
+
+/* The empty state carries the animation runtime, and it only ever renders when
+   the ledger has nothing in it. Loading it eagerly would bill every visitor who
+   *does* have receipts — the common case — for decoration they never see, so it
+   is split out and fetched on demand. `loading` reserves the same height the
+   real stage occupies, so arriving at it does not shift the copy underneath. */
+const ReceiptsEmptyState = dynamic(
+  () => import("../components/ReceiptsEmptyState"),
+  { ssr: false, loading: () => <div className="es-reserve" aria-hidden="true" /> }
+);
 
 // Sort options for the list. Each comparator returns the usual -1/0/1.
 //
@@ -120,9 +131,7 @@ export default function ReceiptsPage() {
           {loading ? (
             <p className="rl-empty">Loading…</p>
           ) : sorted.length === 0 ? (
-            <p className="rl-empty">
-              No receipts yet — click <strong>Add receipts</strong> to scan or photograph one.
-            </p>
+            <ReceiptsEmptyState onAdd={() => setAdding(true)} />
           ) : (
             <ul className="rl-list">
               {sorted.map((r) => (

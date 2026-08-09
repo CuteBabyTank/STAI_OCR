@@ -8,6 +8,7 @@ import { money, fmtDate, CURRENCIES } from "../../lib/format";
 import { listDebts, createDebt, deleteDebt } from "../../lib/api";
 import { useRefresh } from "../../lib/useRefresh";
 import { Modal, Field, TextInput, Select, Button, Progress, FormError } from "../../components/ui";
+import EmptyState from "../../components/empty";
 
 export default function DebtsPage() {
   const [debts, setDebts] = useState<Debt[]>([]);
@@ -34,7 +35,11 @@ export default function DebtsPage() {
         </header>
 
         <div className="card">
-          {debts.length === 0 ? <div className="empty-note">No debts tracked.</div> : (
+          {debts.length === 0 ? <EmptyState
+            glyphs={["handshake", "coins", "calendar"]}
+            title="No debts tracked"
+            sub="Record what you owe and chip away at it."
+          /> : (
             <div className="plan-list">
               {debts.map((d) => (
                 <div key={d.id} className="plan-row">

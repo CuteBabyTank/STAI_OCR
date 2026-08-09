@@ -9,6 +9,7 @@ import { CURRENCIES } from "../../lib/format";
 import { useRefresh } from "../../lib/useRefresh";
 import ActivityModal from "../../components/ActivityModal";
 import { Modal, Field, TextInput, Select, Button, Progress, FormError } from "../../components/ui";
+import EmptyState from "../../components/empty";
 
 export default function GoalsPage() {
   const [goals, setGoals] = useState<Goal[]>([]);
@@ -37,7 +38,11 @@ export default function GoalsPage() {
         </header>
 
         <div className="card">
-          {goals.length === 0 ? <div className="empty-note">No goals yet.</div> : (
+          {goals.length === 0 ? <EmptyState
+            glyphs={["target", "coins", "chart", "calendar"]}
+            title="No goals yet"
+            sub="Set a target and track what you put aside."
+          /> : (
             <div className="plan-list">
               {goals.map((g) => (
                 <div key={g.id} className="plan-row">

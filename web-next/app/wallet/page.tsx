@@ -9,6 +9,7 @@ import { listAccounts, getNetWorth, deleteAccount, setAccountBalance } from "../
 import { useRefresh, broadcastRefresh } from "../lib/useRefresh";
 import AccountModal from "../components/AccountModal";
 import { Modal, Field, TextInput, Button, Segmented, FormError } from "../components/ui";
+import EmptyState from "../components/empty";
 
 type Scope = "all" | "assets" | "liabilities";
 
@@ -100,8 +101,13 @@ export default function WalletPage() {
         {loading ? (
           <div className="empty-note">Loading…</div>
         ) : shown.length === 0 ? (
-          <div className="card empty-note">
-            No accounts yet. Click <strong>Add account</strong> to create your first one.
+          <div className="card">
+            <EmptyState
+              glyphs={["card", "coins", "chart", "arrows"]}
+              title="No accounts yet"
+              sub="Add your first one to start tracking balances."
+              action={{ label: "Add account", onClick: () => setModal({ mode: "add" }) }}
+            />
           </div>
         ) : (
           <div className="acct-grid">

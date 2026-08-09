@@ -1,4 +1,5 @@
 "use client";
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -85,15 +86,15 @@ export default function Sidebar({
   // — so there's no navigation flash.
   const [collapsed, setCollapsed] = useState(false);
   const [open, setOpen] = useState<Record<string, boolean>>({ wallet: true, plan: false, lending: false });
-  // Dark is the default (see the token blocks in globals.css); light is the only
+  // Light is the default (see the token blocks in globals.css); dark is the only
   // state that needs storing. The attribute is already on <html> by now — the
   // inline script in layout.tsx sets it before paint — so this only mirrors it
   // into React state for the button's label.
-  const [light, setLight] = useState(false);
+  const [light, setLight] = useState(true);
 
   useEffect(() => {
     setCollapsed(localStorage.getItem("sb-collapsed") === "1");
-    setLight(document.documentElement.getAttribute("data-theme") === "light");
+    setLight(document.documentElement.getAttribute("data-theme") !== "dark");
     const groups = localStorage.getItem("sb-groups");
     if (groups) {
       try { setOpen((o) => ({ ...o, ...JSON.parse(groups) })); } catch { /* ignore */ }
@@ -184,7 +185,7 @@ export default function Sidebar({
       <div className="sidebar-inner">
         <div className="brand-wrap">
           <div className="brand">
-            <div className="brand-mark">◆</div>
+            <Image className="brand-mark" src="/logo.png" alt="" width={32} height={32} priority />
             <div>
               <span className="brand-name">
                 Ledger<span className="beta-pill">BETA</span>

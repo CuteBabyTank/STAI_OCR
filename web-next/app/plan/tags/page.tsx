@@ -5,6 +5,7 @@ import type { Tag } from "../../lib/types";
 import { listTags, createTag, deleteTag } from "../../lib/api";
 import { useRefresh } from "../../lib/useRefresh";
 import { Field, TextInput, Select, Button, FormError, ColorPicker } from "../../components/ui";
+import EmptyState from "../../components/empty";
 
 export default function TagsPage() {
   const [tags, setTags] = useState<Tag[]>([]);
@@ -60,7 +61,11 @@ export default function TagsPage() {
           </div>
 
           {tags.length === 0 ? (
-            <div className="empty-note">No tags yet.</div>
+            <EmptyState
+              glyphs={["tag", "receipt", "document"]}
+              title="No tags yet"
+              sub="Tags let you slice spending your own way."
+            />
           ) : (
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
               {tags.map((t) => (

@@ -9,6 +9,7 @@ import { listTransactions, listAccounts, listCategories, deleteTransaction } fro
 import { useRefresh } from "../lib/useRefresh";
 import { ExpenseModal, IncomeModal } from "../components/TransactionModals";
 import { Segmented, Select, TextInput } from "../components/ui";
+import EmptyState from "../components/empty";
 
 type KindFilter = "all" | TxnKind;
 
@@ -122,7 +123,11 @@ export default function HistoryPage() {
           {loading ? (
             <div className="empty-note">Loading…</div>
           ) : filtered.length === 0 ? (
-            <div className="empty-note">No transactions match these filters.</div>
+            <EmptyState
+              glyphs={["arrows", "calendar", "coins", "tag"]}
+              title="Nothing matches these filters"
+              sub="Widen the date range or clear a filter to see more."
+            />
           ) : (
             filtered.map((t) => {
               const m = rowMeta(t);

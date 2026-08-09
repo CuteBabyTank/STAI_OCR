@@ -7,6 +7,7 @@ import { money, fmtDate } from "../../lib/format";
 import { listReceivables, listReceivableActivity, listAccounts, receivableActivity } from "../../lib/api";
 import { useRefresh } from "../../lib/useRefresh";
 import { Modal, Field, Select, TextInput, Button, FormError } from "../../components/ui";
+import EmptyState from "../../components/empty";
 
 export default function ReceivableActivityPage() {
   const [log, setLog] = useState<ReceivableActivityRow[]>([]);
@@ -38,9 +39,16 @@ export default function ReceivableActivityPage() {
 
         <div className="card">
           {log.length === 0 ? (
-            <div className="empty-note">
-              No activity logged yet.{items.length === 0 && " Add a receivable on the Owed-to-you page first."}
-            </div>
+            <EmptyState
+              glyphs={["handshake", "coins", "clock", "arrows"]}
+              title="No activity logged yet"
+              sub={items.length === 0
+                ? "Add a receivable first, then log collections against it."
+                : "Collections you log will show up here."}
+              {...(items.length === 0
+                ? { action: { label: "Go to owed to you", href: "/lending/receivables" } }
+                : {})}
+            />
           ) : (
             <div className="plan-list">
               {log.map((r) => {

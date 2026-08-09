@@ -15,28 +15,28 @@ export const metadata: Metadata = {
 // in globals.css resolves to 0. `maximumScale` is deliberately absent: capping
 // zoom would lock out anyone who needs to magnify the ledger.
 //
-// themeColor is the dark canvas unconditionally, matching the default theme —
-// a prefers-color-scheme split here would paint the browser chrome light around
-// a dark page for anyone whose OS is set to light.
+// themeColor is the light canvas unconditionally, matching the default theme —
+// a prefers-color-scheme split here would paint the browser chrome dark around
+// a light page for anyone whose OS is set to dark.
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
-  themeColor: "#0C0D10",
+  themeColor: "#F7F8FA",
 };
 
 // Runs before the first paint (Next inlines a beforeInteractive-equivalent inside
-// <head> when the script is rendered here). Only a saved "light" preference does
-// anything — the default is already dark in CSS, so there is nothing to apply and
+// <head> when the script is rendered here). Only a saved "dark" preference does
+// anything — the default is already light in CSS, so there is nothing to apply and
 // nothing to flash. Wrapped in try/catch because localStorage throws outright in
 // Safari private mode, and a theme preference is not worth a blank page.
-const THEME_INIT = `try{if(localStorage.getItem('theme')==='light')document.documentElement.setAttribute('data-theme','light')}catch(e){}`;
+const THEME_INIT = `try{if(localStorage.getItem('theme')==='dark')document.documentElement.setAttribute('data-theme','dark')}catch(e){}`;
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        {/* Sets data-theme before React hydrates, so a saved light preference is
+        {/* Sets data-theme before React hydrates, so a saved dark preference is
             already on <html> when the page first paints. suppressHydrationWarning
             on <html> is required: the server renders no attribute and this script
             may add one before hydration compares them. */}

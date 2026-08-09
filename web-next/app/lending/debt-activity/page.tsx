@@ -8,6 +8,7 @@ import { money, fmtDate } from "../../lib/format";
 import { listDebts, listDebtActivity, listAccounts, debtActivity } from "../../lib/api";
 import { useRefresh } from "../../lib/useRefresh";
 import { Modal, Field, Select, TextInput, Button, FormError } from "../../components/ui";
+import EmptyState from "../../components/empty";
 
 export default function DebtActivityPage() {
   const [log, setLog] = useState<DebtActivityRow[]>([]);
@@ -39,9 +40,16 @@ export default function DebtActivityPage() {
 
         <div className="card">
           {log.length === 0 ? (
-            <div className="empty-note">
-              No activity logged yet.{debts.length === 0 && " Add a debt on the Debts page first."}
-            </div>
+            <EmptyState
+              glyphs={["handshake", "coins", "calendar", "arrows"]}
+              title="No activity logged yet"
+              sub={debts.length === 0
+                ? "Add a debt first, then log payments against it."
+                : "Payments and charges you log will show up here."}
+              {...(debts.length === 0
+                ? { action: { label: "Go to debts", href: "/lending/debts" } }
+                : {})}
+            />
           ) : (
             <div className="plan-list">
               {log.map((r) => {

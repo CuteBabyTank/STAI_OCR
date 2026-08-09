@@ -11,6 +11,7 @@ import type { Account, Transaction } from "../lib/types";
 import { money, moneyCompact } from "../lib/format";
 import { listTransactions, listAccounts } from "../lib/api";
 import { Segmented } from "../components/ui";
+import EmptyState from "../components/empty";
 
 type Period = "30d" | "90d" | "12m" | "all";
 type Measure = "amount" | "count";
@@ -192,7 +193,14 @@ export default function StatisticsPage() {
           {/* Breakdown donut */}
           <div className="card">
             <p className="section-title">Breakdown</p>
-            {breakdown.rows.length === 0 ? <div className="empty-note">No data.</div> : (
+            {breakdown.rows.length === 0 ? (
+              <EmptyState
+                size="panel"
+                glyphs={["chart", "tag", "coins"]}
+                title="Nothing to break down"
+                sub="No spending in this period yet."
+              />
+            ) : (
               <div style={{ display: "flex", gap: 20, alignItems: "center", flexWrap: "wrap" }}>
                 <div style={{
                   width: 140, height: 140, borderRadius: "50%", flexShrink: 0,
@@ -226,7 +234,14 @@ export default function StatisticsPage() {
           {/* Accounts bar */}
           <div className="card">
             <p className="section-title">Accounts</p>
-            {acctBars.length === 0 ? <div className="empty-note">No data.</div> : (
+            {acctBars.length === 0 ? (
+              <EmptyState
+                size="panel"
+                glyphs={["card", "chart", "arrows"]}
+                title="No account activity"
+                sub="Movements across accounts show up here."
+              />
+            ) : (
               <div style={{ width: "100%", height: 220 }}>
                 <ResponsiveContainer>
                   <BarChart data={acctBars} layout="vertical" margin={{ left: 8 }}>

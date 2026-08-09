@@ -7,6 +7,7 @@ import { money } from "../../lib/format";
 import { listTemplates, createTemplate, deleteTemplate, useTemplate, listAccounts } from "../../lib/api";
 import { useRefresh } from "../../lib/useRefresh";
 import { Field, TextInput, Select, Button, FormError } from "../../components/ui";
+import EmptyState from "../../components/empty";
 
 export default function TemplatesPage() {
   const [templates, setTemplates] = useState<Template[]>([]);
@@ -39,7 +40,12 @@ export default function TemplatesPage() {
   const List = ({ label, k }: { label: string; k: "expense" | "income" }) => (
     <div className="card">
       <p className="section-title">{label}</p>
-      {group(k).length === 0 ? <div className="empty-note">None yet.</div> : group(k).map((t) => (
+      {group(k).length === 0 ? <EmptyState
+        size="panel"
+        glyphs={["document", "coins", "arrows"]}
+        title="None yet"
+        sub="Save a transaction as a template to reuse it."
+      /> : group(k).map((t) => (
         <div key={t.id} className="plan-row">
           <div className="plan-main">
             <div className="plan-title">{t.title}</div>
