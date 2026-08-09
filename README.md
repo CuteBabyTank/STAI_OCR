@@ -50,18 +50,24 @@ column. A slide-ready version of this diagram lives in
 | `gemma4:12b`       | text — SQL agent, RAG answerer, ReAct planner | `AGENT_MODEL`  |
 | `nomic-embed-text` | embeddings — powers semantic search (RAG)     | `EMBED_MODEL`  |
 
-These are the **production** models, served by the shared Ollama endpoint
-(`OLLAMA_HOST`, default `http://103.231.240.155:11434`, set in `core.py` before the
-`ollama` import because the package binds its client at import time).
+All three are served by the shared Ollama endpoint (`OLLAMA_HOST`, default
+`http://103.231.240.155:11434`, set in `core.py` before the `ollama` import because
+the package binds its client at import time).
 
-> Code and `docker-compose.yml` now agree. They previously did not: the code defaulted
-> to `qwen2.5vl:7b` / `qwen2.5:latest` while compose overrode both to the `gemma4`
-> pair, so the same source read receipts with a different model depending only on how
-> it was launched. Still prefer `GET /health` over this table when recording an
-> evaluation run. See `evaluation/CONFIGURATION.md`.
+> **Trialling Qwen-VL for OCR.** `qwen2.5vl:7b` was benchmarked on this branch at
+> 86.3% combined accuracy over 10 labelled receipts — see
+> `evaluation/results/OCR_QWEN25VL_BENCHMARK.md` and re-run it with
+> `evaluation/run_ocr_benchmark.py`. It is **not** the default: the shared endpoint
+> does not carry it, so selecting it also means pointing `OLLAMA_HOST` at an Ollama
+> that does (`ollama pull qwen2.5vl:7b`). There is no free *hosted* Qwen-VL API to
+> use instead — OpenRouter's eight `qwen/*-vl-*` models are all paid, and the free
+> DashScope/ModelScope quotas each require a signup key.
+>
+> Code and `docker-compose.yml` agree on all three. Still prefer `GET /health` over
+> this table when recording an evaluation run. See `evaluation/CONFIGURATION.md`.
 
 To run fully offline against a local Ollama, export all three:
-> `OLLAMA_HOST=http://localhost:11434 VISION_MODEL=qwen2.5vl:7b AGENT_MODEL=qwen2.5:latest`
+> `OLLAMA_HOST=http://localhost:11434 VISION_MODEL=gemma4:e4b AGENT_MODEL=gemma4:12b`
 
 ### Data flow
 

@@ -6,6 +6,12 @@ import { useEffect, useState } from "react";
 // Full budget-tracker navigation (PRD §2.1). Wallet and Plan are expandable
 // groups. A collapse toggle shrinks the rail to icons — a client-only preference
 // persisted to localStorage, so it survives reloads without touching routing.
+//
+// Below 880px this same component is the mobile drawer: AppShell owns the
+// open/closed state and passes it in, CSS turns the rail into an off-canvas
+// panel, and every link reports the navigation back up so the drawer closes
+// behind it. One component, two presentations — a second mobile-only nav would
+// be a second place for routes to go stale.
 
 type Item = { href: string; label: string };
 
@@ -61,9 +67,17 @@ const ICONS = {
   receipt: "M6 2h9l5 5v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1zM14 2v6h6M8 13h8M8 17h6",
   scan: "M4 7V5a1 1 0 0 1 1-1h2M17 4h2a1 1 0 0 1 1 1v2M20 17v2a1 1 0 0 1-1 1h-2M7 20H5a1 1 0 0 1-1-1v-2M3 12h18",
   caret: "m9 6 6 6-6 6",
+  sun: "M12 3v2m0 14v2M5.6 5.6l1.4 1.4m10 10 1.4 1.4M3 12h2m14 0h2M5.6 18.4 7 17m10-10 1.4-1.4M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z",
+  moon: "M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z",
 };
 
-export default function Sidebar() {
+export default function Sidebar({
+  mobileOpen = false,
+  onNavigate,
+}: {
+  mobileOpen?: boolean;
+  onNavigate?: () => void;
+} = {}) {
   const path = usePathname() || "/";
   // Defaults match the server render to avoid hydration mismatches; persisted
   // prefs are applied in an effect after mount. Because the sidebar is persistent
@@ -71,14 +85,29 @@ export default function Sidebar() {
   // — so there's no navigation flash.
   const [collapsed, setCollapsed] = useState(false);
   const [open, setOpen] = useState<Record<string, boolean>>({ wallet: true, plan: false, lending: false });
+  // Dark is the default (see the token blocks in globals.css); light is the only
+  // state that needs storing. The attribute is already on <html> by now — the
+  // inline script in layout.tsx sets it before paint — so this only mirrors it
+  // into React state for the button's label.
+  const [light, setLight] = useState(false);
 
   useEffect(() => {
     setCollapsed(localStorage.getItem("sb-collapsed") === "1");
+    setLight(document.documentElement.getAttribute("data-theme") === "light");
     const groups = localStorage.getItem("sb-groups");
     if (groups) {
       try { setOpen((o) => ({ ...o, ...JSON.parse(groups) })); } catch { /* ignore */ }
     }
   }, []);
+
+  const toggleTheme = () => {
+    setLight((wasLight) => {
+      const next = wasLight ? "dark" : "light";
+      document.documentElement.setAttribute("data-theme", next);
+      try { localStorage.setItem("theme", next); } catch { /* private mode */ }
+      return !wasLight;
+    });
+  };
 
   // Auto-open the group that contains the current route — only ever opens (never
   // closes), and skips the state update when already open so navigation between
@@ -113,7 +142,12 @@ export default function Sidebar() {
   const active = (href: string) => matches(href) && href.length === bestLen;
 
   const NavLink = ({ href, label, icon }: { href: string; label: string; icon?: string }) => (
-    <Link href={href} className={"nav-item" + (active(href) ? " active" : "")} title={label}>
+    <Link
+      href={href}
+      className={"nav-item" + (active(href) ? " active" : "")}
+      title={label}
+      onClick={onNavigate}
+    >
       {icon && <Icon d={icon} />}
       <span className="label">{label}</span>
     </Link>
@@ -143,7 +177,10 @@ export default function Sidebar() {
   );
 
   return (
-    <aside className={"sidebar" + (collapsed ? " collapsed" : "")}>
+    <aside
+      id="app-sidebar"
+      className={"sidebar" + (collapsed ? " collapsed" : "") + (mobileOpen ? " open" : "")}
+    >
       <div className="sidebar-inner">
         <div className="brand-wrap">
           <div className="brand">
@@ -155,9 +192,16 @@ export default function Sidebar() {
               <div className="brand-sub">Budget Tracker</div>
             </div>
           </div>
+          {/* Two dismissals for two shapes: the rail collapses to icons, the
+              drawer closes outright. CSS shows exactly one of them. */}
           <button className="collapse-btn" onClick={toggleCollapse} aria-label="Collapse sidebar">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
               <path d={collapsed ? "m9 6 6 6-6 6" : "m15 6-6 6 6 6"} strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+          <button className="sb-close" onClick={onNavigate} aria-label="Close navigation">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <path d="M18 6 6 18M6 6l12 12" strokeWidth="2" strokeLinecap="round" />
             </svg>
           </button>
         </div>
@@ -172,6 +216,13 @@ export default function Sidebar() {
           <NavLink href="/receipts" label="Receipts" icon={ICONS.receipt} />
           <NavLink href="/settings" label="Settings" icon={ICONS.settings} />
         </nav>
+
+        {/* Lives in the nav rather than on Settings so it is reachable from the
+            mobile drawer, which is the only chrome a phone has. */}
+        <button className="nav-item theme-toggle" onClick={toggleTheme} title={light ? "Switch to dark" : "Switch to light"}>
+          <Icon d={light ? ICONS.moon : ICONS.sun} />
+          <span className="label">{light ? "Dark mode" : "Light mode"}</span>
+        </button>
 
         <div className="nav-user">
           <div className="avatar">◆</div>

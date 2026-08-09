@@ -21,13 +21,19 @@ from datetime import date as _date
 # --------------------------------------------------------------------------- #
 # Configuration
 # --------------------------------------------------------------------------- #
-# The vision/OCR model, served by the shared Ollama endpoint (see core.OLLAMA_HOST).
-# Overridable via the VISION_MODEL env var so a deployment can run a local model
-# (e.g. qwen2.5vl:7b) without a code change.
+# The vision/OCR model, served by an Ollama endpoint (see core.OLLAMA_HOST).
+# Overridable via the VISION_MODEL env var so a deployment can run a different
+# model without a code change.
 #
-# gemma4:e4b is the production choice and now matches docker-compose.yml, which had
-# been overriding a qwen2.5vl:7b default here — so the same code read receipts with
-# a different model depending only on how it was launched.
+# gemma4:e4b is the production choice and matches docker-compose.yml — when these
+# two disagree the same code reads receipts with a different model depending only
+# on how it was launched. It is what the shared endpoint actually carries.
+#
+# qwen2.5vl:7b was trialled on this branch and measured at 86.3% combined accuracy
+# over 10 labelled receipts (evaluation/results/OCR_QWEN25VL_BENCHMARK.md). It is
+# not the default: the shared Ollama endpoint does not serve it, so defaulting to
+# it breaks OCR for anyone who has not pulled it locally. Set VISION_MODEL to
+# select it — the harness and ground truth are kept so the comparison can be re-run.
 #
 # Note gemma4 encodes an image to a FIXED ~256 tokens regardless of resolution, so
 # resolution/crop tuning does not reduce its prompt cost the way it does on

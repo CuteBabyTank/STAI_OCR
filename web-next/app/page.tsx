@@ -111,10 +111,13 @@ export default function Home() {
             <h1>{greet}{name ? `, ${name}` : ""}! 👋</h1>
             <p className="subhead">Here's where your money stands today.</p>
           </div>
+          {/* A class rather than inline styles so it can left-align and take the
+              full row on a phone — right-aligned inside a shrink-to-fit box left
+              the label floating away from its own number. */}
           {nw && (
-            <div style={{ textAlign: "right" }}>
+            <div className="header-figure">
               <div className="stat-label">Net worth</div>
-              <div style={{ fontSize: 22, fontWeight: 680, letterSpacing: "-.02em" }}>{money(nw.net)}</div>
+              <div className="header-figure-num">{money(nw.net)}</div>
             </div>
           )}
         </header>
@@ -136,7 +139,10 @@ export default function Home() {
             </button>
           </div>
         </div>
-        <div className="stat-grid" style={{ gridTemplateColumns: "1fr 1fr" }}>
+        {/* `.two` rather than an inline gridTemplateColumns: an inline style beats
+            the responsive rule in globals.css, which pinned these tiles to two
+            columns even at 320px wide. */}
+        <div className="stat-grid two">
           <div className="card">
             <p className="stat-label">This {topGranularity} out</p>
             <div className="stat-value" style={{ color: "var(--negative)" }}>{money(periodTotals.out)}</div>

@@ -12,6 +12,7 @@ import { Select } from "../components/ui";
 import PeriodControl from "../components/PeriodControl";
 import TxnRow from "../components/TxnRow";
 import ConfidenceBadge from "../components/ConfidenceBadge";
+import { CameraButton } from "../components/CameraCapture";
 import { broadcastRefresh } from "../lib/useRefresh";
 
 interface PeriodSel {
@@ -935,8 +936,11 @@ export default function Dashboard() {
                 <path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" />
               </svg>
             </div>
-            <div className="dz-title">Drop images or click to browse</div>
+            <div className="dz-title">Drop images or tap to browse</div>
             <div className="dz-sub">PNG · JPG · WEBP</div>
+            {/* Same camera component the Receipts modal uses, so a phone gets a
+                real viewfinder here too instead of only a file picker. */}
+            <CameraButton onFiles={processFiles} style={{ marginTop: 12 }} />
           </div>
 
           {batch.length > 0 && (

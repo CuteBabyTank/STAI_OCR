@@ -82,7 +82,9 @@ export default function HistoryPage() {
         </header>
 
         {/* Summary tiles (recompute on filters) */}
-        <div className="stat-grid" style={{ gridTemplateColumns: "1fr 1fr" }}>
+        {/* `.two` rather than an inline gridTemplateColumns — an inline style wins
+            over the media query and would keep these side by side on a phone. */}
+        <div className="stat-grid two">
           <div className="card">
             <p className="stat-label">Income</p>
             <div className="stat-value" style={{ color: "var(--positive)" }}>{money(totals.income)}</div>
