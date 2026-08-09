@@ -26,6 +26,21 @@ export function supportsLiveCamera(): boolean {
   return !!(window.isSecureContext && navigator.mediaDevices?.getUserMedia);
 }
 
+/**
+ * Why the in-page viewfinder is unavailable, in words a user can act on — or null
+ * when it works. Surfacing this matters: "nothing happened when I tapped camera"
+ * is what an unexplained silent fallback feels like, and the usual cause (opening
+ * the dev server at http://192.168.x.x on a phone) is invisible from the UI.
+ */
+export function liveCameraBlockedReason(): string | null {
+  if (typeof window === "undefined") return null;
+  if (supportsLiveCamera()) return null;
+  if (!window.isSecureContext) {
+    return "In-page preview needs https (or localhost), so this opens your phone's camera app instead.";
+  }
+  return "This browser has no in-page camera, so this opens your phone's camera app instead.";
+}
+
 type Facing = "environment" | "user";
 
 /**
@@ -36,12 +51,12 @@ type Facing = "environment" | "user";
 export function CameraButton({
   onFiles,
   className = "btn-ghost",
-  label = "Use camera",
+  label = "Take photo",
   style,
 }: {
   onFiles: (files: File[]) => void;
   className?: string;
-  label?: string;
+  label?: React.ReactNode;
   style?: React.CSSProperties;
 }) {
   const [live, setLive] = useState(false);
@@ -55,10 +70,7 @@ export function CameraButton({
         type="button"
         className={className}
         style={style}
-        onClick={(e) => {
-          // Stop the click reaching a parent dropzone, which would open the
-          // plain file picker on top of the camera.
-          e.stopPropagation();
+        onClick={() => {
           if (supportsLiveCamera()) setLive(true);
           else openNative();
         }}
@@ -75,13 +87,19 @@ export function CameraButton({
       </button>
 
       {/* `capture="environment"` asks for the REAR camera — the one pointed at the
-          receipt. Without it the phone opens the gallery or the selfie camera. */}
+          receipt. Without it the phone opens the gallery or the selfie camera.
+          Deliberately NOT `multiple`: iOS ignores `capture` entirely when both are
+          present and opens the photo library, which is the opposite of the ask.
+
+          Hidden with the clip pattern, never `display:none` — a display:none input
+          cannot be opened by a programmatic .click() on iOS Safari, which makes the
+          camera button do nothing at all. */}
       <input
         ref={nativeRef}
         type="file"
         accept="image/*"
         capture="environment"
-        style={{ display: "none" }}
+        className="visually-hidden-input"
         onChange={(e) => {
           const files = e.target.files ? Array.from(e.target.files) : [];
           // Reset so re-shooting the same filename still fires onChange.

@@ -21,7 +21,7 @@ import { useEffect, useRef, useState } from "react";
 import { money } from "../lib/format";
 import { useOcrJobs } from "../lib/ocrJobs";
 import { Modal, Button } from "./ui";
-import { CameraButton } from "./CameraCapture";
+import { CameraButton, liveCameraBlockedReason } from "./CameraCapture";
 
 export default function ReceiptUpload({ onClose }: { onClose: () => void }) {
   const {
@@ -36,6 +36,11 @@ export default function ReceiptUpload({ onClose }: { onClose: () => void }) {
   } = useOcrJobs();
   const [dragging, setDragging] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // Why the in-page viewfinder is unavailable, if it is. Resolved after mount
+  // because it reads window.isSecureContext, which does not exist on the server.
+  const [camHint, setCamHint] = useState<string | null>(null);
+  useEffect(() => setCamHint(liveCameraBlockedReason()), []);
 
   const onFiles = (fl: FileList | null) => fl && stageFiles(Array.from(fl));
 
@@ -69,15 +74,11 @@ export default function ReceiptUpload({ onClose }: { onClose: () => void }) {
           <Button onClick={closeModal}>
             {reading > 0 ? "Close — keep reading" : done ? "Done" : "Close"}
           </Button>
-          {/* Two distinct actions: stage files, then read them. Neither button
-              ever becomes a status label — progress lives on the rows below, so
-              the modal can't look stuck and more files can be staged mid-read. */}
-          <Button onClick={() => fileRef.current?.click()}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" width="16" height="16" aria-hidden="true">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-            Upload
-          </Button>
+          {/* Staging now happens through the two big buttons in the body, so the
+              footer carries only "read them" — one Upload control, not two. The
+              Run button never becomes a status label: progress lives on the rows
+              below, so the modal can't look stuck and more files can be staged
+              mid-read. */}
           <Button
             variant="primary"
             onClick={runOcr}
@@ -92,30 +93,61 @@ export default function ReceiptUpload({ onClose }: { onClose: () => void }) {
         </>
       }
     >
+      {/* Clip-hidden rather than display:none — iOS Safari will not open a
+          display:none file input from a programmatic .click(). */}
       <input
         ref={fileRef}
         type="file"
         accept="image/*,application/pdf"
         multiple
-        style={{ display: "none" }}
+        className="visually-hidden-input"
         onChange={(e) => { onFiles(e.target.files); e.currentTarget.value = ""; }}
       />
 
+      {/* Two separate, equal actions — NOT one nested inside the other. The camera
+          button used to live inside the dropzone, which is itself a click target,
+          so a tap that landed a pixel outside the button opened the file picker
+          instead of the camera. Nothing nests here now, so each button can only do
+          its own thing. */}
+      <div className="rcpt-actions">
+        <button
+          type="button"
+          className="rcpt-action"
+          onClick={() => fileRef.current?.click()}
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          <span className="rcpt-action-label">Upload files</span>
+          <span className="rcpt-action-sub">Images or PDFs</span>
+        </button>
+
+        {/* Captured shots stage exactly like uploaded files, so the camera can stay
+            open for several receipts and the rows below fill in as they arrive. */}
+        <CameraButton
+          className="rcpt-action rcpt-action-cam"
+          onFiles={stageFiles}
+          label={
+            <>
+              <span className="rcpt-action-label">Take photo</span>
+              <span className="rcpt-action-sub">Use your camera</span>
+            </>
+          }
+        />
+      </div>
+
+      {camHint && <p className="rcpt-cam-hint">{camHint}</p>}
+
+      {/* Drop target only — no click handler, so it can never intercept a button. */}
       <div
         className={"rcpt-drop" + (dragging ? " over" : "")}
         onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
         onDragLeave={() => setDragging(false)}
         onDrop={(e) => { e.preventDefault(); setDragging(false); onFiles(e.dataTransfer.files); }}
-        onClick={() => fileRef.current?.click()}
       >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-        <div className="rcpt-drop-title">Drop receipts here, or tap to browse</div>
-        <div className="rcpt-drop-sub">Images or PDFs · nothing is read until you press Run OCR</div>
-        {/* Captured shots stage exactly like dropped files, so the camera can stay
-            open for several receipts and the rows below fill in as they arrive. */}
-        <CameraButton onFiles={stageFiles} style={{ marginTop: 14 }} />
+        <div className="rcpt-drop-sub">
+          …or drop receipts here · nothing is read until you press Run OCR
+        </div>
       </div>
 
       {batch.length > 0 && (

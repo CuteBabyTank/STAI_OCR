@@ -12,7 +12,7 @@ import { Select } from "../components/ui";
 import PeriodControl from "../components/PeriodControl";
 import TxnRow from "../components/TxnRow";
 import ConfidenceBadge from "../components/ConfidenceBadge";
-import { CameraButton } from "../components/CameraCapture";
+import { CameraButton, liveCameraBlockedReason } from "../components/CameraCapture";
 import { broadcastRefresh } from "../lib/useRefresh";
 
 interface PeriodSel {
@@ -133,6 +133,10 @@ export default function Dashboard() {
   const [batch, setBatch] = useState<BatchItem[]>([]);
   const [dragging, setDragging] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  // Why the in-page viewfinder is unavailable, if it is. Resolved after mount —
+  // it reads window.isSecureContext, which does not exist during SSR.
+  const [camHint, setCamHint] = useState<string | null>(null);
+  useEffect(() => setCamHint(liveCameraBlockedReason()), []);
 
   const [chatOpen, setChatOpen] = useState(false);
   // Minimized is a third state: the panel collapses to its header so this page's
@@ -905,17 +909,48 @@ export default function Dashboard() {
         </p>
 
         <div className="panel-scroll">
+          {/* `hidden` is display:none under the hood, which iOS Safari refuses to
+              open from a programmatic .click(). */}
           <input
             ref={fileRef}
             type="file"
             accept="image/*,application/pdf"
             multiple
-            hidden
+            className="visually-hidden-input"
             onChange={(e) => onFiles(e.target.files)}
           />
+
+          {/* Upload and camera are siblings, not nested — the camera button used
+              to sit inside the dropzone, whose own onClick opened the file picker
+              and swallowed taps meant for the camera. */}
+          <div className="rcpt-actions">
+            <button type="button" className="rcpt-action" onClick={onPick}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              <span className="rcpt-action-label">Upload files</span>
+              <span className="rcpt-action-sub">PNG · JPG · PDF</span>
+            </button>
+
+            {/* Same camera component the Receipts modal uses, so a phone gets a
+                real viewfinder here too instead of only a file picker. */}
+            <CameraButton
+              className="rcpt-action rcpt-action-cam"
+              onFiles={processFiles}
+              label={
+                <>
+                  <span className="rcpt-action-label">Take photo</span>
+                  <span className="rcpt-action-sub">Use your camera</span>
+                </>
+              }
+            />
+          </div>
+
+          {camHint && <p className="rcpt-cam-hint">{camHint}</p>}
+
+          {/* Drop target only — no click handler to intercept the buttons above. */}
           <div
             className={"dropzone" + (dragging ? " drag" : "")}
-            onClick={onPick}
             onDragOver={(e) => {
               e.preventDefault();
               setDragging(true);
@@ -930,17 +965,7 @@ export default function Dashboard() {
               onFiles(e.dataTransfer.files);
             }}
           >
-            <div className="dz-icon">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                <path d="M12 16V4M12 4 8 8M12 4l4 4" />
-                <path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" />
-              </svg>
-            </div>
-            <div className="dz-title">Drop images or tap to browse</div>
-            <div className="dz-sub">PNG · JPG · WEBP</div>
-            {/* Same camera component the Receipts modal uses, so a phone gets a
-                real viewfinder here too instead of only a file picker. */}
-            <CameraButton onFiles={processFiles} style={{ marginTop: 12 }} />
+            <div className="dz-sub">…or drop images here</div>
           </div>
 
           {batch.length > 0 && (
