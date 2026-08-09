@@ -31,13 +31,13 @@ OUT = Path(__file__).resolve().parent / "assets"
 OUT.mkdir(parents=True, exist_ok=True)
 
 # Same ramp as the deck: one neutral scale, one accent, two semantic colours.
-INK = "#111827"
-MUTED = "#6B7280"
-FAINT = "#9CA3AF"
-LINE = "#E5E7EB"
+INK = "#0F172A"
+MUTED = "#8A94A3"
+FAINT = "#C2C9D2"
+LINE = "#E7EAEE"
 ACCENT = "#B45309"
 ACCENT_LIGHT = "#D9A441"
-NEUTRAL = "#94A3B8"
+NEUTRAL = "#A9B3C1"
 GOOD = "#047857"
 BAD = "#B91C1C"
 
@@ -47,15 +47,29 @@ GREEN = GOOD
 RED = BAD
 VIOLET = MUTED
 
+# The figures are read at the same distance as the slides they sit on, so they
+# carry the deck's type and the deck's restraint: no tick marks, no frame round
+# the legend, one hairline per axis, titles left-aligned like a slide label.
 plt.rcParams.update({
-    "font.family": "DejaVu Sans",
-    "font.size": 11,
+    "font.family": ["Segoe UI", "DejaVu Sans"],
+    "font.size": 10,
     "axes.edgecolor": LINE,
-    "axes.labelcolor": INK,
+    "axes.linewidth": 0.8,
+    "axes.labelcolor": MUTED,
+    "axes.labelsize": 9,
     "axes.titlecolor": INK,
+    "axes.titlesize": 10.5,
+    "axes.titlelocation": "left",
+    "axes.titlepad": 12,
     "text.color": INK,
     "xtick.color": MUTED,
     "ytick.color": MUTED,
+    "xtick.labelsize": 9,
+    "ytick.labelsize": 9,
+    "xtick.major.size": 0,
+    "ytick.major.size": 0,
+    "legend.frameon": False,
+    "legend.fontsize": 9,
     "axes.spines.top": False,
     "axes.spines.right": False,
     "figure.facecolor": "white",
