@@ -6,6 +6,7 @@ import type { Upcoming } from "../../lib/types";
 import { money, fmtDate } from "../../lib/format";
 import { getUpcoming } from "../../lib/api";
 import { DueBadge } from "../../components/ui";
+import EmptyState from "../../components/empty";
 
 export default function UpcomingPage() {
   const [data, setData] = useState<Upcoming | null>(null);
@@ -14,7 +15,11 @@ export default function UpcomingPage() {
   const Card = ({ title, rows }: { title: string; rows: { id: number; label: string; amount: number; due: string | null; days: number | null | undefined }[] }) => (
     <div className="card">
       <p className="section-title">{title}</p>
-      {rows.length === 0 ? <div className="empty-note">Nothing upcoming.</div> : (
+      {rows.length === 0 ? <EmptyState
+        glyphs={["calendar", "clock", "coins"]}
+        title="Nothing upcoming"
+        sub="Scheduled payments and due dates land here."
+      /> : (
         <div className="plan-list">
           {rows.map((r) => (
             <div key={r.id} className="plan-row">

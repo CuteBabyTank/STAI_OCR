@@ -14,6 +14,7 @@ import StatTiles from "./components/StatTiles";
 import CashflowChart from "./components/CashflowChart";
 import TopVendors from "./components/TopVendors";
 import PeriodControl from "./components/PeriodControl";
+import EmptyState from "./components/empty";
 
 function greeting(hour: number) {
   if (hour < 12) return "Good morning";
@@ -117,7 +118,17 @@ export default function Home() {
           {nw && (
             <div className="header-figure">
               <div className="stat-label">Net worth</div>
-              <div className="header-figure-num">{money(nw.net)}</div>
+              {/* The page's headline answer to "where do I stand", so it gets the
+                  largest type on the view. Sign-coloured to match how balances
+                  read everywhere else in the ledger. */}
+              <div className={"header-figure-num num" + (nw.net < 0 ? " neg" : "")}>
+                {money(nw.net)}
+              </div>
+              {accounts.length > 0 && (
+                <div className="header-figure-sub">
+                  across {accounts.length} account{accounts.length === 1 ? "" : "s"}
+                </div>
+              )}
             </div>
           )}
         </header>
@@ -163,7 +174,13 @@ export default function Home() {
             {loading ? (
               <div className="empty-note">Loading…</div>
             ) : accounts.length === 0 ? (
-              <div className="empty-note">No accounts yet. <Link href="/wallet" className="link">Add one</Link>.</div>
+              <EmptyState
+                size="panel"
+                glyphs={["card", "coins", "chart"]}
+                title="No accounts yet"
+                sub="Add one to start tracking balances."
+                action={{ label: "Add account", href: "/wallet" }}
+              />
             ) : (
               GROUPS.map((g) => {
                 const items = accounts.filter((a) => g.types.includes(a.type));
@@ -199,11 +216,21 @@ export default function Home() {
             {loading ? (
               <div className="empty-note">Loading…</div>
             ) : txns.length === 0 ? (
-              <div className="empty-note">
-                {allTxns.length === 0 && allReceipts.length === 0
-                  ? "No transactions yet. Use the + button to add one."
-                  : `No transactions this ${topGranularity}.`}
-              </div>
+              allTxns.length === 0 && allReceipts.length === 0 ? (
+                <EmptyState
+                  size="panel"
+                  glyphs={["arrows", "coins", "receipt"]}
+                  title="No transactions yet"
+                  sub="Use the + button to add your first one."
+                />
+              ) : (
+                <EmptyState
+                  size="panel"
+                  glyphs={["calendar", "arrows", "coins"]}
+                  title={`Nothing this ${topGranularity}`}
+                  sub="Try another period, or add a transaction."
+                />
+              )
             ) : (
               txns.map((t) => {
                 const sign = t.kind === "income" ? "+" : t.kind === "expense" ? "-" : undefined;
@@ -225,9 +252,9 @@ export default function Home() {
         </div>
 
         {/* Spending overview (receipt analytics — moved here from the scan page) */}
-        <div className="card-head" style={{ marginBottom: -6 }}>
+        <div className="card-head ov-head" style={{ marginBottom: -6 }}>
           <p className="card-title">Spending overview</p>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div className="ov-head-controls">
             {/* Scopes the three panels below only. The "This month out/in" cards
                 above stay on the real current month, so their labels stay true. */}
             {analytics && (
@@ -249,7 +276,13 @@ export default function Home() {
             {analytics ? (
               <CashflowChart bars={analytics.bars} currency={analytics.currency} focusKey={analytics.focus_key} />
             ) : (
-              <div className="empty-note">No receipt data yet.</div>
+              <EmptyState
+                size="panel"
+                glyphs={["chart", "receipt", "coins"]}
+                title="No receipt data yet"
+                sub="Scan a receipt and your cashflow appears here."
+                action={{ label: "Scan a receipt", href: "/scan" }}
+              />
             )}
           </div>
           <div className="card">
@@ -259,7 +292,13 @@ export default function Home() {
             {analytics && analytics.top_vendors.length > 0 ? (
               <TopVendors vendors={analytics.top_vendors} currency={analytics.currency} />
             ) : (
-              <div className="empty-note">Add receipts to see your top vendors.</div>
+              <EmptyState
+                size="panel"
+                glyphs={["receipt", "tag", "chart"]}
+                title="No vendors yet"
+                sub="Add receipts to see where your money goes."
+                action={{ label: "Add receipts", href: "/receipts" }}
+              />
             )}
           </div>
         </div>

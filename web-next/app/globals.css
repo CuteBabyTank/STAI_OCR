@@ -1,23 +1,20 @@
-/* Dark is the app's default theme — not "dark if the OS says so". A bare :root
-   is the dark palette, so the very first paint on a fresh device is dark with no
-   flash, and there is no prefers-color-scheme block to override it. Light is
-   opt-in only, via data-theme="light" (set by the toggle in the sidebar and
+/* Tailwind sits at the top so everything below wins a specificity tie: this file
+   stays the authority on how the ledger looks, and Tailwind only supplies
+   utilities to the vendored components under components/ui. Preflight is
+   disabled in tailwind.config.js, so `base` emits just the --tw-* custom
+   property defaults that shadow/transform/filter utilities read — no reset. */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Light is the app's default theme — not "light if the OS says so". A bare :root
+   is the light palette, so the very first paint on a fresh device is light with no
+   flash, and there is no prefers-color-scheme block to override it. Dark is
+   opt-in only, via data-theme="dark" (set by the toggle in the sidebar and
    restored before paint by the inline script in layout.tsx).
-   data-theme="dark" is spelled out as well so the toggle can switch back
+   data-theme="light" is spelled out as well so the toggle can switch back
    explicitly rather than by removing the attribute. */
 :root,
-:root[data-theme="dark"] {
-  --canvas:#0C0D10; --surface:#151619; --sunken:#101114;
-  --border:#25272C; --border-strong:#303339;
-  --ink:#F3F4F6; --ink-2:#9CA3AE; --ink-3:#6B7180;
-  --accent:#6D67F0; --accent-hover:#847EF5; --accent-wash:#1C1D33;
-  --positive:#2ABF8A; --negative:#F1575C; --warn:#EAB43A;
-  --cat-food:#6D67F0; --cat-shopping:#2ABF8A; --cat-health:#EAB43A; --cat-other:#7C818C;
-  --shadow:0 1px 3px rgba(0,0,0,.4), 0 1px 2px rgba(0,0,0,.5);
-  --shadow-lg:0 16px 48px rgba(0,0,0,.55), 0 2px 10px rgba(0,0,0,.4);
-  --scrim:rgba(0,0,0,.6);
-  color-scheme:dark;
-}
 :root[data-theme="light"] {
   --canvas:#F7F8FA; --surface:#FFFFFF; --sunken:#FCFCFD;
   --border:#EAECEF; --border-strong:#DFE2E7;
@@ -29,6 +26,18 @@
   --shadow-lg:0 12px 40px rgba(16,24,40,.14), 0 2px 8px rgba(16,24,40,.08);
   --scrim:rgba(16,24,40,.42);
   color-scheme:light;
+}
+:root[data-theme="dark"] {
+  --canvas:#0C0D10; --surface:#151619; --sunken:#101114;
+  --border:#25272C; --border-strong:#303339;
+  --ink:#F3F4F6; --ink-2:#9CA3AE; --ink-3:#6B7180;
+  --accent:#6D67F0; --accent-hover:#847EF5; --accent-wash:#1C1D33;
+  --positive:#2ABF8A; --negative:#F1575C; --warn:#EAB43A;
+  --cat-food:#6D67F0; --cat-shopping:#2ABF8A; --cat-health:#EAB43A; --cat-other:#7C818C;
+  --shadow:0 1px 3px rgba(0,0,0,.4), 0 1px 2px rgba(0,0,0,.5);
+  --shadow-lg:0 16px 48px rgba(0,0,0,.55), 0 2px 10px rgba(0,0,0,.4);
+  --scrim:rgba(0,0,0,.6);
+  color-scheme:dark;
 }
 :root {
   --radius:16px; --radius-sm:12px;
@@ -61,9 +70,8 @@ a { color:inherit; }
 .sidebar-inner { position:sticky; top:24px; display:flex; flex-direction:column; gap:28px; }
 .brand { display:flex; align-items:center; gap:10px; padding:0 8px; }
 .brand-mark {
-  width:32px; height:32px; border-radius:9px; display:grid; place-items:center;
-  background:var(--accent); color:#fff; font-size:15px;
-  box-shadow:0 4px 12px color-mix(in srgb, var(--accent) 40%, transparent);
+  width:32px; height:32px; border-radius:9px; display:block; object-fit:cover;
+  flex-shrink:0;
 }
 .brand-name { font-size:18px; font-weight:650; letter-spacing:-.02em; }
 nav { display:flex; flex-direction:column; gap:2px; }
@@ -725,6 +733,98 @@ a.nav-item { text-decoration:none; }
 .back-link:hover { color:var(--accent); }
 
 .rl-empty { color:var(--ink-3); font-size:14px; padding:10px 4px; margin:0; }
+
+/* ── Receipts empty state ─────────────────────────────────────────────────
+   The marquee stage sits above the message. Heights are set here rather than
+   in the component so the very first paint reserves the right box: useMediaQuery
+   reports false until after mount, and a stage that grew on hydration would
+   shove the copy down the page (CLS). */
+.rl-blank { padding:4px 0 8px; }
+/* ── Empty states ─────────────────────────────────────────────────────────
+   One layout system for every "nothing here yet" in the ledger. Two sizes:
+   `page` fills a route's main card, `panel` sits inside a smaller card such as
+   a statistics breakdown. Heights live here rather than in the components so
+   the first paint reserves the right box — useMediaQuery reports false until
+   after mount, and a stage that grew on hydration would shove the copy down
+   the page. */
+.es-stage {
+  /* Art rides a path that runs past both edges, so pieces enter and leave frame
+     instead of popping. Clipping here is what keeps that off the scrollbar. */
+  overflow:hidden;
+  /* Vertical scrolling still belongs to the page on touch; only horizontal
+     movement is the marquee's to capture. */
+  touch-action:pan-y;
+  user-select:none; -webkit-user-select:none;
+}
+.es-marquee { width:100%; height:100%; }
+
+.es-page { padding:4px 0 8px; }
+.es-page .es-stage { height:210px; margin:0 -22px; }  /* bleed into card padding */
+.es-panel { padding:2px 0 4px; }
+.es-panel .es-stage { height:128px; margin:0 -18px; }
+
+/* Same box the loaded state occupies, held during its dynamic import. */
+.es-reserve { height:342px; }
+.es-reserve-panel { height:214px; }
+
+/* The chip: one card form, one glyph, one stroke weight across every domain. */
+.es-chip { display:block; width:56px; height:56px; overflow:visible; }
+.es-panel .es-chip { width:46px; height:46px; }
+.es-chip-card {
+  fill:var(--surface); stroke:var(--border-strong); stroke-width:1.5;
+  filter:drop-shadow(0 3px 6px rgba(16,24,40,.09));
+  transition:stroke .18s cubic-bezier(.22,1,.36,1);
+}
+.es-chip:hover .es-chip-card { stroke:var(--accent); }
+
+/* The receipts route keeps a drawn receipt rather than a chip — there the paper
+   itself is the domain object, not an icon standing in for one. */
+.rl-slip { display:block; width:54px; height:71px; overflow:visible; }
+.rl-slip-paper {
+  fill:var(--surface); stroke:var(--border-strong); stroke-width:1.5;
+  filter:drop-shadow(0 3px 6px rgba(16,24,40,.09));
+  transition:stroke .18s cubic-bezier(.22,1,.36,1);
+}
+.rl-slip:hover .rl-slip-paper { stroke:var(--accent); }
+.rl-slip-rule { fill:var(--ink-3); opacity:.42; }
+
+:root[data-theme="dark"] .es-chip-card,
+:root[data-theme="dark"] .rl-slip-paper {
+  filter:drop-shadow(0 3px 8px rgba(0,0,0,.5));
+}
+
+/* More space above the heading than below it: the stage and the message are
+   separate groups, while the heading and its sub-line are one. */
+.es-say { text-align:center; padding:22px 4px 6px; }
+.es-panel .es-say { padding:14px 4px 4px; }
+.es-title { margin:0; font-size:17px; font-weight:600; letter-spacing:-.02em; color:var(--ink); }
+.es-panel .es-title { font-size:15px; }
+.es-sub { margin:6px 0 0; font-size:14px; color:var(--ink-2); }
+.es-panel .es-sub { margin-top:4px; font-size:13px; }
+.es-cta { margin-top:18px; display:inline-flex; text-decoration:none; }
+.es-panel .es-cta { margin-top:14px; }
+
+@media (max-width:640px) {
+  /* Not the desktop stage shrunk — a taller, near-square box for the phone's
+     own steeper curve, so the art keeps real size and real vertical travel. */
+  .es-page .es-stage { height:246px; margin:0 -16px; }
+  .es-panel .es-stage { height:150px; margin:0 -14px; }
+  .es-say { padding-top:18px; }
+  .es-title { font-size:16.5px; }
+  .es-reserve { height:374px; }
+  .es-reserve-panel { height:236px; }
+  /* .btn-primary is 40px tall app-wide, under the 44px floor for a finger.
+     Raised on the empty-state CTA only — resizing every primary button in the
+     ledger is not this change's business. */
+  .es-cta { min-height:44px; padding-left:20px; padding-right:20px; align-items:center; }
+}
+
+@media (prefers-reduced-motion:reduce) {
+  /* The marquee's own rAF loop is parked in JS (the global `animation:none`
+     rule below cannot reach a JS-driven loop). The art stays distributed along
+     the path, so the composition still reads — it simply holds still. */
+  .es-chip-card, .rl-slip-paper { transition:none; }
+}
 .rl-list { list-style:none; margin:0; padding:0; }
 .rl-row {
   display:flex; align-items:center; gap:14px; padding:13px 8px; text-decoration:none;
@@ -1183,7 +1283,25 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance:none; margi
 
 /* Summary figure that sits opposite the page title (e.g. Net worth on Home). */
 .header-figure { text-align:right; min-width:0; }
-.header-figure-num { font-size:22px; font-weight:680; letter-spacing:-.02em; }
+/* Net worth is the one number the home view exists to answer, so it carries the
+   largest type on the page — above the period tiles, which are supporting
+   detail. Tabular figures via `.num` so the digits do not jitter as it updates. */
+.header-figure-num {
+  font-size:34px; font-weight:680; letter-spacing:-.03em; line-height:1.05;
+  margin-top:2px; color:var(--ink);
+}
+.header-figure-num.neg { color:var(--negative); }
+.header-figure-sub { margin-top:4px; font-size:13px; color:var(--ink-3); }
+
+/* Spending-overview heading: title on one side, period stepper + link on the
+   other. Three controls on one row is fine with room and cramped without it, so
+   the row is allowed to wrap rather than squeezing the month label. */
+.ov-head { flex-wrap:wrap; gap:10px 14px; }
+.ov-head-controls { display:flex; align-items:center; gap:12px; }
+/* PeriodControl's own .period-bar ships a 20px bottom margin for standalone use.
+   Inside this row that asymmetry is what `align-items:center` centres, leaving
+   the stepper sitting 10px above the link beside it. */
+.ov-head-controls .period-bar { margin-bottom:0; }
 
 /* Every pill button is a fixed-height flex row, so a label that wraps renders
    as text spilling out of the pill rather than a taller button. Keep labels on
@@ -1436,7 +1554,15 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance:none; margi
 
 /* ---- ≤640px: phone. Single column, bottom-sheet dialogs, 16px inputs. -- */
 @media (max-width:640px) {
-  .stat-grid, .stat-grid.two, .stat-grid.four { grid-template-columns:1fr; }
+  /* Paired and four-up tiles stay side by side on a phone. Each holds one short
+     figure, so a full-width row per tile bought nothing but scroll — the home
+     view ran past 2000px and the headline numbers fell below the fold. The
+     three-up `.stat-grid` default is still too narrow to split and stays 1fr. */
+  .stat-grid { grid-template-columns:1fr; }
+  .stat-grid.two, .stat-grid.four { grid-template-columns:repeat(2,1fr); gap:12px; }
+  /* 24px overflows a half-width tile once the figure reaches seven digits. */
+  .stat-grid.two .stat-value, .stat-grid.four .stat-value { font-size:20px; }
+  .stat-grid.two .card, .stat-grid.four .card { padding:14px; }
   .card { padding:16px; }
   .stat-value { font-size:24px; margin:8px 0 6px; }
   .nw-figure { font-size:27px; }
@@ -1453,7 +1579,25 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance:none; margi
   /* Wrapped under the title, so it reads left-to-right with it instead of
      right-aligning against nothing. */
   .header-figure { width:100%; text-align:left; }
-  .header-figure-num { font-size:20px; }
+  /* The headline figure gets bigger on the phone, not smaller: it is the first
+     thing worth reading and it no longer competes with a right-hand column. */
+  .header-figure-num { font-size:40px; }
+  .header-figure-sub { font-size:12.5px; }
+  /* Title takes its own line; the stepper and link share the next one, so the
+     month never gets clipped between them. */
+  .ov-head { flex-direction:column; align-items:flex-start; }
+  .ov-head-controls { width:100%; justify-content:space-between; }
+
+  /* Segmented controls go full width on a phone. Two gains at once: the buttons
+     clear the 44px touch floor (they were 32px tall), and the control stops
+     floating as an orphan against the right edge, disconnected from the tiles
+     it filters. */
+  .seg { display:flex; width:100%; }
+  .seg-btn { flex:1; min-height:44px; }
+
+  /* Link hit areas are handled in the (hover:none) block below, which is where
+     this file already keeps its touch sizing — duplicating them here would set
+     padding that block then overrides, stranding the compensating margin. */
 
   /* Receipts toolbar: the sort picker gets the whole first row, the button the
      second. Must come after .header-actions above — the same element carries
@@ -1537,6 +1681,15 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance:none; margi
   .cam-shutter { width:62px; height:62px; }
 }
 
+/* ---- ≤360px: an iPhone SE leaves ~106px inside a half-width tile, two pixels
+   short of "₱-12,500.00" at 20px. Step the figure down here rather than shrink
+   it on every phone or push the tiles back into a single column. --------- */
+@media (max-width:360px) {
+  .stat-grid.two .stat-value, .stat-grid.four .stat-value { font-size:18px; }
+  .stat-grid.two, .stat-grid.four { gap:10px; }
+  .header-figure-num { font-size:34px; }
+}
+
 /* ---- Touch input: no hover, so hover-revealed controls must be permanent
         and every target has to be big enough to hit. ------------------- */
 @media (hover:none) and (pointer:coarse) {
@@ -1555,9 +1708,14 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance:none; margi
   .nav-item { padding:11px 12px; }
   .nav-sub .nav-item { padding:9px 10px; }
   .seg-btn { padding:9px 14px; }
-  .eye-btn, .pn-btn, .collapse-btn { min-width:38px; min-height:38px; }
+  /* 38px was close but still under the 44px floor, and these are small arrow
+     targets people hit repeatedly to step through periods. */
+  .eye-btn, .pn-btn, .collapse-btn { min-width:44px; min-height:44px; }
   .chip { padding:9px 13px; }
   /* Text links keep their inline look; the extra padding just makes them a
-     bigger target without opening a gap in the sentence they sit in. */
-  .link, .back-link { padding:6px 0; display:inline-block; }
+     bigger target without opening a gap in the sentence they sit in.
+     14px of padding puts the tap target on the 44px floor (16px line + 28px),
+     while -8px of margin keeps the element's outer height at the 28px it
+     occupied before, so no row grows and nothing shifts. */
+  .link, .back-link { padding:14px 0; margin:-8px 0; display:inline-block; }
 }

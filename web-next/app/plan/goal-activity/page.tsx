@@ -8,6 +8,7 @@ import { listGoals, goalActivity, listAccounts } from "../../lib/api";
 import { useRefresh } from "../../lib/useRefresh";
 import ActivityModal from "../../components/ActivityModal";
 import { Progress } from "../../components/ui";
+import EmptyState from "../../components/empty";
 
 export default function GoalActivityPage() {
   const [goals, setGoals] = useState<Goal[]>([]);
@@ -32,7 +33,12 @@ export default function GoalActivityPage() {
         </header>
 
         <div className="card">
-          {goals.length === 0 ? <div className="empty-note">Create a goal first.</div> : (
+          {goals.length === 0 ? <EmptyState
+            glyphs={["target", "coins", "arrows"]}
+            title="No goals to show"
+            sub="Create a goal and its contributions appear here."
+            action={{ label: "Go to goals", href: "/plan/goals" }}
+          /> : (
             <div className="plan-list">
               {goals.map((g) => (
                 <div key={g.id} className="plan-row">

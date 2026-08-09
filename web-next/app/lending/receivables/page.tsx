@@ -8,6 +8,7 @@ import { money, fmtDate, CURRENCIES } from "../../lib/format";
 import { listReceivables, createReceivable, deleteReceivable } from "../../lib/api";
 import { useRefresh } from "../../lib/useRefresh";
 import { Modal, Field, TextInput, Select, Button, Progress, FormError } from "../../components/ui";
+import EmptyState from "../../components/empty";
 
 export default function ReceivablesPage() {
   const [items, setItems] = useState<Receivable[]>([]);
@@ -48,7 +49,11 @@ export default function ReceivablesPage() {
         </div>
 
         <div className="card">
-          {items.length === 0 ? <div className="empty-note">Nobody owes you (yet).</div> : (
+          {items.length === 0 ? <EmptyState
+            glyphs={["handshake", "coins", "clock"]}
+            title="Nobody owes you yet"
+            sub="Track money lent out and when it is due back."
+          /> : (
             <div className="plan-list">
               {items.map((r) => (
                 <div key={r.id} className="plan-row">

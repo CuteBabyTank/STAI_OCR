@@ -7,6 +7,7 @@ import { money, fmtDate } from "../../lib/format";
 import { listRecurring, createRecurring, deleteRecurring, advanceRecurring, listAccounts } from "../../lib/api";
 import { useRefresh } from "../../lib/useRefresh";
 import { Field, TextInput, Select, Button, FormError } from "../../components/ui";
+import EmptyState from "../../components/empty";
 
 export default function RecurringPage() {
   const [items, setItems] = useState<Recurring[]>([]);
@@ -73,7 +74,11 @@ export default function RecurringPage() {
 
         <div className="card">
           <p className="section-title">Schedule</p>
-          {items.length === 0 ? <div className="empty-note">Nothing scheduled.</div> : (
+          {items.length === 0 ? <EmptyState
+            glyphs={["clock", "calendar", "arrows"]}
+            title="Nothing scheduled"
+            sub="Add a repeating payment and it runs on its own."
+          /> : (
             <div className="plan-list">
               {items.map((r) => (
                 <div key={r.id} className="plan-row">

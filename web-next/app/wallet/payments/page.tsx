@@ -8,6 +8,7 @@ import { money } from "../../lib/format";
 import { listAccounts, createTransaction, setAccountBalance } from "../../lib/api";
 import { useRefresh } from "../../lib/useRefresh";
 import { Field, TextInput, Select, Button, FormError } from "../../components/ui";
+import EmptyState from "../../components/empty";
 
 export default function PaymentsPage() {
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -75,7 +76,15 @@ function LiabilityPayment({ title, targets, debit, onSaved, label }: {
     <div className="card">
       <p className="section-title">{title}</p>
       <FormError message={err} />
-      {targets.length === 0 ? <div className="empty-note">No {label.toLowerCase()}s yet.</div> : (
+      {targets.length === 0 ? (
+        <EmptyState
+          size="panel"
+          glyphs={["card", "coins", "arrows"]}
+          title={`No ${label.toLowerCase()}s yet`}
+          sub="Add one in Wallet to pay towards it here."
+          action={{ label: "Go to wallet", href: "/wallet" }}
+        />
+      ) : (
         <div className="inline-form">
           <Field label={label}>
             <Select value={targetId} onChange={(e) => setTargetId(Number(e.target.value))}>

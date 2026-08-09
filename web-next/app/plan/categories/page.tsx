@@ -6,6 +6,7 @@ import type { TxnCategory } from "../../lib/types";
 import { listCategories, createCategory, deleteCategory } from "../../lib/api";
 import { useRefresh } from "../../lib/useRefresh";
 import { Field, TextInput, Select, Button, FormError, ColorPicker } from "../../components/ui";
+import EmptyState from "../../components/empty";
 
 export default function CategoriesPage() {
   const [cats, setCats] = useState<TxnCategory[]>([]);
@@ -127,7 +128,12 @@ function CategoryPanel({
 
       <div>
         {rows.length === 0 ? (
-          <div className="empty-note">None yet.</div>
+          <EmptyState
+            size="panel"
+            glyphs={["tag", "chart", "receipt"]}
+            title="None yet"
+            sub="Categories sort your spending automatically."
+          />
         ) : (
           rows.map((c) => (
             <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderTop: "1px solid var(--border)" }}>

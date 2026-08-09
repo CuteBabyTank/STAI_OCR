@@ -7,6 +7,7 @@ import { money } from "../../lib/format";
 import { listInstallments, createInstallment, deleteInstallment, payInstallment, listAccounts } from "../../lib/api";
 import { useRefresh } from "../../lib/useRefresh";
 import { Field, TextInput, Select, Button, Progress, FormError } from "../../components/ui";
+import EmptyState from "../../components/empty";
 
 export default function InstallmentsPage() {
   const [plans, setPlans] = useState<Installment[]>([]);
@@ -98,7 +99,11 @@ export default function InstallmentsPage() {
 
         <div className="card">
           <p className="section-title">Active plans</p>
-          {plans.length === 0 ? <div className="empty-note">No plans yet.</div> : (
+          {plans.length === 0 ? <EmptyState
+            glyphs={["calendar", "card", "gauge"]}
+            title="No installment plans"
+            sub="Split a purchase and track it down to zero."
+          /> : (
             <div className="plan-list">
               {plans.map((p) => (
                 <div key={p.id} className="plan-row">
