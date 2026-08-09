@@ -1771,9 +1771,23 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance:none; margi
   /* The chat sheet opens above the tab bar rather than under it. */
   .chat { bottom:calc(68px + env(safe-area-inset-bottom)); }
 
-  /* The toast floats below the sticky nav bar instead of sliding beneath it. */
+  /* The toast clears the sticky nav bar instead of sliding beneath it. 66px is
+     the bar at its shortest — a header carrying wrapped actions or the 40px
+     headline figure is taller than that, so the z-index is what actually
+     guarantees the toast stays readable; the offset only keeps it off the
+     title on the pages where the bar is short. Above the bar (100), below the
+     chat launcher (170) so a running job never buries the way to cancel it. */
   .ocr-toast,
-  .ocr-toast.aside { top:calc(66px + env(safe-area-inset-top)); }
+  .ocr-toast.aside { top:calc(66px + env(safe-area-inset-top)); z-index:165; }
+
+  /* The scan page's overlays predate anything floating above them: its scrim,
+     slide-over and past-receipts sheet were authored at 40/50, which now puts
+     all three underneath the tab bar (160) and the chat launcher (170). Lift
+     the set above both — they are modal, and a tab bar still tappable behind a
+     modal is a way to lose the dialog you just opened — but below <Sheet>
+     (200/300), which is the newer surface and must win over the older one. */
+  .scrim { z-index:172; }
+  .panel, .modal { z-index:174; }
 
   /* Link hit areas are handled in the (hover:none) block below, which is where
      this file already keeps its touch sizing — duplicating them here would set
@@ -1817,6 +1831,10 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance:none; margi
      it does not read as a stray centred box among real sheets. */
   .modal {
     top:auto; bottom:0; left:0; transform:translateY(12px); width:100%;
+    /* The base rule caps this at 100vw-32px for a centred box. Left-anchored at
+       full width that cap does not centre anything — it just leaves 32px of
+       page showing down the right-hand side. */
+    max-width:none;
     max-height:86dvh; padding:20px 20px calc(20px + env(safe-area-inset-bottom));
     border-radius:22px 22px 0 0;
   }
