@@ -18,8 +18,9 @@ import NavFab from "./NavFab";
 import Fab from "./Fab";
 import AgentChat from "./AgentChat";
 import OcrToast from "./OcrToast";
+import TabBar from "./TabBar";
 import { useOcrJobs } from "../lib/ocrJobs";
-import { useIsMobile } from "../lib/useMediaQuery";
+import { useIsMobile, useIsPhone } from "../lib/useMediaQuery";
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const path = usePathname() || "/";
@@ -32,10 +33,17 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const isMobile = useIsMobile();
   const [navOpen, setNavOpen] = useState(false);
 
+  const isPhone = useIsPhone();
+  // The More tab's sheet. Owned here rather than inside TabBar because the tab
+  // bar has to render the tab as active while the sheet is up, and the sheet
+  // has to close on navigation — both need the state above the bar.
+  const [moreOpen, setMoreOpen] = useState(false);
+
   // Navigating is the drawer's job finished — leaving it open would cover the
-  // page the user just asked for.
+  // page the user just asked for. Same for the More sheet.
   useEffect(() => {
     setNavOpen(false);
+    setMoreOpen(false);
   }, [path]);
 
   // Growing past the breakpoint turns the drawer back into a rail; a stale "open"
@@ -43,6 +51,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!isMobile) setNavOpen(false);
   }, [isMobile]);
+
+  // Crossing down into the phone tier hands navigation to the tab bar. A drawer
+  // opened at 700px would otherwise still be sitting there, over a tab bar that
+  // now duplicates it.
+  useEffect(() => {
+    if (isPhone) setNavOpen(false);
+  }, [isPhone]);
 
   // A drawer over a still-scrolling page reads as broken. Escape closes it too,
   // matching every other dismissible surface in the app.
@@ -116,6 +131,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             onMinimizedChange={setChatMin}
           />
         )}
+        <TabBar moreOpen={moreOpen} onMoreToggle={() => setMoreOpen((v) => !v)} />
       </div>
     </>
   );

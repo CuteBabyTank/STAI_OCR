@@ -1652,6 +1652,44 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance:none; margi
      legible visually or the tap feels like it did nothing. */
   .tabbar-item:active { transform:scale(.93); }
 
+  /* The drawer trigger is gone: the tab bar is the navigation now. The drawer
+     itself stays in the DOM for the 641–880px tier and is simply unreachable
+     here, since AppShell forces it closed on entry to this width. */
+  .nav-fab { display:none; }
+
+  /* Room for the bar, so the last row of every list clears it. */
+  .shell { padding-bottom:calc(72px + env(safe-area-inset-bottom)); }
+  main { min-height:calc(100dvh - 172px); }
+
+  /* The chat launcher leaves the bottom corner to the tab bar and becomes a
+     nav-bar glyph. 44px because it is now a small round target in a corner
+     rather than a 54px FAB, and the floor applies either way. */
+  .robot-fab {
+    top:calc(10px + env(safe-area-inset-top)); bottom:auto;
+    right:calc(12px + env(safe-area-inset-right));
+    width:44px; height:44px; z-index:170;
+  }
+  .robot-fab svg { width:24px; height:24px; }
+  /* The idle bob reads as a mascot in the corner; in the nav bar it just looks
+     like the chrome is loose. */
+  .robot-fab .float { animation:none; }
+  .robot-fab .ping { width:10px; height:10px; border-width:2px; }
+
+  /* Quick-add keeps a floating slot but clears the bar — and reclaims the right
+     edge, since the 80px offset existed only to sit clear of the chat launcher
+     that just vacated the corner. */
+  .fab-wrap {
+    right:calc(20px + env(safe-area-inset-right));
+    bottom:calc(68px + env(safe-area-inset-bottom));
+  }
+
+  /* The chat sheet opens above the tab bar rather than under it. */
+  .chat { bottom:calc(68px + env(safe-area-inset-bottom)); }
+
+  /* The toast floats below the sticky nav bar instead of sliding beneath it. */
+  .ocr-toast,
+  .ocr-toast.aside { top:calc(66px + env(safe-area-inset-top)); }
+
   /* Link hit areas are handled in the (hover:none) block below, which is where
      this file already keeps its touch sizing — duplicating them here would set
      padding that block then overrides, stranding the compensating margin. */
