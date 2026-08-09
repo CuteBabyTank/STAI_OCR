@@ -25,18 +25,20 @@ from datetime import date as _date
 # Overridable via the VISION_MODEL env var so a deployment can run a different
 # model without a code change.
 #
-# qwen2.5vl:7b is the current choice: it is the strongest Qwen vision model that
-# runs at zero cost here. There is no free *hosted* Qwen-VL API to point at —
-# OpenRouter carries eight qwen/*-vl-* models and every one of them is paid, and
-# the free Qwen-VL quotas (Alibaba DashScope, ModelScope) each need a signup API
-# key. Ollama serves this one over the same HTTP API for free, so VISION_MODEL +
-# OLLAMA_HOST remain the only two knobs.
+# gemma4:e4b is the production choice and matches docker-compose.yml — when these
+# two disagree the same code reads receipts with a different model depending only
+# on how it was launched. It is what the shared endpoint actually carries.
 #
-# Note gemma4 (the previous default) encodes an image to a FIXED ~256 tokens
-# regardless of resolution, so resolution/crop tuning does not reduce its prompt
-# cost the way it does on qwen2.5vl (~2,100 image tokens, scaling with pixels).
-# See evaluation/PERFORMANCE.md.
-DEFAULT_MODEL = os.environ.get("VISION_MODEL", "qwen2.5vl:7b")
+# qwen2.5vl:7b was trialled on this branch and measured at 86.3% combined accuracy
+# over 10 labelled receipts (evaluation/results/OCR_QWEN25VL_BENCHMARK.md). It is
+# not the default: the shared Ollama endpoint does not serve it, so defaulting to
+# it breaks OCR for anyone who has not pulled it locally. Set VISION_MODEL to
+# select it — the harness and ground truth are kept so the comparison can be re-run.
+#
+# Note gemma4 encodes an image to a FIXED ~256 tokens regardless of resolution, so
+# resolution/crop tuning does not reduce its prompt cost the way it does on
+# qwen2.5vl (~2,100 image tokens, scaling with pixels). See evaluation/PERFORMANCE.md.
+DEFAULT_MODEL = os.environ.get("VISION_MODEL", "gemma4:e4b")
 
 EXTRACTION_PROMPT = """You are a careful transcription tool reading a purchase
 receipt or invoice — the kind you get at a restaurant, cafe, grocery, retail

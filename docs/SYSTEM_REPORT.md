@@ -53,17 +53,22 @@ and the two share the same `ledger.db`.
 
 ### Three local models (via Ollama)
 
-| Role | README default | Runtime default in code | Docker-compose override |
+| Role | README default | Runtime default in code | Docker-compose value |
 |---|---|---|---|
-| Vision / OCR | `qwen2.5vl:7b` | `VISION_MODEL` → `qwen2.5vl:7b` (`extraction.py:26`) | `gemma4:e4b` |
-| Text (SQL/RAG/ReAct) | `llama3.2:3b` | `AGENT_MODEL` → `qwen2.5:latest` (`core.py:438`) | `gemma4:12b` |
-| Embeddings | `nomic-embed-text` | `EMBED_MODEL` → `nomic-embed-text` (`core.py:440`) | `nomic-embed-text` |
+| Vision / OCR | `gemma4:e4b` | `VISION_MODEL` → `gemma4:e4b` (`extraction.py:41`) | `gemma4:e4b` |
+| Text (SQL/RAG/ReAct) | `gemma4:12b` | `AGENT_MODEL` → `gemma4:12b` (`core.py:531`) | `gemma4:12b` |
+| Embeddings | `nomic-embed-text` | `EMBED_MODEL` → `nomic-embed-text` (`core.py:533`) | `nomic-embed-text` |
 
-> **Worth noting:** the model names are inconsistent across README / code defaults /
-> compose. The compose file also points `OLLAMA_HOST` at a **shared remote endpoint**
-> (`103.231.240.155:11434`), so the "runs entirely on your machine" claim only holds
-> when you override `OLLAMA_HOST` to a local Ollama. This is called out in the compose
-> comments as a class-lab convenience.
+> All three sources now agree, so the compose column is a restatement rather than an
+> override. `qwen2.5vl:7b` was trialled for OCR on the `qwen-vl-ocr-eval` branch and
+> measured (`evaluation/results/OCR_QWEN25VL_BENCHMARK.md`), but it is not a default:
+> the shared endpoint does not serve it. Prefer `GET /health` over this table when
+> recording an evaluation run.
+>
+> **Worth noting:** the compose file points `OLLAMA_HOST` at a **shared remote
+> endpoint** (`103.231.240.155:11434`), so the "runs entirely on your machine" claim
+> only holds when you override `OLLAMA_HOST` to a local Ollama. This is called out in
+> the compose comments as a class-lab convenience.
 
 ---
 
@@ -415,8 +420,8 @@ currencies, category/account color metadata).
 | `OCR_MAX_IMAGE_BYTES` | `26214400` | Hard upload ceiling (25 MB) |
 | `OCR_PDF_RENDER_SCALE` | `2.0` | PDF rasterization scale (~144 DPI) |
 | `OLLAMA_KEEP_ALIVE` | `30m` | Keep the model resident between requests |
-| `VISION_MODEL` | `qwen2.5vl:7b` | Vision/OCR model |
-| `AGENT_MODEL` | `qwen2.5:latest` | Text model (SQL/RAG/ReAct) |
+| `VISION_MODEL` | `gemma4:e4b` | Vision/OCR model |
+| `AGENT_MODEL` | `gemma4:12b` | Text model (SQL/RAG/ReAct) |
 | `EMBED_MODEL` | `nomic-embed-text` | Embedding model for RAG |
 | `ADD_EXPENSE_MAX_AMOUNT` | `1000000` | Ceiling on a single chat-recorded expense |
 | `MLFLOW_ENABLED` | `1` | Turn all MLflow tracing on/off |
@@ -429,9 +434,10 @@ currencies, category/account color metadata).
 
 ## 11. Observations worth flagging
 
-- **Model-name drift** across README (`qwen2.5vl:7b`/`llama3.2:3b`), code defaults
-  (`qwen2.5:latest`), and compose (`gemma4:*`) — a reader can't tell which models
-  actually run without checking env.
+- ~~**Model-name drift** across README, code defaults, and compose~~ — **resolved.**
+  All three now specify `gemma4:e4b` / `gemma4:12b` / `nomic-embed-text`. `GET /health`
+  remains the authoritative source for the vision model at runtime, since env vars
+  still override every one of them.
 - **"Fully local" caveat** — the default compose talks to a remote Ollama endpoint;
   true offline operation requires overriding `OLLAMA_HOST`.
 - **Documentation lag** — the README covers the OCR product well but omits the entire
