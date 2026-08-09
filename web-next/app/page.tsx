@@ -118,7 +118,17 @@ export default function Home() {
           {nw && (
             <div className="header-figure">
               <div className="stat-label">Net worth</div>
-              <div className="header-figure-num">{money(nw.net)}</div>
+              {/* The page's headline answer to "where do I stand", so it gets the
+                  largest type on the view. Sign-coloured to match how balances
+                  read everywhere else in the ledger. */}
+              <div className={"header-figure-num num" + (nw.net < 0 ? " neg" : "")}>
+                {money(nw.net)}
+              </div>
+              {accounts.length > 0 && (
+                <div className="header-figure-sub">
+                  across {accounts.length} account{accounts.length === 1 ? "" : "s"}
+                </div>
+              )}
             </div>
           )}
         </header>
@@ -242,9 +252,9 @@ export default function Home() {
         </div>
 
         {/* Spending overview (receipt analytics — moved here from the scan page) */}
-        <div className="card-head" style={{ marginBottom: -6 }}>
+        <div className="card-head ov-head" style={{ marginBottom: -6 }}>
           <p className="card-title">Spending overview</p>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div className="ov-head-controls">
             {/* Scopes the three panels below only. The "This month out/in" cards
                 above stay on the real current month, so their labels stay true. */}
             {analytics && (

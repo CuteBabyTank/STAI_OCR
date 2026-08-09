@@ -1283,7 +1283,25 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance:none; margi
 
 /* Summary figure that sits opposite the page title (e.g. Net worth on Home). */
 .header-figure { text-align:right; min-width:0; }
-.header-figure-num { font-size:22px; font-weight:680; letter-spacing:-.02em; }
+/* Net worth is the one number the home view exists to answer, so it carries the
+   largest type on the page — above the period tiles, which are supporting
+   detail. Tabular figures via `.num` so the digits do not jitter as it updates. */
+.header-figure-num {
+  font-size:34px; font-weight:680; letter-spacing:-.03em; line-height:1.05;
+  margin-top:2px; color:var(--ink);
+}
+.header-figure-num.neg { color:var(--negative); }
+.header-figure-sub { margin-top:4px; font-size:13px; color:var(--ink-3); }
+
+/* Spending-overview heading: title on one side, period stepper + link on the
+   other. Three controls on one row is fine with room and cramped without it, so
+   the row is allowed to wrap rather than squeezing the month label. */
+.ov-head { flex-wrap:wrap; gap:10px 14px; }
+.ov-head-controls { display:flex; align-items:center; gap:12px; }
+/* PeriodControl's own .period-bar ships a 20px bottom margin for standalone use.
+   Inside this row that asymmetry is what `align-items:center` centres, leaving
+   the stepper sitting 10px above the link beside it. */
+.ov-head-controls .period-bar { margin-bottom:0; }
 
 /* Every pill button is a fixed-height flex row, so a label that wraps renders
    as text spilling out of the pill rather than a taller button. Keep labels on
@@ -1536,7 +1554,15 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance:none; margi
 
 /* ---- ≤640px: phone. Single column, bottom-sheet dialogs, 16px inputs. -- */
 @media (max-width:640px) {
-  .stat-grid, .stat-grid.two, .stat-grid.four { grid-template-columns:1fr; }
+  /* Paired and four-up tiles stay side by side on a phone. Each holds one short
+     figure, so a full-width row per tile bought nothing but scroll — the home
+     view ran past 2000px and the headline numbers fell below the fold. The
+     three-up `.stat-grid` default is still too narrow to split and stays 1fr. */
+  .stat-grid { grid-template-columns:1fr; }
+  .stat-grid.two, .stat-grid.four { grid-template-columns:repeat(2,1fr); gap:12px; }
+  /* 24px overflows a half-width tile once the figure reaches seven digits. */
+  .stat-grid.two .stat-value, .stat-grid.four .stat-value { font-size:20px; }
+  .stat-grid.two .card, .stat-grid.four .card { padding:14px; }
   .card { padding:16px; }
   .stat-value { font-size:24px; margin:8px 0 6px; }
   .nw-figure { font-size:27px; }
@@ -1553,7 +1579,25 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance:none; margi
   /* Wrapped under the title, so it reads left-to-right with it instead of
      right-aligning against nothing. */
   .header-figure { width:100%; text-align:left; }
-  .header-figure-num { font-size:20px; }
+  /* The headline figure gets bigger on the phone, not smaller: it is the first
+     thing worth reading and it no longer competes with a right-hand column. */
+  .header-figure-num { font-size:40px; }
+  .header-figure-sub { font-size:12.5px; }
+  /* Title takes its own line; the stepper and link share the next one, so the
+     month never gets clipped between them. */
+  .ov-head { flex-direction:column; align-items:flex-start; }
+  .ov-head-controls { width:100%; justify-content:space-between; }
+
+  /* Segmented controls go full width on a phone. Two gains at once: the buttons
+     clear the 44px touch floor (they were 32px tall), and the control stops
+     floating as an orphan against the right edge, disconnected from the tiles
+     it filters. */
+  .seg { display:flex; width:100%; }
+  .seg-btn { flex:1; min-height:44px; }
+
+  /* Link hit areas are handled in the (hover:none) block below, which is where
+     this file already keeps its touch sizing — duplicating them here would set
+     padding that block then overrides, stranding the compensating margin. */
 
   /* Receipts toolbar: the sort picker gets the whole first row, the button the
      second. Must come after .header-actions above — the same element carries
@@ -1637,6 +1681,15 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance:none; margi
   .cam-shutter { width:62px; height:62px; }
 }
 
+/* ---- ≤360px: an iPhone SE leaves ~106px inside a half-width tile, two pixels
+   short of "₱-12,500.00" at 20px. Step the figure down here rather than shrink
+   it on every phone or push the tiles back into a single column. --------- */
+@media (max-width:360px) {
+  .stat-grid.two .stat-value, .stat-grid.four .stat-value { font-size:18px; }
+  .stat-grid.two, .stat-grid.four { gap:10px; }
+  .header-figure-num { font-size:34px; }
+}
+
 /* ---- Touch input: no hover, so hover-revealed controls must be permanent
         and every target has to be big enough to hit. ------------------- */
 @media (hover:none) and (pointer:coarse) {
@@ -1655,9 +1708,14 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance:none; margi
   .nav-item { padding:11px 12px; }
   .nav-sub .nav-item { padding:9px 10px; }
   .seg-btn { padding:9px 14px; }
-  .eye-btn, .pn-btn, .collapse-btn { min-width:38px; min-height:38px; }
+  /* 38px was close but still under the 44px floor, and these are small arrow
+     targets people hit repeatedly to step through periods. */
+  .eye-btn, .pn-btn, .collapse-btn { min-width:44px; min-height:44px; }
   .chip { padding:9px 13px; }
   /* Text links keep their inline look; the extra padding just makes them a
-     bigger target without opening a gap in the sentence they sit in. */
-  .link, .back-link { padding:6px 0; display:inline-block; }
+     bigger target without opening a gap in the sentence they sit in.
+     14px of padding puts the tap target on the 44px floor (16px line + 28px),
+     while -8px of margin keeps the element's outer height at the 28px it
+     occupied before, so no row grows and nothing shifts. */
+  .link, .back-link { padding:14px 0; margin:-8px 0; display:inline-block; }
 }
