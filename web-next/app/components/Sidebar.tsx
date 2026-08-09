@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { ICON_PATHS as ICONS, LENDING, PLAN, WALLET, activeHref } from "../lib/navRoutes";
 import type { NavItem as Item } from "../lib/navRoutes";
+import { useTheme } from "../lib/useTheme";
 
 // Full budget-tracker navigation (PRD §2.1). Wallet and Plan are expandable
 // groups. A collapse toggle shrinks the rail to icons — a client-only preference
@@ -38,29 +39,15 @@ export default function Sidebar({
   // — so there's no navigation flash.
   const [collapsed, setCollapsed] = useState(false);
   const [open, setOpen] = useState<Record<string, boolean>>({ wallet: true, plan: false, lending: false });
-  // Light is the default (see the token blocks in globals.css); dark is the only
-  // state that needs storing. The attribute is already on <html> by now — the
-  // inline script in layout.tsx sets it before paint — so this only mirrors it
-  // into React state for the button's label.
-  const [light, setLight] = useState(true);
+  const { light, toggle: toggleTheme } = useTheme();
 
   useEffect(() => {
     setCollapsed(localStorage.getItem("sb-collapsed") === "1");
-    setLight(document.documentElement.getAttribute("data-theme") !== "dark");
     const groups = localStorage.getItem("sb-groups");
     if (groups) {
       try { setOpen((o) => ({ ...o, ...JSON.parse(groups) })); } catch { /* ignore */ }
     }
   }, []);
-
-  const toggleTheme = () => {
-    setLight((wasLight) => {
-      const next = wasLight ? "dark" : "light";
-      document.documentElement.setAttribute("data-theme", next);
-      try { localStorage.setItem("theme", next); } catch { /* private mode */ }
-      return !wasLight;
-    });
-  };
 
   // Auto-open the group that contains the current route — only ever opens (never
   // closes), and skips the state update when already open so navigation between

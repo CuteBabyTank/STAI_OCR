@@ -1461,6 +1461,30 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance:none; margi
 }
 .sheet-foot > * { flex:1; justify-content:center; }
 
+/* More-sheet rows. Grouped rather than one flat list: nineteen undifferentiated
+   links is a wall, and the groups already exist as concepts in the sidebar. */
+.more-group { display:flex; flex-direction:column; gap:2px; }
+.more-group + .more-group { margin-top:6px; padding-top:10px; border-top:1px solid var(--border); }
+.more-label {
+  margin:0 0 4px; padding:0 12px;
+  font-size:var(--t-caption); font-weight:600; letter-spacing:.04em;
+  text-transform:uppercase; color:var(--ink-3);
+}
+.more-row {
+  display:flex; align-items:center; gap:12px;
+  min-height:48px; padding:0 12px; border-radius:12px;
+  border:none; background:none; width:100%; text-align:left;
+  font-size:var(--t-body); font-weight:500; color:var(--ink); text-decoration:none;
+  -webkit-tap-highlight-color:transparent;
+}
+.more-row svg { width:20px; height:20px; stroke-width:1.9; color:var(--ink-2); flex-shrink:0; }
+.more-row.on { background:var(--accent-wash); color:var(--accent); }
+.more-row.on svg { color:var(--accent); }
+.more-row:active { background:var(--sunken); }
+/* Rows without a glyph keep their labels on the same left edge as those with
+   one, so the list does not read as two ragged columns. */
+.more-dot { width:20px; flex-shrink:0; }
+
 /* Phone tab bar. Hidden by default and switched on in the ≤640px block, so the
    boundary lives in exactly one place and the desktop first paint is correct
    without any JS. */

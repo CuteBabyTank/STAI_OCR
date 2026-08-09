@@ -19,6 +19,7 @@ import Fab from "./Fab";
 import AgentChat from "./AgentChat";
 import OcrToast from "./OcrToast";
 import TabBar from "./TabBar";
+import MoreSheet from "./MoreSheet";
 import { useOcrJobs } from "../lib/ocrJobs";
 import { useIsMobile, useIsPhone } from "../lib/useMediaQuery";
 
@@ -132,6 +133,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           />
         )}
         <TabBar moreOpen={moreOpen} onMoreToggle={() => setMoreOpen((v) => !v)} />
+        {moreOpen && <MoreSheet onClose={() => setMoreOpen(false)} />}
       </div>
     </>
   );
