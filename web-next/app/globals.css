@@ -18,7 +18,10 @@
 :root[data-theme="light"] {
   --canvas:#F7F8FA; --surface:#FFFFFF; --sunken:#FCFCFD;
   --border:#EAECEF; --border-strong:#DFE2E7;
-  --ink:#0E1116; --ink-2:#5B616E; --ink-3:#9AA0AB;
+  /* --ink-3 was #9AA0AB, which is 2.63:1 on white — it carries real secondary
+     copy (.stat-label, .header-figure-sub), not just decoration. 4.83:1 now,
+     still a clear step lighter than --ink-2's 6.21:1. */
+  --ink:#0E1116; --ink-2:#5B616E; --ink-3:#6B7280;
   --accent:#4F46E5; --accent-hover:#4338CA; --accent-wash:#EEF0FF;
   --positive:#0E9F6E; --negative:#E5484D; --warn:#B26B00;
   --cat-food:#4F46E5; --cat-shopping:#0E9F6E; --cat-health:#E0A106; --cat-other:#9AA0AB;
@@ -30,7 +33,8 @@
 :root[data-theme="dark"] {
   --canvas:#0C0D10; --surface:#151619; --sunken:#101114;
   --border:#25272C; --border-strong:#303339;
-  --ink:#F3F4F6; --ink-2:#9CA3AE; --ink-3:#6B7180;
+  /* Dark failed too, at 3.70:1 — so this one lightens rather than darkens. */
+  --ink:#F3F4F6; --ink-2:#9CA3AE; --ink-3:#7C828F;
   --accent:#6D67F0; --accent-hover:#847EF5; --accent-wash:#1C1D33;
   --positive:#2ABF8A; --negative:#F1575C; --warn:#EAB43A;
   --cat-food:#6D67F0; --cat-shopping:#2ABF8A; --cat-health:#EAB43A; --cat-other:#7C818C;
