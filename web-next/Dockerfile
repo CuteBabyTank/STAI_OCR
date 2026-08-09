@@ -1,8 +1,16 @@
 # Multi-stage build for the Next.js frontend (standalone output).
 FROM node:20-slim AS deps
 WORKDIR /app
-COPY package.json package-lock.json* ./
-RUN npm install
+# The lockfile is required, not optional (no trailing *): `npm ci` is the only
+# install that guarantees node_modules matches it exactly. `npm install` was
+# here before and reconciles an EXISTING tree — which is how a stale
+# node_modules survives an install and the build then dies on "Module not
+# found" for deps that package.json has listed for weeks (framer-motion,
+# motion, tailwind-merge all did). `npm ci` deletes the tree first, and errors
+# loudly when package.json and the lockfile disagree instead of quietly
+# resolving something neither file asked for.
+COPY package.json package-lock.json ./
+RUN npm ci
 
 FROM node:20-slim AS builder
 WORKDIR /app
