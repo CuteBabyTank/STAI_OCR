@@ -1,53 +1,54 @@
-:root {
-  --canvas:#F7F8FA; --surface:#FFFFFF; --sunken:#FCFCFD;
-  --border:#EAECEF; --border-strong:#DFE2E7;
-  --ink:#0E1116; --ink-2:#5B616E; --ink-3:#9AA0AB;
-  --accent:#4F46E5; --accent-hover:#4338CA; --accent-wash:#EEF0FF;
-  --positive:#0E9F6E; --negative:#E5484D;
-  --cat-food:#4F46E5; --cat-shopping:#0E9F6E; --cat-health:#E0A106; --cat-other:#9AA0AB;
-  --shadow:0 1px 3px rgba(16,24,40,.04), 0 1px 2px rgba(16,24,40,.06);
-  --shadow-lg:0 12px 40px rgba(16,24,40,.14), 0 2px 8px rgba(16,24,40,.08);
-  --radius:16px; --radius-sm:12px;
-  --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --canvas:#0C0D10; --surface:#151619; --sunken:#101114;
-    --border:#25272C; --border-strong:#303339;
-    --ink:#F3F4F6; --ink-2:#9CA3AE; --ink-3:#6B7180;
-    --accent:#6D67F0; --accent-hover:#847EF5; --accent-wash:#1C1D33;
-    --positive:#2ABF8A; --negative:#F1575C;
-    --cat-food:#6D67F0; --cat-shopping:#2ABF8A; --cat-health:#EAB43A; --cat-other:#7C818C;
-    --shadow:0 1px 3px rgba(0,0,0,.4), 0 1px 2px rgba(0,0,0,.5);
-    --shadow-lg:0 16px 48px rgba(0,0,0,.55), 0 2px 10px rgba(0,0,0,.4);
-  }
+/* Dark is the app's default theme — not "dark if the OS says so". A bare :root
+   is the dark palette, so the very first paint on a fresh device is dark with no
+   flash, and there is no prefers-color-scheme block to override it. Light is
+   opt-in only, via data-theme="light" (set by the toggle in the sidebar and
+   restored before paint by the inline script in layout.tsx).
+   data-theme="dark" is spelled out as well so the toggle can switch back
+   explicitly rather than by removing the attribute. */
+:root,
+:root[data-theme="dark"] {
+  --canvas:#0C0D10; --surface:#151619; --sunken:#101114;
+  --border:#25272C; --border-strong:#303339;
+  --ink:#F3F4F6; --ink-2:#9CA3AE; --ink-3:#6B7180;
+  --accent:#6D67F0; --accent-hover:#847EF5; --accent-wash:#1C1D33;
+  --positive:#2ABF8A; --negative:#F1575C; --warn:#EAB43A;
+  --cat-food:#6D67F0; --cat-shopping:#2ABF8A; --cat-health:#EAB43A; --cat-other:#7C818C;
+  --shadow:0 1px 3px rgba(0,0,0,.4), 0 1px 2px rgba(0,0,0,.5);
+  --shadow-lg:0 16px 48px rgba(0,0,0,.55), 0 2px 10px rgba(0,0,0,.4);
+  --scrim:rgba(0,0,0,.6);
+  color-scheme:dark;
 }
 :root[data-theme="light"] {
   --canvas:#F7F8FA; --surface:#FFFFFF; --sunken:#FCFCFD;
   --border:#EAECEF; --border-strong:#DFE2E7;
   --ink:#0E1116; --ink-2:#5B616E; --ink-3:#9AA0AB;
   --accent:#4F46E5; --accent-hover:#4338CA; --accent-wash:#EEF0FF;
-  --positive:#0E9F6E; --negative:#E5484D;
+  --positive:#0E9F6E; --negative:#E5484D; --warn:#B26B00;
   --cat-food:#4F46E5; --cat-shopping:#0E9F6E; --cat-health:#E0A106; --cat-other:#9AA0AB;
   --shadow:0 1px 3px rgba(16,24,40,.04), 0 1px 2px rgba(16,24,40,.06);
   --shadow-lg:0 12px 40px rgba(16,24,40,.14), 0 2px 8px rgba(16,24,40,.08);
+  --scrim:rgba(16,24,40,.42);
+  color-scheme:light;
 }
-:root[data-theme="dark"] {
-  --canvas:#0C0D10; --surface:#151619; --sunken:#101114;
-  --border:#25272C; --border-strong:#303339;
-  --ink:#F3F4F6; --ink-2:#9CA3AE; --ink-3:#6B7180;
-  --accent:#6D67F0; --accent-hover:#847EF5; --accent-wash:#1C1D33;
-  --positive:#2ABF8A; --negative:#F1575C;
-  --cat-food:#6D67F0; --cat-shopping:#2ABF8A; --cat-health:#EAB43A; --cat-other:#7C818C;
-  --shadow:0 1px 3px rgba(0,0,0,.4), 0 1px 2px rgba(0,0,0,.5);
-  --shadow-lg:0 16px 48px rgba(0,0,0,.55), 0 2px 10px rgba(0,0,0,.4);
+:root {
+  --radius:16px; --radius-sm:12px;
+  --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
 }
 
 * { box-sizing:border-box; }
 html, body { margin:0; padding:0; }
+html {
+  /* Stop iOS inflating text in landscape, and clip any stray horizontal overflow
+     so a single wide child can't hand the whole page a sideways scrollbar.
+     `clip` rather than `hidden` on purpose: `hidden` would make this a scroll
+     container and break every position:sticky descendant (the sidebar rail). */
+  -webkit-text-size-adjust:100%;
+  overflow-x:clip;
+}
 body {
   background:var(--canvas); color:var(--ink);
   font-family:var(--sans); -webkit-font-smoothing:antialiased; letter-spacing:-.01em;
+  overflow-x:clip;
 }
 .num { font-variant-numeric:tabular-nums; }
 button { font-family:inherit; cursor:pointer; }
@@ -238,15 +239,26 @@ select.month-filter {
 .batch-row .b-cat { margin-top:4px; font-size:10.5px; font-weight:600; padding:2px 8px; border-radius:999px; color:#fff; letter-spacing:.02em; display:inline-block; }
 .batch-row .b-file { margin-top:4px; font-size:11px; color:var(--ink-3); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .batch-row .b-amt { font-size:13px; font-weight:560; }
-.batch-row .b-review { margin-left:6px; font-size:10px; font-weight:600; color:#7a5a12; background:#FDF3E7; padding:2px 7px; border-radius:999px; }
+/* Amber "needs review" chip, derived from --warn rather than a baked-in light
+   swatch — the old #FDF3E7 fill was invisible on the dark canvas. */
+.batch-row .b-review {
+  margin-left:6px; font-size:10px; font-weight:600; padding:2px 7px; border-radius:999px;
+  color:var(--warn); background:color-mix(in srgb, var(--warn) 15%, transparent);
+}
 
 /* Post-extraction arithmetic audit: why a receipt needs review. Wraps rather
    than truncating — the numbers are the point, and a clipped "short by ₱1…" is
    worse than no message at all. */
 .batch-row .b-audit { margin:5px 0 0; padding:0; list-style:none; display:flex; flex-direction:column; gap:3px; }
 .batch-row .b-audit li { font-size:11px; line-height:1.35; padding:3px 7px; border-radius:6px; border-left:2px solid transparent; }
-.batch-row .b-audit-error { color:#8a2c2c; background:#FDECEC; border-left-color:#D9534F; }
-.batch-row .b-audit-warning { color:#7a5a12; background:#FDF3E7; border-left-color:#E0A93B; }
+.batch-row .b-audit-error {
+  color:var(--negative); background:color-mix(in srgb, var(--negative) 12%, transparent);
+  border-left-color:var(--negative);
+}
+.batch-row .b-audit-warning {
+  color:var(--warn); background:color-mix(in srgb, var(--warn) 13%, transparent);
+  border-left-color:var(--warn);
+}
 
 /* ---- Measured OCR confidence badge (shared) ---- */
 .conf-badge {
@@ -257,7 +269,11 @@ select.month-filter {
 .conf-badge.md { font-size:12px; padding:3px 10px; }
 .conf-badge .conf-dot { width:6px; height:6px; border-radius:50%; background:currentColor; opacity:.9; }
 .conf-badge.hi  { color:var(--positive); background:color-mix(in srgb, var(--positive) 13%, transparent); border-color:color-mix(in srgb, var(--positive) 26%, transparent); }
-.conf-badge.mid { color:#8a6100; background:#FBEFD3; border-color:#E7C877; }
+.conf-badge.mid {
+  color:var(--warn);
+  background:color-mix(in srgb, var(--warn) 14%, transparent);
+  border-color:color-mix(in srgb, var(--warn) 30%, transparent);
+}
 .conf-badge.lo  { color:var(--negative); background:color-mix(in srgb, var(--negative) 13%, transparent); border-color:color-mix(in srgb, var(--negative) 30%, transparent); }
 
 /* ---- Confidence breakdown panel (expanded transaction row) ---- */
@@ -280,7 +296,7 @@ select.month-filter {
 
 /* Slide-over panel */
 .scrim {
-  position:fixed; inset:0; background:rgba(16,24,40,.28); backdrop-filter:blur(3px);
+  position:fixed; inset:0; background:var(--scrim); backdrop-filter:blur(3px);
   opacity:0; pointer-events:none; transition:opacity .25s; z-index:40;
 }
 .scrim.open { opacity:1; pointer-events:auto; }
@@ -691,14 +707,9 @@ select.month-filter {
 .it-amt { text-align:right; font-weight:560; color:var(--ink); white-space:nowrap; }
 .items-loading { font-size:13px; color:var(--ink-3); padding:6px 0; }
 
-@media (max-width:880px) {
-  .shell { padding:16px 14px; gap:0; }
-  .sidebar { display:none; }
-  .stat-grid { grid-template-columns:1fr; }
-  .stat-grid.four { grid-template-columns:repeat(2,1fr); }
-  .band { grid-template-columns:1fr; }
-  .cf-legend { display:none; }
-}
+/* The layout breakpoints live in one place, at the bottom of this file under
+   "RESPONSIVE". Keeping them together is what stops a rule added here from
+   quietly re-breaking the phone layout. */
 @media (prefers-reduced-motion:reduce) {
   * { animation:none !important; transition:none !important; }
 }
@@ -737,13 +748,10 @@ a.nav-item { text-decoration:none; }
 .rl-sort { display:flex; align-items:center; gap:8px; }
 .rl-sort-label { font-size:13px; font-weight:550; color:var(--ink-2); white-space:nowrap; }
 .rl-sort .bt-select { width:auto; min-width:200px; padding:9px 12px; }
-/* Narrow screens: the header already wraps, so let the picker take the full row
-   rather than squeezing it against the button. */
-@media (max-width:640px) {
-  .rl-toolbar { width:100%; flex-wrap:wrap; }
-  .rl-sort { flex:1 1 100%; }
-  .rl-sort .bt-select { width:100%; min-width:0; }
-}
+/* The narrow-screen rules for this toolbar live in the RESPONSIVE section at the
+   bottom of the file, next to the .header-actions rules they have to outrank —
+   .rl-toolbar is also a .header-actions, and whichever block came last was
+   winning. */
 
 /* editable values table on the detail page */
 .val-table { width:100%; border-collapse:collapse; font-size:14px; }
@@ -797,7 +805,7 @@ a.nav-item { text-decoration:none; }
 
 /* --- Modal (bt- prefix avoids collision with the receipt app's .modal) - */
 .bt-scrim {
-  position:fixed; inset:0; z-index:200; background:rgba(16,24,40,.42);
+  position:fixed; inset:0; z-index:200; background:var(--scrim);
   backdrop-filter:blur(2px); display:grid; place-items:center; padding:20px;
   animation:fade .12s ease;
 }
@@ -1075,12 +1083,6 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance:none; margi
 .rcpt-drop-sub { font-size:12.5px; color:var(--ink-3); }
 .rcpt-drop .btn-ghost { height:36px; }
 
-.rcpt-cam { display:flex; flex-direction:column; gap:12px; }
-.rcpt-cam video {
-  width:100%; max-height:52vh; background:#000; border-radius:12px; object-fit:contain;
-}
-.rcpt-cam-actions { display:flex; justify-content:center; gap:12px; }
-
 .rcpt-progress { font-size:12.5px; color:var(--ink-2); margin:14px 0 2px; }
 .rcpt-batch { display:flex; flex-direction:column; gap:2px; max-height:34vh; overflow-y:auto; }
 .rcpt-item { display:flex; align-items:center; gap:10px; padding:9px 4px; border-top:1px solid var(--border); }
@@ -1101,3 +1103,416 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance:none; margi
 }
 .rcpt-item-x:hover { background:var(--border); color:var(--ink); }
 .rcpt-item-x svg { width:14px; height:14px; stroke-width:2.2; }
+
+/* ===================================================================== */
+/* Mobile chrome: floating nav button, scrim, drawer close               */
+/* All three are display:none until the drawer breakpoint — they exist    */
+/* only to replace the sidebar rail, so above 880px they must not paint.  */
+/* ===================================================================== */
+.nav-fab { display:none; }
+.nav-scrim { display:none; }
+.sb-close { display:none; }
+
+/* ===================================================================== */
+/* Shrink-to-fit                                                         */
+/* Flex and grid children default to min-width:auto, which means they     */
+/* refuse to shrink below their content's minimum width. One long vendor  */
+/* name in a nowrap row was therefore widening its card, its grid track,  */
+/* and the page — the sideways scroll. Every layout container that holds  */
+/* text has to opt its children out.                                      */
+/* ===================================================================== */
+.band > *, .grid-2 > *, .stat-grid > *, .acct-grid > *,
+.card, main > *, .vendor-list > *, .budget-list > *, .plan-list > * { min-width:0; }
+
+/* Truncating text inside a flex row needs min-width:0 on the item itself,
+   not just its parent — otherwise nowrap + ellipsis still reports the full
+   string as the minimum size. */
+.vendor-name, .vendor-top > *, .budget-cat, .budget-top > *,
+.legend .name, .legend li > *, .plan-title, .plan-sub,
+.acct-name, .stat-label, .card-title { min-width:0; }
+.vendor-name, .budget-cat, .legend .name, .acct-name {
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+
+/* A table that would rather scroll inside its card than widen the page. */
+.table-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch; }
+.table-wrap > table { min-width:340px; }
+
+/* Two-up stat tiles. A class, not an inline style, so the responsive rules
+   below can actually collapse it — inline styles outrank media queries. */
+.stat-grid.two { grid-template-columns:repeat(2,1fr); }
+
+/* Summary figure that sits opposite the page title (e.g. Net worth on Home). */
+.header-figure { text-align:right; min-width:0; }
+.header-figure-num { font-size:22px; font-weight:680; letter-spacing:-.02em; }
+
+/* Every pill button is a fixed-height flex row, so a label that wraps renders
+   as text spilling out of the pill rather than a taller button. Keep labels on
+   one line and let the containing row wrap instead. */
+.btn-primary, .btn-ghost, .btn-danger, .seg-btn { white-space:nowrap; }
+
+/* Popover can't be wider than the screen it opens on. */
+.cp-pop { width:min(280px, calc(100vw - 48px)); }
+
+/* ===================================================================== */
+/* Camera (components/CameraCapture.tsx)                                 */
+/* Full-bleed viewfinder. Fixed rather than a modal because on a phone the */
+/* only sensible size for a viewfinder is "the whole screen", and the      */
+/* controls have to clear the home indicator.                             */
+/* ===================================================================== */
+.cam {
+  position:fixed; inset:0; z-index:400; background:#000; color:#fff;
+  display:flex; flex-direction:column;
+}
+.cam-stage { position:relative; flex:1; min-height:0; overflow:hidden; }
+/* `cover` fills the screen; the snapshot is taken from the video track at full
+   sensor resolution, so cropping the preview costs nothing in the saved image. */
+.cam-video { width:100%; height:100%; object-fit:cover; display:block; background:#000; }
+
+/* Portrait guide at receipt proportions — holding the phone right is most of
+   the difference between a clean read and a re-shoot. */
+.cam-frame {
+  position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+  width:min(78%, 460px); aspect-ratio:3/4; max-height:72%;
+  border:2px solid rgba(255,255,255,.85); border-radius:14px;
+  box-shadow:0 0 0 100vmax rgba(0,0,0,.28); pointer-events:none;
+}
+.cam-status {
+  position:absolute; inset:0; display:grid; place-items:center;
+  font-size:14px; color:rgba(255,255,255,.8);
+}
+.cam-top {
+  position:absolute; top:0; left:0; right:0;
+  display:flex; align-items:center; justify-content:space-between;
+  padding:calc(12px + env(safe-area-inset-top)) calc(12px + env(safe-area-inset-right))
+          12px calc(12px + env(safe-area-inset-left));
+  background:linear-gradient(rgba(0,0,0,.45), transparent);
+}
+.cam-top-right { display:flex; gap:10px; }
+.cam-icon {
+  width:44px; height:44px; border-radius:50%; border:none;
+  background:rgba(0,0,0,.42); color:#fff; display:grid; place-items:center;
+  -webkit-backdrop-filter:blur(6px); backdrop-filter:blur(6px);
+}
+.cam-icon svg { width:22px; height:22px; }
+.cam-icon.on { background:#fff; color:#111; }
+.cam-err {
+  position:absolute; inset:auto 16px 16px; display:flex; flex-direction:column;
+  align-items:center; gap:12px; text-align:center;
+  background:rgba(0,0,0,.72); border-radius:16px; padding:20px 18px;
+}
+.cam-err p { margin:0; font-size:14px; line-height:1.5; }
+.cam-controls {
+  flex:none; display:flex; flex-direction:column; align-items:center; gap:12px;
+  padding:16px 16px calc(20px + env(safe-area-inset-bottom));
+  background:#000;
+}
+.cam-count { font-size:13px; color:rgba(255,255,255,.72); }
+.cam-controls-row {
+  display:flex; align-items:center; justify-content:space-between;
+  width:100%; max-width:420px;
+}
+.cam-shutter {
+  width:70px; height:70px; border-radius:50%; flex:none;
+  background:#fff; border:4px solid rgba(255,255,255,.35);
+  box-shadow:0 0 0 3px #000 inset; transition:transform .1s;
+}
+.cam-shutter:active { transform:scale(.93); }
+.cam-shutter:disabled { opacity:.4; }
+.cam-text-btn {
+  min-width:96px; padding:10px 6px; border:none; background:none; color:#fff;
+  font-size:14.5px; font-weight:550; font-family:inherit; border-radius:10px;
+}
+.cam-text-btn:active { background:rgba(255,255,255,.14); }
+
+/* ===================================================================== */
+/* RESPONSIVE                                                            */
+/* Every breakpoint in the app lives below, largest first. Nothing above  */
+/* this line should contain a width media query.                          */
+/* Tiers: 1024 tablet · 880 drawer · 640 phone · 400 small phone.         */
+/* ===================================================================== */
+
+/* ---- ≤1024px: tablet. Four-up tiles stop being readable first. -------- */
+@media (max-width:1024px) {
+  .stat-grid { grid-template-columns:repeat(2,1fr); }
+  .stat-grid.four { grid-template-columns:repeat(2,1fr); }
+  .band { grid-template-columns:1fr; }
+}
+
+/* ---- ≤880px: the sidebar rail becomes an off-canvas drawer. ---------- */
+@media (max-width:880px) {
+  /* Floating nav button, bottom-LEFT — opposite the quick-add and chat FABs, so
+     the bottom row reads "where am I going" then "what am I adding". Replaces
+     the old sticky header: it costs no vertical space, and the bottom corners
+     are where a thumb already is. */
+  .nav-fab {
+    display:grid; place-items:center;
+    position:fixed; z-index:190;
+    left:calc(16px + env(safe-area-inset-left));
+    bottom:calc(18px + env(safe-area-inset-bottom));
+    width:54px; height:54px; border-radius:50%;
+    border:1px solid var(--border-strong);
+    background:var(--surface); color:var(--ink);
+    box-shadow:var(--shadow-lg);
+    transition:background .15s, transform .12s;
+  }
+  .nav-fab:active { transform:scale(.94); }
+  /* Above the drawer (185) so the button stays hittable while open and turns
+     into the close control. */
+  .nav-fab.open { background:var(--accent); color:#fff; border-color:transparent; }
+
+  /* Three bars that fold into an X, so the control always states its next action. */
+  .nav-fab-bars {
+    position:relative; display:block; width:20px; height:14px;
+  }
+  .nav-fab-bars i {
+    position:absolute; left:0; width:100%; height:2px; border-radius:2px;
+    background:currentColor;
+    transition:transform .22s cubic-bezier(.32,.72,0,1), opacity .14s;
+  }
+  .nav-fab-bars i:nth-child(1) { top:0; }
+  .nav-fab-bars i:nth-child(2) { top:6px; }
+  .nav-fab-bars i:nth-child(3) { top:12px; }
+  .nav-fab.open .nav-fab-bars i:nth-child(1) { transform:translateY(6px) rotate(45deg); }
+  .nav-fab.open .nav-fab-bars i:nth-child(2) { opacity:0; }
+  .nav-fab.open .nav-fab-bars i:nth-child(3) { transform:translateY(-6px) rotate(-45deg); }
+
+  /* The drawer itself — the same <Sidebar>, re-presented. */
+  /* Stacking, bottom to top: FABs (150) < top bar (170) < scrim (180) <
+     drawer (185) < app modals (bt-scrim, 200). The drawer must outrank the top
+     bar or it slides underneath it and loses its own header. */
+  .sidebar {
+    position:fixed; top:0; bottom:0; left:0; z-index:185;
+    width:min(84vw, 300px); flex-shrink:0;
+    background:var(--surface); border-right:1px solid var(--border);
+    overflow-y:auto; overscroll-behavior:contain;
+    /* Bottom padding clears the nav button, which floats above the drawer as its
+       close control — without it the button covers the last nav row. */
+    padding:14px calc(10px + env(safe-area-inset-right))
+            calc(86px + env(safe-area-inset-bottom)) calc(10px + env(safe-area-inset-left));
+    transform:translateX(-100%);
+    /* visibility keeps a closed drawer out of the tab order and the a11y tree —
+       transform alone would leave every nav link focusable off-screen. */
+    visibility:hidden;
+    transition:transform .28s cubic-bezier(.32,.72,0,1), visibility .28s;
+  }
+  .sidebar.open { transform:none; visibility:visible; box-shadow:var(--shadow-lg); }
+  /* Fill the drawer so `nav-user`'s margin-top:auto pushes it to the bottom of
+     the content box — which sits above the padding reserved for the nav button.
+     Without this the footer follows the last link and the button lands on it. */
+  .sidebar-inner { position:static; top:auto; gap:22px; min-height:100%; }
+
+  /* The collapse preference is a desktop concept. A drawer that opens as a
+     64px icon strip is just a broken drawer, so every `.collapsed` suppression
+     is undone here with its real display value (never `revert`, which would
+     drop flex containers back to block). */
+  .sidebar.collapsed { width:min(84vw, 300px); }
+  .sidebar.collapsed .brand-name { display:inline; }
+  .sidebar.collapsed .nav-item span.label { display:inline; }
+  .sidebar.collapsed .beta-pill { display:inline-block; }
+  .sidebar.collapsed .brand-sub { display:block; }
+  .sidebar.collapsed .nav-sub { display:flex; }
+  .sidebar.collapsed .nav-user > div { display:block; }
+  .sidebar.collapsed .sb-caret { display:block; }
+  .sidebar.collapsed .nav-item { justify-content:flex-start; padding:10px 12px; }
+  .sidebar.collapsed .nav-group-btn { justify-content:space-between; }
+
+  .collapse-btn { display:none; }
+  .sb-close {
+    display:grid; place-items:center; flex-shrink:0;
+    width:36px; height:36px; border-radius:50%; border:1px solid var(--border);
+    background:var(--surface); color:var(--ink-2);
+  }
+  .sb-close svg { width:17px; height:17px; }
+  .nav-user { margin-top:20px; border-top:1px solid var(--border); padding-top:14px; }
+
+  .nav-scrim {
+    display:block; position:fixed; inset:0; z-index:180;
+    background:rgba(16,24,40,.4); -webkit-backdrop-filter:blur(2px); backdrop-filter:blur(2px);
+    opacity:0; pointer-events:none; transition:opacity .28s;
+  }
+  .nav-scrim.open { opacity:1; pointer-events:auto; }
+
+  /* Content column: the drawer is out of flow, so main gets the full width.
+     The bottom padding clears the floating buttons, which would otherwise sit
+     on top of the last row of every list. */
+  .shell {
+    gap:0;
+    padding:16px calc(14px + env(safe-area-inset-right))
+            calc(88px + env(safe-area-inset-bottom)) calc(14px + env(safe-area-inset-left));
+  }
+  /* The desktop min-height reserved a full viewport to stop route changes from
+     jumping. With no header above it and floating buttons below, that reservation
+     just leaves dead space under every short page. */
+  main { min-height:calc(100dvh - 120px); gap:20px; }
+
+  /* Chat becomes a near-full-width sheet above its launcher rather than a
+     380px panel pinned to a corner that no longer exists. */
+  .chat {
+    left:12px; right:12px; width:auto; max-width:none;
+    bottom:calc(88px + env(safe-area-inset-bottom));
+    height:min(64dvh, 520px); max-height:none;
+    transform-origin:bottom center;
+  }
+  .msg { max-width:88%; }
+
+  /* The OCR toast floats at the top of the screen instead of fighting the chat
+     sheet and the three corner buttons for the bottom. AppShell stops sending
+     `.aside` at this width for the same reason, but the override is kept so a
+     stale flag can't reposition it into the sheet. */
+  .ocr-toast,
+  .ocr-toast.aside {
+    top:calc(12px + env(safe-area-inset-top));
+    bottom:auto; left:12px; right:12px;
+    width:auto; min-width:0; max-width:none; padding:12px 13px;
+    transform-origin:top center; transform:translateY(-10px) scale(.98);
+  }
+  .ocr-toast.show, .ocr-toast.aside.show { transform:none; }
+  .ocr-toast.aside .ocr-toast-sub { display:block; }
+  .ocr-toast.aside .ocr-toast-icon { width:34px; height:34px; border-radius:10px; }
+  .ocr-toast.aside .ocr-toast-icon svg { width:21px; height:21px; }
+
+  /* Corner buttons, pulled inside the safe area and sized for a thumb. */
+  .robot-fab {
+    width:54px; height:54px;
+    right:calc(16px + env(safe-area-inset-right));
+    bottom:calc(18px + env(safe-area-inset-bottom));
+  }
+  .robot-fab svg { width:28px; height:28px; }
+  .fab-wrap {
+    right:calc(80px + env(safe-area-inset-right));
+    bottom:calc(18px + env(safe-area-inset-bottom));
+  }
+  .fab { width:50px; height:50px; }
+  .fab svg { width:24px; height:24px; }
+  .fab-menu { bottom:62px; }
+
+  /* Slide-over (scan) takes the whole screen — 420px of a 390px phone is a
+     panel with its own horizontal scrollbar. */
+  .panel {
+    width:100%; max-width:none;
+    padding:calc(18px + env(safe-area-inset-top)) 16px calc(18px + env(safe-area-inset-bottom));
+  }
+}
+
+/* ---- ≤640px: phone. Single column, bottom-sheet dialogs, 16px inputs. -- */
+@media (max-width:640px) {
+  .stat-grid, .stat-grid.two, .stat-grid.four { grid-template-columns:1fr; }
+  .card { padding:16px; }
+  .stat-value { font-size:24px; margin:8px 0 6px; }
+  .nw-figure { font-size:27px; }
+  .tile-num { font-size:22px; }
+  h1 { font-size:19px; }
+  main { gap:18px; }
+
+  /* Header actions go full width rather than crowding the title. The 150px
+     basis is a floor, not a target: two controls that both want it wrap onto
+     separate rows instead of squeezing a button until its label breaks. */
+  .header-actions { width:100%; gap:8px; flex-wrap:wrap; }
+  .header-actions > * { flex:1 1 150px; justify-content:center; }
+
+  /* Wrapped under the title, so it reads left-to-right with it instead of
+     right-aligning against nothing. */
+  .header-figure { width:100%; text-align:left; }
+  .header-figure-num { font-size:20px; }
+
+  /* Receipts toolbar: the sort picker gets the whole first row, the button the
+     second. Must come after .header-actions above — the same element carries
+     both classes. */
+  .rl-toolbar { width:100%; flex-wrap:wrap; }
+  .rl-toolbar .rl-sort { flex:1 1 100%; }
+  .rl-toolbar .rl-sort .bt-select { width:100%; min-width:0; }
+
+  /* Two-column form rows have ~150px per field at this width — below the point
+     where a labelled input is usable. */
+  .field-row { grid-template-columns:1fr; }
+  .fld-row { flex-direction:column; }
+
+  /* Donut + legend side by side leaves the legend ~120px wide; stack them. */
+  .donut-wrap { flex-direction:column; align-items:flex-start; gap:18px; }
+  .legend { width:100%; }
+
+  /* Modals become bottom sheets: reachable, and the keyboard pushes the fields
+     up instead of hiding a vertically-centred dialog behind it. */
+  .bt-scrim { padding:0; place-items:end center; }
+  .bt-modal, .bt-modal-wide {
+    width:100%; max-width:none; max-height:92dvh;
+    border-radius:18px 18px 0 0; border-bottom:none;
+    animation:sheet .18s cubic-bezier(.32,.72,0,1);
+  }
+  @keyframes sheet { from { transform:translateY(28px); } to { transform:none; } }
+  .bt-modal-foot {
+    position:sticky; bottom:0; z-index:1; flex-wrap:wrap;
+    background:var(--surface);
+    padding-bottom:calc(14px + env(safe-area-inset-bottom));
+  }
+  .bt-modal-foot > * { flex:1 1 130px; justify-content:center; }
+
+  /* The receipt-app modal keeps its centred placement but stops assuming 520px. */
+  .modal { width:calc(100vw - 24px); max-height:86dvh; padding:20px; }
+
+  /* 16px is the threshold below which iOS Safari zooms the page on focus, and
+     it never zooms back out. Every focusable text field has to clear it. */
+  .input, .vt-input, .budget-input, .cp-val,
+  .chat-input input, .fld input, select.month-filter { font-size:16px; }
+  .vt-input { max-width:none; }
+
+  /* Toolbars stack instead of squeezing. */
+  .ledger-toolbar .input { max-width:none; flex:1 1 100%; }
+  .seg { max-width:100%; overflow-x:auto; -webkit-overflow-scrolling:touch; }
+  .period-bar { gap:10px; }
+  .period-label { min-width:0; flex:1; }
+
+  /* One line of a merchant name is ~20 characters at this width, which cuts most
+     of them mid-word. Two clamped lines fit the row without letting a long name
+     push the amount off-screen — the truncation still exists, it just happens
+     twice as late. */
+  .ledger-title, .rl-merch, .txn-merchant, .plan-title, .acct-name {
+    white-space:normal; overflow-wrap:anywhere;
+    display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;
+    overflow:hidden;
+  }
+
+  /* Expanded item lists were indented to line up under a 40px icon + gap that
+     no longer leaves room for the text. */
+  .txn-items { padding:2px 4px 12px 8px; }
+  .conf-grid { grid-template-columns:1fr; }
+
+  /* The card head has to wrap before it clips the cashflow legend. */
+  .card-head { flex-wrap:wrap; gap:8px; }
+  .cf-legend { gap:12px; font-size:12px; }
+}
+
+/* ---- ≤400px: small phones (iPhone SE and friends). ------------------- */
+@media (max-width:400px) {
+  .acct-grid { grid-template-columns:1fr; }
+  .shell { padding-left:calc(10px + env(safe-area-inset-left)); padding-right:calc(10px + env(safe-area-inset-right)); }
+  .card { padding:14px; }
+  .rl-row, .ledger-row, .plan-row { gap:10px; }
+  .cam-shutter { width:62px; height:62px; }
+}
+
+/* ---- Touch input: no hover, so hover-revealed controls must be permanent
+        and every target has to be big enough to hit. ------------------- */
+@media (hover:none) and (pointer:coarse) {
+  /* These were invisible until :hover — on a touch screen that made delete
+     unreachable, not subtle. */
+  .txn-del,
+  .txn:hover .txn-del,
+  .txn.expandable .txn-del,
+  .past-row .p-del { opacity:1; }
+
+  .kebab { width:40px; height:40px; }
+  .txn-del, .past-row .p-del, .batch-row .b-del, .rcpt-item-x { width:34px; height:34px; }
+  .rcpt-item-x svg { width:16px; height:16px; }
+  .bt-modal-x, .modal-head .close-x, .chat-head .head-actions button { width:38px; height:38px; }
+  .mini-btn { min-height:34px; padding:6px 0; }
+  .nav-item { padding:11px 12px; }
+  .nav-sub .nav-item { padding:9px 10px; }
+  .seg-btn { padding:9px 14px; }
+  .eye-btn, .pn-btn, .collapse-btn { min-width:38px; min-height:38px; }
+  .chip { padding:9px 13px; }
+  /* Text links keep their inline look; the extra padding just makes them a
+     bigger target without opening a gap in the sentence they sit in. */
+  .link, .back-link { padding:6px 0; display:inline-block; }
+}

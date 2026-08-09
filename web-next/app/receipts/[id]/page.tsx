@@ -256,24 +256,28 @@ export default function ReceiptDetail() {
                   )}
                 </div>
                 {items.length > 0 ? (
-                  <table className="val-table items">
-                    <thead>
-                      <tr>
-                        <th>Description</th>
-                        <th className="num">Qty</th>
-                        <th className="num">Amount</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {items.map((it, i) => (
-                        <tr key={i}>
-                          <td>{it.description || "Item"}</td>
-                          <td className="num">{it.quantity ?? ""}</td>
-                          <td className="num">{money(it.amount ?? it.unit_price ?? 0, receipt.currency)}</td>
+                  // Three columns of item text can't always fit a phone; let the
+                  // table scroll inside the card rather than widen the page.
+                  <div className="table-wrap">
+                    <table className="val-table items">
+                      <thead>
+                        <tr>
+                          <th>Description</th>
+                          <th className="num">Qty</th>
+                          <th className="num">Amount</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {items.map((it, i) => (
+                          <tr key={i}>
+                            <td>{it.description || "Item"}</td>
+                            <td className="num">{it.quantity ?? ""}</td>
+                            <td className="num">{money(it.amount ?? it.unit_price ?? 0, receipt.currency)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 ) : (
                   <p className="empty-note">No line items were read from this receipt.</p>
                 )}
