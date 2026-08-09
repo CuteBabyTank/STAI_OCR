@@ -13,6 +13,8 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
+import Sheet from "./Sheet";
+import { useIsPhone } from "../lib/useMediaQuery";
 
 // --------------------------------------------------------------------------- //
 // Modal
@@ -30,6 +32,16 @@ export function Modal({
   footer?: ReactNode;
   wide?: boolean;
 }) {
+  // On a phone this dialog is a drag-dismissible sheet instead. Sheet owns its
+  // own Escape handling, scroll lock and focus trap, so the effect below is
+  // skipped along with the desktop markup.
+  //
+  // useIsPhone reports false on the first render by design (it must match the
+  // server), which would flash the desktop dialog for a frame. It does not in
+  // practice: a Modal is only ever mounted in response to a tap, long after the
+  // media-query effect has settled.
+  const isPhone = useIsPhone();
+
   // Close on Escape; lock background scroll while open.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -46,6 +58,15 @@ export function Modal({
   // Guards against: the opening click flashing the modal shut, a text-selection
   // drag ending on the backdrop, and clicks inside the modal bubbling out.
   const pressedOnScrim = useRef(false);
+
+  if (isPhone) {
+    // `wide` is a desktop max-width concern; a sheet is always full-bleed.
+    return (
+      <Sheet title={title} onClose={onClose} footer={footer}>
+        {children}
+      </Sheet>
+    );
+  }
 
   return (
     <div
