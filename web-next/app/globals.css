@@ -1420,6 +1420,11 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance:none; margi
   .band { grid-template-columns:1fr; }
 }
 
+/* Phone tab bar. Hidden by default and switched on in the ≤640px block, so the
+   boundary lives in exactly one place and the desktop first paint is correct
+   without any JS. */
+.tabbar { display:none; }
+
 /* ---- ≤880px: the sidebar rail becomes an off-canvas drawer. ---------- */
 @media (max-width:880px) {
   /* Floating nav button, bottom-LEFT — opposite the quick-add and chat FABs, so
@@ -1619,6 +1624,34 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance:none; margi
   .seg { display:flex; width:100%; }
   .seg-btn { flex:1; min-height:44px; }
 
+  /* ---- Bottom tab bar ------------------------------------------------ */
+  .tabbar {
+    display:flex; position:fixed; z-index:160;
+    left:0; right:0; bottom:0;
+    /* The inset is padding, not margin, so the glass runs all the way to the
+       bottom of the screen behind the home indicator instead of leaving a
+       stripe of page showing under the bar. */
+    padding-bottom:env(safe-area-inset-bottom);
+    background:var(--glass);
+    -webkit-backdrop-filter:saturate(180%) blur(20px);
+    backdrop-filter:saturate(180%) blur(20px);
+    border-top:1px solid var(--glass-border);
+  }
+  .tabbar-item {
+    flex:1; min-height:56px; min-width:44px;
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px;
+    border:none; background:none; text-decoration:none;
+    color:var(--ink-3); font-size:var(--t-tab); font-weight:530;
+    letter-spacing:0; line-height:1;
+    -webkit-tap-highlight-color:transparent;
+    transition:color .15s, transform .12s;
+  }
+  .tabbar-item svg { width:24px; height:24px; stroke-width:1.9; }
+  .tabbar-item.on { color:var(--accent); }
+  /* No haptics are available to a web page on iOS, so the press has to be
+     legible visually or the tap feels like it did nothing. */
+  .tabbar-item:active { transform:scale(.93); }
+
   /* Link hit areas are handled in the (hover:none) block below, which is where
      this file already keeps its touch sizing — duplicating them here would set
      padding that block then overrides, stranding the compensating margin. */
@@ -1742,4 +1775,12 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance:none; margi
      while -8px of margin keeps the element's outer height at the 28px it
      occupied before, so no row grows and nothing shifts. */
   .link, .back-link { padding:14px 0; margin:-8px 0; display:inline-block; }
+}
+
+/* ---- Glass fallback. Without backdrop-filter, a 72%-alpha bar over scrolling
+   content is just unreadable, so the chrome goes opaque instead. ---------- */
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))) {
+  @media (max-width:640px) {
+    .tabbar { background:var(--surface); }
+  }
 }
