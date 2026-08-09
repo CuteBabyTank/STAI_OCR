@@ -1420,6 +1420,47 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance:none; margi
   .band { grid-template-columns:1fr; }
 }
 
+/* ---- Bottom sheet (phone presentation of every dialog) ----------------- */
+.sheet-scrim {
+  position:fixed; inset:0; z-index:200; background:var(--scrim);
+  display:flex; align-items:flex-end; justify-content:center;
+}
+.sheet {
+  position:relative; z-index:300;
+  width:100%; max-width:560px; max-height:92dvh;
+  display:flex; flex-direction:column;
+  background:var(--surface);
+  border-radius:22px 22px 0 0; border-top:1px solid var(--border);
+  box-shadow:var(--shadow-lg);
+  padding-bottom:env(safe-area-inset-bottom);
+  outline:none;
+}
+/* touch-action:none is scoped to the handle, not the panel: on the panel it
+   would stop .sheet-body scrolling, and these hold forms taller than a phone. */
+.sheet-grab-zone { padding:9px 0 3px; touch-action:none; cursor:grab; flex-shrink:0; }
+.sheet-grab-zone:active { cursor:grabbing; }
+.sheet-grab { width:38px; height:5px; border-radius:3px; background:var(--border-strong); margin:0 auto; }
+.sheet-head {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:4px 20px 4px; flex-shrink:0;
+}
+.sheet-title { margin:0; font-size:var(--t-title); font-weight:640; letter-spacing:-.02em; }
+.sheet-x {
+  width:44px; height:44px; margin-right:-10px; border-radius:50%;
+  border:none; background:none; color:var(--ink-3);
+  display:grid; place-items:center; flex-shrink:0;
+}
+.sheet-x svg { width:20px; height:20px; }
+.sheet-body {
+  padding:10px 20px 18px; overflow-y:auto; overscroll-behavior:contain;
+  display:flex; flex-direction:column; gap:14px;
+}
+.sheet-foot {
+  padding:14px 20px; border-top:1px solid var(--border);
+  display:flex; gap:10px; flex-shrink:0;
+}
+.sheet-foot > * { flex:1; justify-content:center; }
+
 /* Phone tab bar. Hidden by default and switched on in the ≤640px block, so the
    boundary lives in exactly one place and the desktop first paint is correct
    without any JS. */
