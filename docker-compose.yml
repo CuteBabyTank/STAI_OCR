@@ -51,7 +51,12 @@ services:
       # Keep the ledger off the bind mount (see command above) so SQLite locking works.
       - LEDGER_DB_PATH=/data/ledger.db
       - OLLAMA_HOST=${OLLAMA_HOST:-http://103.231.240.155:11434}
-      - VISION_MODEL=${VISION_MODEL:-gemma4:e4b}
+      # OCR now runs on Qwen-VL. The shared endpoint above does NOT carry it
+      # (`ollama pull qwen2.5vl:7b` there, or point OLLAMA_HOST at a local Ollama
+      # that has it). Kept in sync with extraction.DEFAULT_MODEL — when these two
+      # disagree the same code reads receipts with a different model depending
+      # only on how it was launched.
+      - VISION_MODEL=${VISION_MODEL:-qwen2.5vl:7b}
       - AGENT_MODEL=${AGENT_MODEL:-gemma4:12b}
       - EMBED_MODEL=${EMBED_MODEL:-nomic-embed-text}
       # NOTE: VISION_MAX_DIM/VISION_NUM_CTX used to be set here but were never read by

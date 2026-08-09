@@ -1,0 +1,2032 @@
+{
+  "model": "qwen2.5vl:7b",
+  "ollama_host": "http://localhost:11434",
+  "dataset": "receipts_gt_10.json",
+  "receipts": 10,
+  "wall_clock_s": 3402.4,
+  "overall": {
+    "scalar_fields": {
+      "tp": 105,
+      "fp": 17,
+      "fn": 9,
+      "tn": 15,
+      "accuracy": 0.821917808219178,
+      "precision": 0.860655737704918,
+      "recall": 0.9210526315789473,
+      "f1": 0.8898305084745763
+    },
+    "line_items": {
+      "tp": 50,
+      "fp": 1,
+      "fn": 0,
+      "tn": 0,
+      "accuracy": 0.9803921568627451,
+      "precision": 0.9803921568627451,
+      "recall": 1.0,
+      "f1": 0.99009900990099
+    },
+    "combined": {
+      "tp": 155,
+      "fp": 18,
+      "fn": 9,
+      "tn": 15,
+      "accuracy": 0.8629441624365483,
+      "precision": 0.8959537572254336,
+      "recall": 0.9451219512195121,
+      "f1": 0.9198813056379822
+    }
+  },
+  "per_receipt": [
+    {
+      "id": "r1",
+      "file": "r1.jpg",
+      "elapsed_s": 291.92,
+      "error": null,
+      "disambiguation_reasons": [
+        "The 5 line items add up to \u20b1960.00, but the printed subtotal is \u20b196.00 \u2014 over by \u20b1864.00. A line was probably misread or missed.",
+        "Totals check: line items add up to \u20b1960.00, which doesn't reconcile to the total of \u20b11,056.00."
+      ],
+      "confidence_overall": 0.9541683259295294,
+      "scalars": {
+        "metrics": {
+          "tp": 9,
+          "fp": 1,
+          "fn": 0,
+          "tn": 4,
+          "accuracy": 0.9285714285714286,
+          "precision": 0.9,
+          "recall": 1.0,
+          "f1": 0.9473684210526316
+        },
+        "detail": [
+          {
+            "field": "vendor_name",
+            "verdict": "TP",
+            "expected": "IKKORYU FUKUOKA RAMEN",
+            "got": "IKKORYU FUKUOKA RAMEN"
+          },
+          {
+            "field": "vendor_tin",
+            "verdict": "TP",
+            "expected": "008-401-866-005",
+            "got": "008-401-866-005"
+          },
+          {
+            "field": "receipt_date",
+            "verdict": "TP",
+            "expected": "2015-12-02",
+            "got": "2015-12-02"
+          },
+          {
+            "field": "receipt_number",
+            "verdict": "TP",
+            "expected": "24614",
+            "got": "24614"
+          },
+          {
+            "field": "subtotal",
+            "verdict": "FP",
+            "expected": null,
+            "got": 96.0
+          },
+          {
+            "field": "vatable_sales",
+            "verdict": "TP",
+            "expected": 857.14,
+            "got": 857.14
+          },
+          {
+            "field": "vat_exempt_sales",
+            "verdict": "TP",
+            "expected": 0.0,
+            "got": 0.0
+          },
+          {
+            "field": "zero_rated_sales",
+            "verdict": "TN",
+            "expected": null,
+            "got": null
+          },
+          {
+            "field": "vat_amount",
+            "verdict": "TP",
+            "expected": 102.86,
+            "got": 102.86
+          },
+          {
+            "field": "discount",
+            "verdict": "TN",
+            "expected": null,
+            "got": null
+          },
+          {
+            "field": "total_amount",
+            "verdict": "TP",
+            "expected": 1056.0,
+            "got": 1056.0
+          },
+          {
+            "field": "cash",
+            "verdict": "TN",
+            "expected": null,
+            "got": null
+          },
+          {
+            "field": "change",
+            "verdict": "TN",
+            "expected": null,
+            "got": null
+          },
+          {
+            "field": "currency",
+            "verdict": "TP",
+            "expected": "PHP",
+            "got": "PHP"
+          }
+        ]
+      },
+      "items": {
+        "metrics": {
+          "tp": 5,
+          "fp": 0,
+          "fn": 0,
+          "tn": 0,
+          "accuracy": 1.0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        "detail": [
+          {
+            "verdict": "TP",
+            "expected": {
+              "description": "Chashu Tonkotsu",
+              "quantity": 1,
+              "amount": 380.0
+            },
+            "got": {
+              "description": "Chashu Tonkotsu",
+              "quantity": 1.0,
+              "unit_price": null,
+              "amount": 380.0
+            },
+            "similarity": 1.0
+          },
+          {
+            "verdict": "TP",
+            "expected": {
+              "description": "Gyoza6",
+              "quantity": 1,
+              "amount": 150.0
+            },
+            "got": {
+              "description": "Gyoza6",
+              "quantity": 1.0,
+              "unit_price": null,
+              "amount": 150.0
+            },
+            "similarity": 1.0
+          },
+          {
+            "verdict": "TP",
+            "expected": {
+              "description": "Karaage",
+              "quantity": 1,
+              "amount": 180.0
+            },
+            "got": {
+              "description": "Karaage",
+              "quantity": 1.0,
+              "unit_price": null,
+              "amount": 180.0
+            },
+            "similarity": 1.0
+          },
+          {
+            "verdict": "TP",
+            "expected": {
+              "description": "Ebi Yakimeshi",
+              "quantity": 1,
+              "amount": 200.0
+            },
+            "got": {
+              "description": "Ebi Yakimeshi",
+              "quantity": 1.0,
+              "unit_price": null,
+              "amount": 200.0
+            },
+            "similarity": 1.0
+          },
+          {
+            "verdict": "TP",
+            "expected": {
+              "description": "Calamansi Soda",
+              "quantity": 1,
+              "amount": 50.0
+            },
+            "got": {
+              "description": "Calamansi Soda",
+              "quantity": 1.0,
+              "unit_price": null,
+              "amount": 50.0
+            },
+            "similarity": 1.0
+          }
+        ],
+        "labelled": 5,
+        "extracted": 5
+      }
+    },
+    {
+      "id": "r2",
+      "file": "r2.jpg",
+      "elapsed_s": 460.14,
+      "error": null,
+      "disambiguation_reasons": [
+        "1 line item(s) were read without an amount, so the item total is short by an unknown figure."
+      ],
+      "confidence_overall": 0.9743703148232292,
+      "scalars": {
+        "metrics": {
+          "tp": 11,
+          "fp": 1,
+          "fn": 0,
+          "tn": 2,
+          "accuracy": 0.9285714285714286,
+          "precision": 0.9166666666666666,
+          "recall": 1.0,
+          "f1": 0.9565217391304348
+        },
+        "detail": [
+          {
+            "field": "vendor_name",
+            "verdict": "TP",
+            "expected": "ALL FILIPINO CORP.",
+            "got": "ALL FILIPINO CORP."
+          },
+          {
+            "field": "vendor_tin",
+            "verdict": "TP",
+            "expected": "008-653-196-000",
+            "got": "008-653-196-000"
+          },
+          {
+            "field": "receipt_date",
+            "verdict": "TP",
+            "expected": "2014-07-12",
+            "got": "2014-07-12"
+          },
+          {
+            "field": "receipt_number",
+            "verdict": "TP",
+            "expected": "5158",
+            "got": "5158 [24639]"
+          },
+          {
+            "field": "subtotal",
+            "verdict": "FP",
+            "expected": null,
+            "got": 1493.0
+          },
+          {
+            "field": "vatable_sales",
+            "verdict": "TP",
+            "expected": 1333.04,
+            "got": 1333.04
+          },
+          {
+            "field": "vat_exempt_sales",
+            "verdict": "TP",
+            "expected": 0.0,
+            "got": 0.0
+          },
+          {
+            "field": "zero_rated_sales",
+            "verdict": "TN",
+            "expected": null,
+            "got": null
+          },
+          {
+            "field": "vat_amount",
+            "verdict": "TP",
+            "expected": 159.96,
+            "got": 159.96
+          },
+          {
+            "field": "discount",
+            "verdict": "TN",
+            "expected": null,
+            "got": null
+          },
+          {
+            "field": "total_amount",
+            "verdict": "TP",
+            "expected": 1493.0,
+            "got": 1493.0
+          },
+          {
+            "field": "cash",
+            "verdict": "TP",
+            "expected": 1500.0,
+            "got": 1500.0
+          },
+          {
+            "field": "change",
+            "verdict": "TP",
+            "expected": 7.0,
+            "got": 7.0
+          },
+          {
+            "field": "currency",
+            "verdict": "TP",
+            "expected": "PHP",
+            "got": "PHP"
+          }
+        ]
+      },
+      "items": {
+        "metrics": {
+          "tp": 8,
+          "fp": 1,
+          "fn": 0,
+          "tn": 0,
+          "accuracy": 0.8888888888888888,
+          "precision": 0.8888888888888888,
+          "recall": 1.0,
+          "f1": 0.9411764705882353
+        },
+        "detail": [
+          {
+            "verdict": "TP",
+            "expected": {
+              "description": "CRISPY HITO D",
+              "quantity": 1,
+              "amount": 250.0
+            },
+            "got": {
+              "description": "CRISPY HITO D",
+              "quantity": 1.0,
+              "unit_price": null,
+              "amount": 250.0
+            },
+            "similarity": 1.0
+          },
+          {
+            "verdict": "TP",
+            "expected": {
+              "description": "SISIG D Bangus D",
+              "quantity": 1,
+              "amount": 189.0
+            },
+            "got": {
+              "description": "SISIG D",
+              "quantity": 1.0,
+              "unit_price": null,
+              "amount": 189.0
+            },
+            "similarity": 0.63
+          },
+          {
+            "verdict": "TP",
+            "expected": {
+              "description": "NILASING NA HIPON D",
+              "quantity": 1,
+              "amount": 250.0
+            },
+            "got": {
+              "description": "NILASING NA HIPON D",
+              "quantity": 1.0,
+              "unit_price": null,
+              "amount": 250.0
+            },
+            "similarity": 1.0
+          },
+          {
+            "verdict": "TP",
+            "expected": {
+              "description": "Suam na tahong D",
+              "quantity": 1,
+              "amount": 250.0
+            },
+            "got": {
+              "description": "Suam na tahong D",
+              "quantity": 1.0,
+              "unit_price": null,
+              "amount": 250.0
+            },
+            "similarity": 1.0
+          },
+          {
+            "verdict": "TP",
+            "expected": {
+              "description": "FREE Camote Frit D",
+              "quantity": 1,
+              "amount": 0.0
+            },
+            "got": {
+              "description": "FREE Camote Frit D",
+              "quantity": 1.0,
+              "unit_price": null,
+              "amount": 0.0
+            },
+            "similarity": 1.0
+          },
+          {
+            "verdict": "TP",
+            "expected": {
+              "description": "Steamed Rice D",
+              "quantity": 2,
+              "amount": 64.0
+            },
+            "got": {
+              "description": "Steamed Rice D",
+              "quantity": 2.0,
+              "unit_price": null,
+              "amount": 64.0
+            },
+            "similarity": 1.0
+          },
+          {
+            "verdict": "TP",
+            "expected": {
+              "description": "SANGKATUTAK NA FISHBALLS D",
+              "quantity": 1,
+              "amount": 130.0
+            },
+            "got": {
+              "description": "SANGKATUTAK NA FISHBALLS D",
+              "quantity": 1.0,
+              "unit_price": null,
+              "amount": 130.0
+            },
+            "similarity": 1.0
+          },
+          {
+            "verdict": "TP",
+            "expected": {
+              "description": "BEEF SPARERIBS CALDERETA D",
+              "quantity": 1,
+              "amount": 360.0
+            },
+            "got": {
+              "description": "BEEF SPARERIBS CALDERETA D",
+              "quantity": 1.0,
+              "unit_price": null,
+              "amount": 360.0
+            },
+            "similarity": 1.0
+          },
+          {
+            "verdict": "FP",
+            "expected": null,
+            "got": {
+              "description": "Banguis D",
+              "quantity": 1.0,
+              "unit_price": null,
+              "amount": null
+            }
+          }
+        ],
+        "labelled": 8,
+        "extracted": 9
+      }
+    },
+    {
+      "id": "r3",
+      "file": "r3.jpg",
+      "elapsed_s": 297.21,
+      "error": null,
+      "disambiguation_reasons": [],
+      "confidence_overall": 0.9767049052691779,
+      "scalars": {
+        "metrics": {
+          "tp": 8,
+          "fp": 1,
+          "fn": 2,
+          "tn": 3,
+          "accuracy": 0.7857142857142857,
+          "precision": 0.8888888888888888,
+          "recall": 0.8,
+          "f1": 0.8421052631578948
+        },
+        "detail": [
+          {
+            "field": "vendor_name",
+            "verdict": "TP",
+            "expected": "SAVEMORE MARKET",
+            "got": "SAVEMORE MARKET"
+          },
+          {
+            "field": "vendor_tin",
+            "verdict": "TP",
+            "expected": "207-961-175-00070",
+            "got": "207-961-175-00070"
+          },
+          {
+            "field": "receipt_date",
+            "verdict": "TP",
+            "expected": "2022-12-19",
+            "got": "2022-12-19"
+          },
+          {
+            "field": "receipt_number",
+            "verdict": "TP",
+            "expected": "08-00036843",
+            "got": "SI# 08-00036843"
+          },
+          {
+            "field": "subtotal",
+            "verdict": "FP",
+            "expected": null,
+            "got": 689.75
+          },
+          {
+            "field": "vatable_sales",
+            "verdict": "TP",
+            "expected": 615.85,
+            "got": 615.85
+          },
+          {
+            "field": "vat_exempt_sales",
+            "verdict": "FN",
+            "expected": 0.0,
+            "got": null
+          },
+          {
+            "field": "zero_rated_sales",
+            "verdict": "FN",
+            "expected": 0.0,
+            "got": null
+          },
+          {
+            "field": "vat_amount",
+            "verdict": "TP",
+            "expected": 73.9,
+            "got": 73.9
+          },
+          {
+            "field": "discount",
+            "verdict": "TN",
+            "expected": null,
+            "got": null
+          },
+          {
+            "field": "total_amount",
+            "verdict": "TP",
+            "expected": 689.75,
+            "got": 689.75
+          },
+          {
+            "field": "cash",
+            "verdict": "TN",
+            "expected": null,
+            "got": null
+          },
+          {
+            "field": "change",
+            "verdict": "TN",
+            "expected": null,
+            "got": null
+          },
+          {
+            "field": "currency",
+            "verdict": "TP",
+            "expected": "PHP",
+            "got": "PHP"
+          }
+        ]
+      },
+      "items": {
+        "metrics": {
+          "tp": 9,
+          "fp": 0,
+          "fn": 0,
+          "tn": 0,
+          "accuracy": 1.0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        "detail": [
+          {
+            "verdict": "TP",
+            "expected": {
+              "description": "FemmeTsu2Ply250",
+              "quantity": 1,
+              "amount": 68.75
+            },
+            "got": {
+              "description": "FemmeTsu2Ply250",
+              "quantity": null,
+              "unit_price": null,
+              "amount": 68.75
+            },
+            "similarity": 1.0
+          },
+          {
+            "verdict": "TP",
+            "expected": {
+              "description": "MYSAN SkyFlakes",
+              "quantity": 1,
+              "amount": 60.5
+            },
+            "got": {
+              "description": "MYSAN SkyFlakes",
+              "quantity": null,
+              "unit_price": null,
+              "amount": 60.5
+            },
+            "similarity": 1.0
+          },
+          {
+            "verdict": "TP",
+            "expected": {
+              "description": "NissinEggnogReg130",
+              "quantity": 3,
+              "amount": 100.5
+            },
+            "got": {
+              "description": "NissinEggnogReg",
+              "quantity": null,
+              "unit_price": 33.5,
+              "amount": 100.5
+            },
+            "similarity": 0.91
+          },
+          {
+            "verdict": "TP",
+            "expected": {
+              "description": "JnJDwbryBlbryChsCk",
+              "quantity": 1,
+              "amount": 85.0
+            },
+            "got": {
+              "description": "JnJDwbryB1bryChsCk",
+              "quantity": null,
+              "unit_price": null,
+              "amount": 85.0
+            },
+            "similarity": 0.94
+          },
+          {
+            "verdict": "TP",
+            "expected": {
+              "description": "GleeGrTeaTpste150",
+              "quantity": 1,
+              "amount": 49.75
+            },
+            "got": {
+              "description": "GleeGrTeaTpste150",
+              "quantity": null,
+              "unit_price": null,
+              "amount": 49.75
+            },
+            "similarity": 1.0
+          },
+          {
+            "verdict": "TP",
+            "expected": {
+              "description": "DelMontePttCrspOrg",
+              "quantity": 5,
+              "amount": 114.75
+            },
+            "got": {
+              "description": "DelMontePttCrspOrg",
+              "quantity": null,
+              "unit_price": 22.95,
+              "amount": 114.75
+            },
+            "similarity": 1.0
+          },
+          {
+            "verdict": "TP",
+            "expected": {
+              "description": "Sprite Can 320ml",
+              "quantity": 3,
+              "amount": 103.5
+            },
+            "got": {
+              "description": "Sprite Can 320ml",
+              "quantity": null,
+              "unit_price": 34.5,
+              "amount": 103.5
+            },
+            "similarity": 1.0
+          },
+          {
+            "verdict": "TP",
+            "expected": {
+              "description": "GAR WhiteBreadRS",
+              "quantity": 1,
+              "amount": 82.0
+            },
+            "got": {
+              "description": "GAR WhiteBreadRS",
+              "quantity": null,
+              "unit_price": null,
+              "amount": 82.0
+            },
+            "similarity": 1.0
+          },
+          {
+            "verdict": "TP",
+            "expected": {
+              "description": "Turon WithLangka",
+              "quantity": 1,
+              "amount": 25.0
+            },
+            "got": {
+              "description": "# Turon WithLangka",
+              "quantity": null,
+              "unit_price": null,
+              "amount": 25.0
+            },
+            "similarity": 1.0
+          }
+        ],
+        "labelled": 9,
+        "extracted": 9
+      }
+    },
+    {
+      "id": "r4",
+      "file": "r4.jpg",
+      "elapsed_s": 244.34,
+      "error": null,
+      "disambiguation_reasons": [
+        "Totals check: line items add up to \u20b11,120.00, which doesn't reconcile to the total of \u20b1896.01."
+      ],
+      "confidence_overall": 0.9778032786749044,
+      "scalars": {
+        "metrics": {
+          "tp": 13,
+          "fp": 1,
+          "fn": 0,
+          "tn": 0,
+          "accuracy": 0.9285714285714286,
+          "precision": 0.9285714285714286,
+          "recall": 1.0,
+          "f1": 0.962962962962963
+        },
+        "detail": [
+          {
+            "field": "vendor_name",
+            "verdict": "TP",
+            "expected": "Cara Mia",
+            "got": "Cara Mia Sales and Services Inc."
+          },
+          {
+            "field": "vendor_tin",
+            "verdict": "TP",
+            "expected": "009062877-00029",
+            "got": "009062877-00029"
+          },
+          {
+            "field": "receipt_date",
+            "verdict": "TP",
+            "expected": "2023-05-05",
+            "got": "2023-05-05"
+          },
+          {
+            "field": "receipt_number",
+            "verdict": "TP",
+            "expected": "1219",
+            "got": "00000000000000001219"
+          },
+          {
+            "field": "subtotal",
+            "verdict": "TP",
+            "expected": 1120.0,
+            "got": 1120.0
+          },
+          {
+            "field": "vatable_sales",
+            "verdict": "TP",
+            "expected": 9856.01,
+            "got": 9856.01
+          },
+          {
+            "field": "vat_exempt_sales",
+            "verdict": "TP",
+            "expected": 0.0,
+            "got": 0.0
+          },
+          {
+            "field": "zero_rated_sales",
+            "verdict": "TP",
+            "expected": 0.0,
+            "got": 0.0
+          },
+          {
+            "field": "vat_amount",
+            "verdict": "TP",
+            "expected": 107.52,
+            "got": 107.52
+          },
+          {
+            "field": "discount",
+            "verdict": "TP",
+            "expected": 223.99,
+            "got": -223.99
+          },
+          {
+            "field": "total_amount",
+            "verdict": "TP",
+            "expected": 896.01,
+            "got": 896.01
+          },
+          {
+            "field": "cash",
+            "verdict": "TP",
+            "expected": 896.01,
+            "got": 896.01
+          },
+          {
+            "field": "change",
+            "verdict": "FP",
+            "expected": null,
+            "got": 0.0
+          },
+          {
+            "field": "currency",
+            "verdict": "TP",
+            "expected": "PHP",
+            "got": "PHP"
+          }
+        ]
+      },
+      "items": {
+        "metrics": {
+          "tp": 2,
+          "fp": 0,
+          "fn": 0,
+          "tn": 0,
+          "accuracy": 1.0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        "detail": [
+          {
+            "verdict": "TP",
+            "expected": {
+              "description": "Midnight Dream (Whole)",
+              "quantity": 1,
+              "amount": 1065.0
+            },
+            "got": {
+              "description": "Midnight Dream (Whole)",
+              "quantity": 1.0,
+              "unit_price": 1065.0,
+              "amount": 1065.0
+            },
+            "similarity": 1.0
+          },
+          {
+            "verdict": "TP",
+            "expected": {
+              "description": "ECO",
+              "quantity": 1,
+              "amount": 55.0
+            },
+            "got": {
+              "description": "ECO",
+              "quantity": 1.0,
+              "unit_price": 55.0,
+              "amount": 55.0
+            },
+            "similarity": 1.0
+          }
+        ],
+        "labelled": 2,
+        "extracted": 2
+      }
+    },
+    {
+      "id": "r5",
+      "file": "r5.JPG",
+      "elapsed_s": 564.78,
+      "error": null,
+      "disambiguation_reasons": [],
+      "confidence_overall": 0.9570405090616761,
+      "scalars": {
+        "metrics": {
+          "tp": 11,
+          "fp": 3,
+          "fn": 1,
+          "tn": 0,
+          "accuracy": 0.7333333333333333,
+          "precision": 0.7857142857142857,
+          "recall": 0.9166666666666666,
+          "f1": 0.8461538461538461
+        },
+        "detail": [
+          {
+            "field": "vendor_name",
+            "verdict": "TP",
+            "expected": "ISETANN DEPARTMENT STORE INC",
+            "got": "ISETANN DEPARTMENT STORE INC"
+          },
+          {
+            "field": "vendor_tin",
+            "verdict": "TP",
+            "expected": "000-083-402-001",
+            "got": "000-083-402-001"
+          },
+          {
+            "field": "receipt_date",
+            "verdict": "TP",
+            "expected": "2026-06-24",
+            "got": "2026-06-24"
+          },
+          {
+            "field": "receipt_number",
+            "verdict": "FP+FN",
+            "expected": "00-095687",
+            "got": "06/24/2026"
+          },
+          {
+            "field": "subtotal",
+            "verdict": "TP",
+            "expected": 1164.0,
+            "got": 1164.0
+          },
+          {
+            "field": "vatable_sales",
+            "verdict": "TP",
+            "expected": 1039.27,
+            "got": 1039.27
+          },
+          {
+            "field": "vat_exempt_sales",
+            "verdict": "TP",
+            "expected": 0.0,
+            "got": 0.0
+          },
+          {
+            "field": "zero_rated_sales",
+            "verdict": "TP",
+            "expected": 0.0,
+            "got": 0.0
+          },
+          {
+            "field": "vat_amount",
+            "verdict": "TP",
+            "expected": 124.73,
+            "got": 124.73
+          },
+          {
+            "field": "discount",
+            "verdict": "TP",
+            "expected": 19.86,
+            "got": -19.86
+          },
+          {
+            "field": "total_amount",
+            "verdict": "TP",
+            "expected": 1144.14,
+            "got": 1144.14
+          },
+          {
+            "field": "cash",
+            "verdict": "FP",
+            "expected": null,
+            "got": 1144.14
+          },
+          {
+            "field": "change",
+            "verdict": "FP",
+            "expected": null,
+            "got": 0.0
+          },
+          {
+            "field": "currency",
+            "verdict": "TP",
+            "expected": "PHP",
+            "got": "PHP"
+          }
+        ]
+      },
+      "items": {
+        "metrics": {
+          "tp": 8,
+          "fp": 0,
+          "fn": 0,
+          "tn": 0,
+          "accuracy": 1.0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        "detail": [
+          {
+            "verdict": "TP",
+            "expected": {
+              "description": "LUCKY ME BEEF NOODLES 55GM",
+              "quantity": 25,
+              "amount": 225.0
+            },
+            "got": {
+              "description": "LUCKY ME BEEF NOODLES 55GM",
+              "quantity": 25.0,
+              "unit_price": 9.0,
+              "amount": 225.0
+            },
+            "similarity": 1.0
+          },
+          {
+            "verdict": "TP",
+            "expected": {
+              "description": "KOPIKO COFFE",
+              "quantity": 1,
+              "amount": 39.9
+            },
+            "got": {
+              "description": "KOPIKO COFFE",
+              "quantity": 8996001320136.0,
+              "unit_price": 39.9,
+              "amount": 39.9
+            },
+            "similarity": 1.0
+          },
+          {
+            "verdict": "TP",
+            "expected": {
+              "description": "KOPIKO COFFE",
+              "quantity": 1,
+              "amount": 39.9
+            },
+            "got": {
+              "description": "KOPIKO COFFE",
+              "quantity": 8996001320051.0,
+              "unit_price": 39.9,
+              "amount": 39.9
+            },
+            "similarity": 1.0
+          },
+          {
+            "verdict": "TP",
+            "expected": {
+              "description": "CHARMEE ALL FLOW W/WINGS 8",
+              "quantity": 5,
+              "amount": 100.0
+            },
+            "got": {
+              "description": "CHARMEE ALL FLOW W/WINGS 8",
+              "quantity": 5.0,
+              "unit_price": 20.0,
+              "amount": 100.0
+            },
+            "similarity": 1.0
+          },
+          {
+            "verdict": "TP",
+            "expected": {
+              "description": "MODESS REGULAR NON-WINGS 8",
+              "quantity": 5,
+              "amount": 208.75
+            },
+            "got": {
+              "description": "MODESS REGULAR NON-WINGS 8",
+              "quantity": 5.0,
+              "unit_price": 41.75,
+              "amount": 208.75
+            },
+            "similarity": 1.0
+          },
+          {
+            "verdict": "TP",
+            "expected": {
+              "description": "HAPPY COTTON 12G (100)",
+              "quantity": 21,
+              "amount": 103.95
+            },
+            "got": {
+              "description": "HAPPY COTTON 12G (100)",
+              "quantity": 21.0,
+              "unit_price": 4.95,
+              "amount": 103.95
+            },
+            "similarity": 1.0
+          },
+          {
+            "verdict": "TP",
+            "expected": {
+              "description": "CASINO 70% ALCOHOL FEMME 1",
+              "quantity": 6,
+              "amount": 226.5
+            },
+            "got": {
+              "description": "CASINO 70% ALCOHOL FEMME 1",
+              "quantity": 6.0,
+              "unit_price": 37.75,
+              "amount": 226.5
+            },
+            "similarity": 1.0
+          },
+          {
+            "verdict": "TP",
+            "expected": {
+              "description": "GARDENIA HIGH FIBER WHEAT",
+              "quantity": 2,
+              "amount": 220.0
+            },
+            "got": {
+              "description": "GARDENIA HIGH FIBER WHEAT",
+              "quantity": 2.0,
+              "unit_price": 110.0,
+              "amount": 220.0
+            },
+            "similarity": 1.0
+          }
+        ],
+        "labelled": 8,
+        "extracted": 8
+      }
+    },
+    {
+      "id": "r6",
+      "file": "r6.jpg",
+      "elapsed_s": 283.1,
+      "error": null,
+      "disambiguation_reasons": [
+        "Totals check: line items add up to \u20b1270.00, which doesn't reconcile to the total of \u20b1216.00."
+      ],
+      "confidence_overall": 0.9808143843830045,
+      "scalars": {
+        "metrics": {
+          "tp": 11,
+          "fp": 2,
+          "fn": 2,
+          "tn": 0,
+          "accuracy": 0.7333333333333333,
+          "precision": 0.8461538461538461,
+          "recall": 0.8461538461538461,
+          "f1": 0.8461538461538461
+        },
+        "detail": [
+          {
+            "field": "vendor_name",
+            "verdict": "TP",
+            "expected": "DBARN MANILA CORP.",
+            "got": "DBARN MANILA CORP."
+          },
+          {
+            "field": "vendor_tin",
+            "verdict": "TP",
+            "expected": "009-857-920-000",
+            "got": "009-857-920-000"
+          },
+          {
+            "field": "receipt_date",
+            "verdict": "TP",
+            "expected": "2026-06-22",
+            "got": "2026-06-22"
+          },
+          {
+            "field": "receipt_number",
+            "verdict": "FP+FN",
+            "expected": "SI000000225762",
+            "got": "3BN7A25504742"
+          },
+          {
+            "field": "subtotal",
+            "verdict": "TP",
+            "expected": 270.0,
+            "got": 270.0
+          },
+          {
+            "field": "vatable_sales",
+            "verdict": "TP",
+            "expected": 241.07,
+            "got": 241.07
+          },
+          {
+            "field": "vat_exempt_sales",
+            "verdict": "TP",
+            "expected": 0.0,
+            "got": 0.0
+          },
+          {
+            "field": "zero_rated_sales",
+            "verdict": "TP",
+            "expected": 0.0,
+            "got": 0.0
+          },
+          {
+            "field": "vat_amount",
+            "verdict": "TP",
+            "expected": 28.93,
+            "got": 28.93
+          },
+          {
+            "field": "discount",
+            "verdict": "FN",
+            "expected": 54.0,
+            "got": null
+          },
+          {
+            "field": "total_amount",
+            "verdict": "TP",
+            "expected": 216.0,
+            "got": 216.0
+          },
+          {
+            "field": "cash",
+            "verdict": "FP",
+            "expected": null,
+            "got": 216.0
+          },
+          {
+            "field": "change",
+            "verdict": "TP",
+            "expected": 0.0,
+            "got": 0.0
+          },
+          {
+            "field": "currency",
+            "verdict": "TP",
+            "expected": "PHP",
+            "got": "PHP"
+          }
+        ]
+      },
+      "items": {
+        "metrics": {
+          "tp": 1,
+          "fp": 0,
+          "fn": 0,
+          "tn": 0,
+          "accuracy": 1.0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        "detail": [
+          {
+            "verdict": "TP",
+            "expected": {
+              "description": "Peri-Peri Chicken",
+              "quantity": 1,
+              "amount": 270.0
+            },
+            "got": {
+              "description": "Peri-Peri Chicken",
+              "quantity": null,
+              "unit_price": 270.0,
+              "amount": 270.0
+            },
+            "similarity": 1.0
+          }
+        ],
+        "labelled": 1,
+        "extracted": 1
+      }
+    },
+    {
+      "id": "r7",
+      "file": "r7.jpg",
+      "elapsed_s": 246.29,
+      "error": null,
+      "disambiguation_reasons": [],
+      "confidence_overall": 0.9664344584862568,
+      "scalars": {
+        "metrics": {
+          "tp": 8,
+          "fp": 3,
+          "fn": 1,
+          "tn": 3,
+          "accuracy": 0.7333333333333333,
+          "precision": 0.7272727272727273,
+          "recall": 0.8888888888888888,
+          "f1": 0.7999999999999999
+        },
+        "detail": [
+          {
+            "field": "vendor_name",
+            "verdict": "TP",
+            "expected": "McDonald's",
+            "got": "GOLDEN ARCHES DEVELOPMENT CORP."
+          },
+          {
+            "field": "vendor_tin",
+            "verdict": "TP",
+            "expected": "000-121-242-110",
+            "got": "000-121-242-110"
+          },
+          {
+            "field": "receipt_date",
+            "verdict": "TP",
+            "expected": "2011-05-13",
+            "got": "2011-05-13"
+          },
+          {
+            "field": "receipt_number",
+            "verdict": "TP",
+            "expected": "014601200357315",
+            "got": "014601200357315"
+          },
+          {
+            "field": "subtotal",
+            "verdict": "FP",
+            "expected": null,
+            "got": 216.0
+          },
+          {
+            "field": "vatable_sales",
+            "verdict": "FP",
+            "expected": null,
+            "got": 486.61
+          },
+          {
+            "field": "vat_exempt_sales",
+            "verdict": "TN",
+            "expected": null,
+            "got": null
+          },
+          {
+            "field": "zero_rated_sales",
+            "verdict": "TN",
+            "expected": null,
+            "got": null
+          },
+          {
+            "field": "vat_amount",
+            "verdict": "FP+FN",
+            "expected": 23.15,
+            "got": 58.39
+          },
+          {
+            "field": "discount",
+            "verdict": "TN",
+            "expected": null,
+            "got": null
+          },
+          {
+            "field": "total_amount",
+            "verdict": "TP",
+            "expected": 216.0,
+            "got": 216.0
+          },
+          {
+            "field": "cash",
+            "verdict": "TP",
+            "expected": 220.0,
+            "got": 220.0
+          },
+          {
+            "field": "change",
+            "verdict": "TP",
+            "expected": 4.0,
+            "got": 4.0
+          },
+          {
+            "field": "currency",
+            "verdict": "TP",
+            "expected": "PHP",
+            "got": "PHP"
+          }
+        ]
+      },
+      "items": {
+        "metrics": {
+          "tp": 5,
+          "fp": 0,
+          "fn": 0,
+          "tn": 0,
+          "accuracy": 1.0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        "detail": [
+          {
+            "verdict": "TP",
+            "expected": {
+              "description": "BottldWater 330",
+              "quantity": 1,
+              "amount": 22.0
+            },
+            "got": {
+              "description": "BottledWater 330",
+              "quantity": 1.0,
+              "unit_price": null,
+              "amount": 22.0
+            },
+            "similarity": 0.97
+          },
+          {
+            "verdict": "TP",
+            "expected": {
+              "description": "Cheeseburger",
+              "quantity": 1,
+              "amount": 39.0
+            },
+            "got": {
+              "description": "Cheeseburger",
+              "quantity": 1.0,
+              "unit_price": null,
+              "amount": 39.0
+            },
+            "similarity": 1.0
+          },
+          {
+            "verdict": "TP",
+            "expected": {
+              "description": "Medium Fries",
+              "quantity": 1,
+              "amount": 45.0
+            },
+            "got": {
+              "description": "Medium Fries",
+              "quantity": 1.0,
+              "unit_price": null,
+              "amount": 45.0
+            },
+            "similarity": 1.0
+          },
+          {
+            "verdict": "TP",
+            "expected": {
+              "description": "EVM Reg Coke",
+              "quantity": 1,
+              "amount": 0.0
+            },
+            "got": {
+              "description": "EVM Reg Coke",
+              "quantity": 1.0,
+              "unit_price": null,
+              "amount": 0.0
+            },
+            "similarity": 1.0
+          },
+          {
+            "verdict": "TP",
+            "expected": {
+              "description": "D ChicknwSpagML",
+              "quantity": 1,
+              "amount": 110.0
+            },
+            "got": {
+              "description": "D ChicknWSpagML",
+              "quantity": 1.0,
+              "unit_price": null,
+              "amount": 110.0
+            },
+            "similarity": 1.0
+          }
+        ],
+        "labelled": 5,
+        "extracted": 5
+      }
+    },
+    {
+      "id": "r8",
+      "file": "r8.jpg",
+      "elapsed_s": 685.74,
+      "error": null,
+      "disambiguation_reasons": [
+        "The 9 line items add up to \u20b1972.00, but the printed subtotal is \u20b1867.86 \u2014 over by \u20b1104.14. A line was probably misread or missed."
+      ],
+      "confidence_overall": 0.986600913428449,
+      "scalars": {
+        "metrics": {
+          "tp": 10,
+          "fp": 3,
+          "fn": 1,
+          "tn": 1,
+          "accuracy": 0.7333333333333333,
+          "precision": 0.7692307692307693,
+          "recall": 0.9090909090909091,
+          "f1": 0.8333333333333333
+        },
+        "detail": [
+          {
+            "field": "vendor_name",
+            "verdict": "TP",
+            "expected": "BENCH BOUTIQUE",
+            "got": "BENCH BOUTIQUE"
+          },
+          {
+            "field": "vendor_tin",
+            "verdict": "FP+FN",
+            "expected": "000-844-246-008",
+            "got": "124-000844246-000103"
+          },
+          {
+            "field": "receipt_date",
+            "verdict": "TP",
+            "expected": "2026-06-24",
+            "got": "2026-06-24"
+          },
+          {
+            "field": "receipt_number",
+            "verdict": "TP",
+            "expected": "768579",
+            "got": "768579"
+          },
+          {
+            "field": "subtotal",
+            "verdict": "FP",
+            "expected": null,
+            "got": 867.86
+          },
+          {
+            "field": "vatable_sales",
+            "verdict": "TP",
+            "expected": 867.86,
+            "got": 867.86
+          },
+          {
+            "field": "vat_exempt_sales",
+            "verdict": "TP",
+            "expected": 0.0,
+            "got": 0.0
+          },
+          {
+            "field": "zero_rated_sales",
+            "verdict": "TP",
+            "expected": 0.0,
+            "got": 0.0
+          },
+          {
+            "field": "vat_amount",
+            "verdict": "TP",
+            "expected": 104.14,
+            "got": 104.14
+          },
+          {
+            "field": "discount",
+            "verdict": "TN",
+            "expected": null,
+            "got": null
+          },
+          {
+            "field": "total_amount",
+            "verdict": "TP",
+            "expected": 972.0,
+            "got": 972.0
+          },
+          {
+            "field": "cash",
+            "verdict": "TP",
+            "expected": 972.0,
+            "got": 972.0
+          },
+          {
+            "field": "change",
+            "verdict": "FP",
+            "expected": null,
+            "got": 0.0
+          },
+          {
+            "field": "currency",
+            "verdict": "TP",
+            "expected": "PHP",
+            "got": "PHP"
+          }
+        ]
+      },
+      "items": {
+        "metrics": {
+          "tp": 9,
+          "fp": 0,
+          "fn": 0,
+          "tn": 0,
+          "accuracy": 1.0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        "detail": [
+          {
+            "verdict": "TP",
+            "expected": {
+              "description": "Kiss & Tell Deo Body Spray",
+              "quantity": 1,
+              "amount": 128.0
+            },
+            "got": {
+              "description": "Kiss & Tell Deo Body Spray (1.000) (2)",
+              "quantity": null,
+              "unit_price": 128.0,
+              "amount": 128.0
+            },
+            "similarity": 0.89
+          },
+          {
+            "verdict": "TP",
+            "expected": {
+              "description": "Kiss & Tell Deo Body Spray",
+              "quantity": 1,
+              "amount": 128.0
+            },
+            "got": {
+              "description": "Kiss & Tell Deo Body Spray (1.000) (2)",
+              "quantity": null,
+              "unit_price": 128.0,
+              "amount": 128.0
+            },
+            "similarity": 0.89
+          },
+          {
+            "verdict": "TP",
+            "expected": {
+              "description": "Kiss & Tell Deo Body Spray",
+              "quantity": 1,
+              "amount": 128.0
+            },
+            "got": {
+              "description": "Kiss & Tell Deo Body Spray (1.000) (2)",
+              "quantity": null,
+              "unit_price": 128.0,
+              "amount": 128.0
+            },
+            "similarity": 0.89
+          },
+          {
+            "verdict": "TP",
+            "expected": {
+              "description": "Eight New - 75",
+              "quantity": 1,
+              "amount": 98.0
+            },
+            "got": {
+              "description": "Eight New - 75(1.000) (20259340)",
+              "quantity": null,
+              "unit_price": 98.0,
+              "amount": 98.0
+            },
+            "similarity": 0.62
+          },
+          {
+            "verdict": "TP",
+            "expected": {
+              "description": "Eight New - 75",
+              "quantity": 1,
+              "amount": 98.0
+            },
+            "got": {
+              "description": "Eight New - 75(1.000) (20259340)",
+              "quantity": null,
+              "unit_price": 98.0,
+              "amount": 98.0
+            },
+            "similarity": 0.62
+          },
+          {
+            "verdict": "TP",
+            "expected": {
+              "description": "Atlantis - 75",
+              "quantity": 1,
+              "amount": 98.0
+            },
+            "got": {
+              "description": "Atlantis - 75(1.000) (20259340)",
+              "quantity": null,
+              "unit_price": 98.0,
+              "amount": 98.0
+            },
+            "similarity": 0.62
+          },
+          {
+            "verdict": "TP",
+            "expected": {
+              "description": "Atlantis - 75",
+              "quantity": 1,
+              "amount": 98.0
+            },
+            "got": {
+              "description": "Atlantis - 75(1.000) (20259340)",
+              "quantity": null,
+              "unit_price": 98.0,
+              "amount": 98.0
+            },
+            "similarity": 0.62
+          },
+          {
+            "verdict": "TP",
+            "expected": {
+              "description": "Atlantis - 75",
+              "quantity": 1,
+              "amount": 98.0
+            },
+            "got": {
+              "description": "Atlantis - 75(1.000) (20259340)",
+              "quantity": null,
+              "unit_price": 98.0,
+              "amount": 98.0
+            },
+            "similarity": 0.62
+          },
+          {
+            "verdict": "TP",
+            "expected": {
+              "description": "Eight New - 75",
+              "quantity": 1,
+              "amount": 98.0
+            },
+            "got": {
+              "description": "Eight New - 75(1.000) (20259340)",
+              "quantity": null,
+              "unit_price": 98.0,
+              "amount": 98.0
+            },
+            "similarity": 0.62
+          }
+        ],
+        "labelled": 9,
+        "extracted": 9
+      }
+    },
+    {
+      "id": "r9",
+      "file": "r9.jpg",
+      "elapsed_s": 180.37,
+      "error": null,
+      "disambiguation_reasons": [],
+      "confidence_overall": 0.9563624392970503,
+      "scalars": {
+        "metrics": {
+          "tp": 11,
+          "fp": 2,
+          "fn": 2,
+          "tn": 1,
+          "accuracy": 0.75,
+          "precision": 0.8461538461538461,
+          "recall": 0.8461538461538461,
+          "f1": 0.8461538461538461
+        },
+        "detail": [
+          {
+            "field": "vendor_name",
+            "verdict": "TP",
+            "expected": "Shake Shack Philippines",
+            "got": "Shake Shack Philippines"
+          },
+          {
+            "field": "vendor_tin",
+            "verdict": "FP+FN",
+            "expected": "088-311-880-00044",
+            "got": "08-311-880-00044"
+          },
+          {
+            "field": "receipt_date",
+            "verdict": "TP",
+            "expected": "2026-06-20",
+            "got": "2026-06-20"
+          },
+          {
+            "field": "receipt_number",
+            "verdict": "FP+FN",
+            "expected": "O-0000000000000275296",
+            "got": "000000000000275236"
+          },
+          {
+            "field": "subtotal",
+            "verdict": "TP",
+            "expected": 475.0,
+            "got": 475.0
+          },
+          {
+            "field": "vatable_sales",
+            "verdict": "TP",
+            "expected": 424.11,
+            "got": 424.11
+          },
+          {
+            "field": "vat_exempt_sales",
+            "verdict": "TP",
+            "expected": 0.0,
+            "got": 0.0
+          },
+          {
+            "field": "zero_rated_sales",
+            "verdict": "TP",
+            "expected": 0.0,
+            "got": 0.0
+          },
+          {
+            "field": "vat_amount",
+            "verdict": "TP",
+            "expected": 50.89,
+            "got": 50.89
+          },
+          {
+            "field": "discount",
+            "verdict": "TN",
+            "expected": null,
+            "got": null
+          },
+          {
+            "field": "total_amount",
+            "verdict": "TP",
+            "expected": 475.0,
+            "got": 475.0
+          },
+          {
+            "field": "cash",
+            "verdict": "TP",
+            "expected": 1000.0,
+            "got": 1000.0
+          },
+          {
+            "field": "change",
+            "verdict": "TP",
+            "expected": 525.0,
+            "got": 525.0
+          },
+          {
+            "field": "currency",
+            "verdict": "TP",
+            "expected": "PHP",
+            "got": "PHP"
+          }
+        ]
+      },
+      "items": {
+        "metrics": {
+          "tp": 2,
+          "fp": 0,
+          "fn": 0,
+          "tn": 0,
+          "accuracy": 1.0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        "detail": [
+          {
+            "verdict": "TP",
+            "expected": {
+              "description": "SHK CHICKEN S",
+              "quantity": 1,
+              "amount": 310.0
+            },
+            "got": {
+              "description": "SHK CHICKEN S",
+              "quantity": 1.0,
+              "unit_price": 310.0,
+              "amount": 310.0
+            },
+            "similarity": 1.0
+          },
+          {
+            "verdict": "TP",
+            "expected": {
+              "description": "SHK FRIES",
+              "quantity": 1,
+              "amount": 165.0
+            },
+            "got": {
+              "description": "SHK FRIES",
+              "quantity": 1.0,
+              "unit_price": 165.0,
+              "amount": 165.0
+            },
+            "similarity": 1.0
+          }
+        ],
+        "labelled": 2,
+        "extracted": 2
+      }
+    },
+    {
+      "id": "r10",
+      "file": "r10.jpg",
+      "elapsed_s": 148.46,
+      "error": null,
+      "disambiguation_reasons": [],
+      "confidence_overall": 0.9867802854083517,
+      "scalars": {
+        "metrics": {
+          "tp": 13,
+          "fp": 0,
+          "fn": 0,
+          "tn": 1,
+          "accuracy": 1.0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        "detail": [
+          {
+            "field": "vendor_name",
+            "verdict": "TP",
+            "expected": "DBARN MANILA CORP.",
+            "got": "DBARN MANILA CORP."
+          },
+          {
+            "field": "vendor_tin",
+            "verdict": "TP",
+            "expected": "009-857-920-000",
+            "got": "009-857-920-000"
+          },
+          {
+            "field": "receipt_date",
+            "verdict": "TP",
+            "expected": "2026-06-22",
+            "got": "2026-06-22"
+          },
+          {
+            "field": "receipt_number",
+            "verdict": "TP",
+            "expected": "SI000000225763",
+            "got": "SI000000225763"
+          },
+          {
+            "field": "subtotal",
+            "verdict": "TP",
+            "expected": 540.0,
+            "got": 540.0
+          },
+          {
+            "field": "vatable_sales",
+            "verdict": "TP",
+            "expected": 482.14,
+            "got": 482.14
+          },
+          {
+            "field": "vat_exempt_sales",
+            "verdict": "TP",
+            "expected": 0.0,
+            "got": 0.0
+          },
+          {
+            "field": "zero_rated_sales",
+            "verdict": "TP",
+            "expected": 0.0,
+            "got": 0.0
+          },
+          {
+            "field": "vat_amount",
+            "verdict": "TP",
+            "expected": 57.86,
+            "got": 57.86
+          },
+          {
+            "field": "discount",
+            "verdict": "TN",
+            "expected": null,
+            "got": null
+          },
+          {
+            "field": "total_amount",
+            "verdict": "TP",
+            "expected": 540.0,
+            "got": 540.0
+          },
+          {
+            "field": "cash",
+            "verdict": "TP",
+            "expected": 1000.0,
+            "got": 1000.0
+          },
+          {
+            "field": "change",
+            "verdict": "TP",
+            "expected": 460.0,
+            "got": 460.0
+          },
+          {
+            "field": "currency",
+            "verdict": "TP",
+            "expected": "PHP",
+            "got": "PHP"
+          }
+        ]
+      },
+      "items": {
+        "metrics": {
+          "tp": 1,
+          "fp": 0,
+          "fn": 0,
+          "tn": 0,
+          "accuracy": 1.0,
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0
+        },
+        "detail": [
+          {
+            "verdict": "TP",
+            "expected": {
+              "description": "Peri-Peri Chicken",
+              "quantity": 2,
+              "amount": 540.0
+            },
+            "got": {
+              "description": "Peri-Peri Chicken",
+              "quantity": 2.0,
+              "unit_price": 270.0,
+              "amount": 540.0
+            },
+            "similarity": 1.0
+          }
+        ],
+        "labelled": 1,
+        "extracted": 1
+      }
+    }
+  ]
+}

@@ -21,18 +21,22 @@ from datetime import date as _date
 # --------------------------------------------------------------------------- #
 # Configuration
 # --------------------------------------------------------------------------- #
-# The vision/OCR model, served by the shared Ollama endpoint (see core.OLLAMA_HOST).
-# Overridable via the VISION_MODEL env var so a deployment can run a local model
-# (e.g. qwen2.5vl:7b) without a code change.
+# The vision/OCR model, served by an Ollama endpoint (see core.OLLAMA_HOST).
+# Overridable via the VISION_MODEL env var so a deployment can run a different
+# model without a code change.
 #
-# gemma4:e4b is the production choice and now matches docker-compose.yml, which had
-# been overriding a qwen2.5vl:7b default here — so the same code read receipts with
-# a different model depending only on how it was launched.
+# qwen2.5vl:7b is the current choice: it is the strongest Qwen vision model that
+# runs at zero cost here. There is no free *hosted* Qwen-VL API to point at —
+# OpenRouter carries eight qwen/*-vl-* models and every one of them is paid, and
+# the free Qwen-VL quotas (Alibaba DashScope, ModelScope) each need a signup API
+# key. Ollama serves this one over the same HTTP API for free, so VISION_MODEL +
+# OLLAMA_HOST remain the only two knobs.
 #
-# Note gemma4 encodes an image to a FIXED ~256 tokens regardless of resolution, so
-# resolution/crop tuning does not reduce its prompt cost the way it does on
-# qwen2.5vl (~2,100 image tokens, scaling with pixels). See evaluation/PERFORMANCE.md.
-DEFAULT_MODEL = os.environ.get("VISION_MODEL", "gemma4:e4b")
+# Note gemma4 (the previous default) encodes an image to a FIXED ~256 tokens
+# regardless of resolution, so resolution/crop tuning does not reduce its prompt
+# cost the way it does on qwen2.5vl (~2,100 image tokens, scaling with pixels).
+# See evaluation/PERFORMANCE.md.
+DEFAULT_MODEL = os.environ.get("VISION_MODEL", "qwen2.5vl:7b")
 
 EXTRACTION_PROMPT = """You are a careful transcription tool reading a purchase
 receipt or invoice — the kind you get at a restaurant, cafe, grocery, retail

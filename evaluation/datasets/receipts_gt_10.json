@@ -1,0 +1,307 @@
+{
+  "_about": {
+    "name": "receipts-gt-10",
+    "labelled_on": "2026-08-09",
+    "source": "10 photographed Philippine retail/restaurant receipts (r1..r10)",
+    "labeller": "Manual transcription from the source images, one pass per receipt, values read straight off the paper.",
+    "policy": [
+      "This is a TRANSCRIPTION ground truth, not an arithmetic one: the label is what is PRINTED, even where the receipt itself is wrong (see r4 vatable_sales).",
+      "null means the field is not printed on that receipt at all. A null label is scored as a true negative when the model also returns null, and as a false positive when the model invents a value.",
+      "`accept` lists alternative readings that are also defensible for a genuinely ambiguous or dual-labelled figure; any of them counts as correct.",
+      "Money fields are compared to the cent. Text fields are compared after case/punctuation normalisation and count as correct if the label is contained in the answer or vice versa.",
+      "Line items are matched greedily on amount first, then on description similarity."
+    ]
+  },
+
+  "receipts": [
+    {
+      "id": "r1",
+      "file": "r1.jpg",
+      "note": "Service charge printed but no subtotal line; no payment lines.",
+      "fields": {
+        "vendor_name": "IKKORYU FUKUOKA RAMEN",
+        "vendor_tin": "008-401-866-005",
+        "receipt_date": "2015-12-02",
+        "receipt_number": {"value": "24614", "accept": ["24614", "Trans No.:24614"]},
+        "subtotal": null,
+        "vatable_sales": 857.14,
+        "vat_exempt_sales": 0.0,
+        "zero_rated_sales": null,
+        "vat_amount": 102.86,
+        "discount": null,
+        "total_amount": 1056.0,
+        "cash": null,
+        "change": null,
+        "currency": "PHP"
+      },
+      "items": [
+        {"description": "Chashu Tonkotsu", "quantity": 1, "amount": 380.0},
+        {"description": "Gyoza6", "quantity": 1, "amount": 150.0},
+        {"description": "Karaage", "quantity": 1, "amount": 180.0},
+        {"description": "Ebi Yakimeshi", "quantity": 1, "amount": 200.0},
+        {"description": "Calamansi Soda", "quantity": 1, "amount": 50.0}
+      ]
+    },
+
+    {
+      "id": "r2",
+      "file": "r2.jpg",
+      "note": "'Bangus D' is a wrapped continuation of the SISIG D line, not its own item. FREE item priced 0.00.",
+      "fields": {
+        "vendor_name": "ALL FILIPINO CORP.",
+        "vendor_tin": "008-653-196-000",
+        "receipt_date": "2014-07-12",
+        "receipt_number": {"value": "5158", "accept": ["5158", "24639"]},
+        "subtotal": null,
+        "vatable_sales": 1333.04,
+        "vat_exempt_sales": 0.0,
+        "zero_rated_sales": null,
+        "vat_amount": 159.96,
+        "discount": null,
+        "total_amount": 1493.0,
+        "cash": 1500.0,
+        "change": 7.0,
+        "currency": "PHP"
+      },
+      "items": [
+        {"description": "CRISPY HITO D", "quantity": 1, "amount": 250.0},
+        {"description": "SISIG D Bangus D", "quantity": 1, "amount": 189.0},
+        {"description": "NILASING NA HIPON D", "quantity": 1, "amount": 250.0},
+        {"description": "Suam na tahong D", "quantity": 1, "amount": 250.0},
+        {"description": "FREE Camote Frit D", "quantity": 1, "amount": 0.0},
+        {"description": "Steamed Rice D", "quantity": 2, "amount": 64.0},
+        {"description": "SANGKATUTAK NA FISHBALLS D", "quantity": 1, "amount": 130.0},
+        {"description": "BEEF SPARERIBS CALDERETA D", "quantity": 1, "amount": 360.0}
+      ]
+    },
+
+    {
+      "id": "r3",
+      "file": "r3.jpg",
+      "note": "'17 Item(s)' is a unit count, not a line count — 9 printed product lines. Paid by BDO ATM card, so cash/change are not printed.",
+      "fields": {
+        "vendor_name": {"value": "SAVEMORE MARKET", "accept": ["SAVEMORE MARKET", "SAVEMORE", "SANFORD MARKETING CORPORATION", "SAVEMORE MARKET BASAK"]},
+        "vendor_tin": "207-961-175-00070",
+        "receipt_date": "2022-12-19",
+        "receipt_number": {"value": "08-00036843", "accept": ["08-00036843", "1072", "0800037004"]},
+        "subtotal": null,
+        "vatable_sales": 615.85,
+        "vat_exempt_sales": 0.0,
+        "zero_rated_sales": 0.0,
+        "vat_amount": 73.9,
+        "discount": null,
+        "total_amount": 689.75,
+        "cash": null,
+        "change": null,
+        "currency": "PHP"
+      },
+      "items": [
+        {"description": "FemmeTsu2Ply250", "quantity": 1, "amount": 68.75},
+        {"description": "MYSAN SkyFlakes", "quantity": 1, "amount": 60.5},
+        {"description": "NissinEggnogReg130", "quantity": 3, "amount": 100.5},
+        {"description": "JnJDwbryBlbryChsCk", "quantity": 1, "amount": 85.0},
+        {"description": "GleeGrTeaTpste150", "quantity": 1, "amount": 49.75},
+        {"description": "DelMontePttCrspOrg", "quantity": 5, "amount": 114.75},
+        {"description": "Sprite Can 320ml", "quantity": 3, "amount": 103.5},
+        {"description": "GAR WhiteBreadRS", "quantity": 1, "amount": 82.0},
+        {"description": "Turon WithLangka", "quantity": 1, "amount": 25.0}
+      ]
+    },
+
+    {
+      "id": "r4",
+      "file": "r4.jpg",
+      "note": "The receipt itself misprints VATable Sale as 9856.01 (it cannot be, given VAT 107.52). Ground truth is the printed glyphs; 856.01 is accepted as the defensible alternative reading.",
+      "fields": {
+        "vendor_name": {"value": "Cara Mia", "accept": ["Cara Mia", "Cara Mia Sales and Services Inc.", "SM Tanza - CARA MIA"]},
+        "vendor_tin": "009062877-00029",
+        "receipt_date": "2023-05-05",
+        "receipt_number": {"value": "1219", "accept": ["1219", "00000000000000001219", "1231"]},
+        "subtotal": 1120.0,
+        "vatable_sales": {"value": 9856.01, "accept": [9856.01, 856.01]},
+        "vat_exempt_sales": 0.0,
+        "zero_rated_sales": 0.0,
+        "vat_amount": 107.52,
+        "discount": 223.99,
+        "total_amount": 896.01,
+        "cash": 896.01,
+        "change": null,
+        "currency": "PHP"
+      },
+      "items": [
+        {"description": "Midnight Dream (Whole)", "quantity": 1, "amount": 1065.0},
+        {"description": "ECO", "quantity": 1, "amount": 55.0}
+      ]
+    },
+
+    {
+      "id": "r5",
+      "file": "r5.JPG",
+      "note": "Photographed sideways (90 deg). 8 printed product lines; '66 Item(s)' is a unit count. VAT is stripped then re-added; discount is the 5% SC line. Paid by credit card.",
+      "fields": {
+        "vendor_name": "ISETANN DEPARTMENT STORE INC",
+        "vendor_tin": "000-083-402-001",
+        "receipt_date": "2026-06-24",
+        "receipt_number": {"value": "00-095687", "accept": ["00-095687", "00-095809"]},
+        "subtotal": 1164.0,
+        "vatable_sales": 1039.27,
+        "vat_exempt_sales": 0.0,
+        "zero_rated_sales": 0.0,
+        "vat_amount": 124.73,
+        "discount": 19.86,
+        "total_amount": 1144.14,
+        "cash": null,
+        "change": null,
+        "currency": "PHP"
+      },
+      "items": [
+        {"description": "LUCKY ME BEEF NOODLES 55GM", "quantity": 25, "amount": 225.0},
+        {"description": "KOPIKO COFFE", "quantity": 1, "amount": 39.9},
+        {"description": "KOPIKO COFFE", "quantity": 1, "amount": 39.9},
+        {"description": "CHARMEE ALL FLOW W/WINGS 8", "quantity": 5, "amount": 100.0},
+        {"description": "MODESS REGULAR NON-WINGS 8", "quantity": 5, "amount": 208.75},
+        {"description": "HAPPY COTTON 12G (100)", "quantity": 21, "amount": 103.95},
+        {"description": "CASINO 70% ALCOHOL FEMME 1", "quantity": 6, "amount": 226.5},
+        {"description": "GARDENIA HIGH FIBER WHEAT", "quantity": 2, "amount": 220.0}
+      ]
+    },
+
+    {
+      "id": "r6",
+      "file": "r6.jpg",
+      "note": "Paid by card, so 'cash' is not printed; Change is printed as 0.00.",
+      "fields": {
+        "vendor_name": "DBARN MANILA CORP.",
+        "vendor_tin": "009-857-920-000",
+        "receipt_date": "2026-06-22",
+        "receipt_number": {"value": "SI000000225762", "accept": ["SI000000225762", "000000262729"]},
+        "subtotal": 270.0,
+        "vatable_sales": 241.07,
+        "vat_exempt_sales": 0.0,
+        "zero_rated_sales": 0.0,
+        "vat_amount": 28.93,
+        "discount": 54.0,
+        "total_amount": 216.0,
+        "cash": null,
+        "change": 0.0,
+        "currency": "PHP"
+      },
+      "items": [
+        {"description": "Peri-Peri Chicken", "quantity": 1, "amount": 270.0}
+      ]
+    },
+
+    {
+      "id": "r7",
+      "file": "r7.jpg",
+      "note": "No VAT sales breakdown printed — only the VAT-included total and the VAT figure.",
+      "fields": {
+        "vendor_name": {"value": "McDonald's", "accept": ["McDonald's", "McDonald's Robinson's Malate", "GOLDEN ARCHES DEVELOPMENT CORP."]},
+        "vendor_tin": "000-121-242-110",
+        "receipt_date": "2011-05-13",
+        "receipt_number": {"value": "014601200357315", "accept": ["014601200357315"]},
+        "subtotal": null,
+        "vatable_sales": null,
+        "vat_exempt_sales": null,
+        "zero_rated_sales": null,
+        "vat_amount": 23.15,
+        "discount": null,
+        "total_amount": 216.0,
+        "cash": 220.0,
+        "change": 4.0,
+        "currency": "PHP"
+      },
+      "items": [
+        {"description": "BottldWater 330", "quantity": 1, "amount": 22.0},
+        {"description": "Cheeseburger", "quantity": 1, "amount": 39.0},
+        {"description": "Medium Fries", "quantity": 1, "amount": 45.0},
+        {"description": "EVM Reg Coke", "quantity": 1, "amount": 0.0},
+        {"description": "D ChicknwSpagML", "quantity": 1, "amount": 110.0}
+      ]
+    },
+
+    {
+      "id": "r8",
+      "file": "r8.jpg",
+      "note": "9 printed lines, heavily repeated (3x128.00, 6x98.00). Each product line is followed by a wrapped name line that is not its own item.",
+      "fields": {
+        "vendor_name": {"value": "BENCH BOUTIQUE", "accept": ["BENCH BOUTIQUE", "BENCH", "SUYEN CORPORATION"]},
+        "vendor_tin": "000-844-246-008",
+        "receipt_date": "2026-06-24",
+        "receipt_number": {"value": "768579", "accept": ["768579"]},
+        "subtotal": null,
+        "vatable_sales": 867.86,
+        "vat_exempt_sales": 0.0,
+        "zero_rated_sales": 0.0,
+        "vat_amount": 104.14,
+        "discount": null,
+        "total_amount": 972.0,
+        "cash": 972.0,
+        "change": null,
+        "currency": "PHP"
+      },
+      "items": [
+        {"description": "Kiss & Tell Deo Body Spray", "quantity": 1, "amount": 128.0},
+        {"description": "Kiss & Tell Deo Body Spray", "quantity": 1, "amount": 128.0},
+        {"description": "Kiss & Tell Deo Body Spray", "quantity": 1, "amount": 128.0},
+        {"description": "Eight New - 75", "quantity": 1, "amount": 98.0},
+        {"description": "Eight New - 75", "quantity": 1, "amount": 98.0},
+        {"description": "Atlantis - 75", "quantity": 1, "amount": 98.0},
+        {"description": "Atlantis - 75", "quantity": 1, "amount": 98.0},
+        {"description": "Atlantis - 75", "quantity": 1, "amount": 98.0},
+        {"description": "Eight New - 75", "quantity": 1, "amount": 98.0}
+      ]
+    },
+
+    {
+      "id": "r9",
+      "file": "r9.jpg",
+      "note": "Cash tendered is printed with a minus sign (-1,000.00); the label is the magnitude.",
+      "fields": {
+        "vendor_name": {"value": "Shake Shack Philippines", "accept": ["Shake Shack Philippines", "Shake Shack", "Specialty Food Retailers Inc."]},
+        "vendor_tin": "088-311-880-00044",
+        "receipt_date": "2026-06-20",
+        "receipt_number": {"value": "O-0000000000000275296", "accept": ["O-0000000000000275296", "0000000000000275296", "275296", "169163"]},
+        "subtotal": 475.0,
+        "vatable_sales": 424.11,
+        "vat_exempt_sales": 0.0,
+        "zero_rated_sales": 0.0,
+        "vat_amount": 50.89,
+        "discount": null,
+        "total_amount": 475.0,
+        "cash": 1000.0,
+        "change": 525.0,
+        "currency": "PHP"
+      },
+      "items": [
+        {"description": "SHK CHICKEN S", "quantity": 1, "amount": 310.0},
+        {"description": "SHK FRIES", "quantity": 1, "amount": 165.0}
+      ]
+    },
+
+    {
+      "id": "r10",
+      "file": "r10.jpg",
+      "note": "Same merchant and minute as r6, one transaction later — a near-duplicate pair that tests whether the model reads each image independently.",
+      "fields": {
+        "vendor_name": "DBARN MANILA CORP.",
+        "vendor_tin": "009-857-920-000",
+        "receipt_date": "2026-06-22",
+        "receipt_number": {"value": "SI000000225763", "accept": ["SI000000225763", "000000262730"]},
+        "subtotal": 540.0,
+        "vatable_sales": 482.14,
+        "vat_exempt_sales": 0.0,
+        "zero_rated_sales": 0.0,
+        "vat_amount": 57.86,
+        "discount": null,
+        "total_amount": 540.0,
+        "cash": 1000.0,
+        "change": 460.0,
+        "currency": "PHP"
+      },
+      "items": [
+        {"description": "Peri-Peri Chicken", "quantity": 2, "amount": 540.0}
+      ]
+    }
+  ]
+}
