@@ -27,6 +27,11 @@
   --cat-food:#4F46E5; --cat-shopping:#0E9F6E; --cat-health:#E0A106; --cat-other:#9AA0AB;
   --shadow:0 1px 3px rgba(16,24,40,.04), 0 1px 2px rgba(16,24,40,.06);
   --shadow-lg:0 12px 40px rgba(16,24,40,.14), 0 2px 8px rgba(16,24,40,.08);
+  /* Chrome that floats over scrolling content (the phone nav bar and tab bar).
+     Deliberately not a --surface alpha: the saturate() in the backdrop-filter
+     is what pulls colour up from whatever is passing underneath, and that only
+     reads correctly against a near-neutral base. */
+  --glass:rgba(255,255,255,.72); --glass-border:rgba(16,24,40,.08);
   --scrim:rgba(16,24,40,.42);
   color-scheme:light;
 }
@@ -40,12 +45,27 @@
   --cat-food:#6D67F0; --cat-shopping:#2ABF8A; --cat-health:#EAB43A; --cat-other:#7C818C;
   --shadow:0 1px 3px rgba(0,0,0,.4), 0 1px 2px rgba(0,0,0,.5);
   --shadow-lg:0 16px 48px rgba(0,0,0,.55), 0 2px 10px rgba(0,0,0,.4);
+  --glass:rgba(21,22,25,.72); --glass-border:rgba(255,255,255,.10);
   --scrim:rgba(0,0,0,.6);
   color-scheme:dark;
 }
 :root {
   --radius:16px; --radius-sm:12px;
   --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+
+  /* Phone type scale, in rem so it answers the reader's text-size setting.
+     There is deliberately no `html { font-size }` override anywhere in this
+     file — setting one in px is exactly what stops a page from scaling.
+     Worth being precise about the mechanism: iOS Safari does not push the
+     system Dynamic Type setting into web content. What these do respond to is
+     Safari's per-site Text Size control (aA in the address bar) and the desktop
+     browser's default-font-size preference. Desktop rules keep their px values;
+     these are applied only to phone-tier rules. */
+  --t-tab:.6875rem;    /* 11px */
+  --t-caption:.75rem;  /* 12px */
+  --t-small:.8125rem;  /* 13px */
+  --t-body:.9375rem;   /* 15px */
+  --t-title:1.3125rem; /* 21px */
 }
 
 * { box-sizing:border-box; }
