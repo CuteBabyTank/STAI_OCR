@@ -18,30 +18,54 @@
 :root[data-theme="light"] {
   --canvas:#F7F8FA; --surface:#FFFFFF; --sunken:#FCFCFD;
   --border:#EAECEF; --border-strong:#DFE2E7;
-  --ink:#0E1116; --ink-2:#5B616E; --ink-3:#9AA0AB;
+  /* --ink-3 was #9AA0AB, which is 2.63:1 on white — it carries real secondary
+     copy (.stat-label, .header-figure-sub), not just decoration. 4.83:1 now,
+     still a clear step lighter than --ink-2's 6.21:1. */
+  --ink:#0E1116; --ink-2:#5B616E; --ink-3:#6B7280;
   --accent:#4F46E5; --accent-hover:#4338CA; --accent-wash:#EEF0FF;
   --positive:#0E9F6E; --negative:#E5484D; --warn:#B26B00;
   --cat-food:#4F46E5; --cat-shopping:#0E9F6E; --cat-health:#E0A106; --cat-other:#9AA0AB;
   --shadow:0 1px 3px rgba(16,24,40,.04), 0 1px 2px rgba(16,24,40,.06);
   --shadow-lg:0 12px 40px rgba(16,24,40,.14), 0 2px 8px rgba(16,24,40,.08);
+  /* Chrome that floats over scrolling content (the phone nav bar and tab bar).
+     Deliberately not a --surface alpha: the saturate() in the backdrop-filter
+     is what pulls colour up from whatever is passing underneath, and that only
+     reads correctly against a near-neutral base. */
+  --glass:rgba(255,255,255,.72); --glass-border:rgba(16,24,40,.08);
   --scrim:rgba(16,24,40,.42);
   color-scheme:light;
 }
 :root[data-theme="dark"] {
   --canvas:#0C0D10; --surface:#151619; --sunken:#101114;
   --border:#25272C; --border-strong:#303339;
-  --ink:#F3F4F6; --ink-2:#9CA3AE; --ink-3:#6B7180;
+  /* Dark failed too, at 3.70:1 — so this one lightens rather than darkens. */
+  --ink:#F3F4F6; --ink-2:#9CA3AE; --ink-3:#7C828F;
   --accent:#6D67F0; --accent-hover:#847EF5; --accent-wash:#1C1D33;
   --positive:#2ABF8A; --negative:#F1575C; --warn:#EAB43A;
   --cat-food:#6D67F0; --cat-shopping:#2ABF8A; --cat-health:#EAB43A; --cat-other:#7C818C;
   --shadow:0 1px 3px rgba(0,0,0,.4), 0 1px 2px rgba(0,0,0,.5);
   --shadow-lg:0 16px 48px rgba(0,0,0,.55), 0 2px 10px rgba(0,0,0,.4);
+  --glass:rgba(21,22,25,.72); --glass-border:rgba(255,255,255,.10);
   --scrim:rgba(0,0,0,.6);
   color-scheme:dark;
 }
 :root {
   --radius:16px; --radius-sm:12px;
   --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+
+  /* Phone type scale, in rem so it answers the reader's text-size setting.
+     There is deliberately no `html { font-size }` override anywhere in this
+     file — setting one in px is exactly what stops a page from scaling.
+     Worth being precise about the mechanism: iOS Safari does not push the
+     system Dynamic Type setting into web content. What these do respond to is
+     Safari's per-site Text Size control (aA in the address bar) and the desktop
+     browser's default-font-size preference. Desktop rules keep their px values;
+     these are applied only to phone-tier rules. */
+  --t-tab:.6875rem;    /* 11px */
+  --t-caption:.75rem;  /* 12px */
+  --t-small:.8125rem;  /* 13px */
+  --t-body:.9375rem;   /* 15px */
+  --t-title:1.3125rem; /* 21px */
 }
 
 * { box-sizing:border-box; }
@@ -1396,6 +1420,76 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance:none; margi
   .band { grid-template-columns:1fr; }
 }
 
+/* ---- Bottom sheet (phone presentation of every dialog) ----------------- */
+.sheet-scrim {
+  position:fixed; inset:0; z-index:200; background:var(--scrim);
+  display:flex; align-items:flex-end; justify-content:center;
+}
+.sheet {
+  position:relative; z-index:300;
+  width:100%; max-width:560px; max-height:92dvh;
+  display:flex; flex-direction:column;
+  background:var(--surface);
+  border-radius:22px 22px 0 0; border-top:1px solid var(--border);
+  box-shadow:var(--shadow-lg);
+  padding-bottom:env(safe-area-inset-bottom);
+  outline:none;
+}
+/* touch-action:none is scoped to the handle, not the panel: on the panel it
+   would stop .sheet-body scrolling, and these hold forms taller than a phone. */
+.sheet-grab-zone { padding:9px 0 3px; touch-action:none; cursor:grab; flex-shrink:0; }
+.sheet-grab-zone:active { cursor:grabbing; }
+.sheet-grab { width:38px; height:5px; border-radius:3px; background:var(--border-strong); margin:0 auto; }
+.sheet-head {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:4px 20px 4px; flex-shrink:0;
+}
+.sheet-title { margin:0; font-size:var(--t-title); font-weight:640; letter-spacing:-.02em; }
+.sheet-x {
+  width:44px; height:44px; margin-right:-10px; border-radius:50%;
+  border:none; background:none; color:var(--ink-3);
+  display:grid; place-items:center; flex-shrink:0;
+}
+.sheet-x svg { width:20px; height:20px; }
+.sheet-body {
+  padding:10px 20px 18px; overflow-y:auto; overscroll-behavior:contain;
+  display:flex; flex-direction:column; gap:14px;
+}
+.sheet-foot {
+  padding:14px 20px; border-top:1px solid var(--border);
+  display:flex; gap:10px; flex-shrink:0;
+}
+.sheet-foot > * { flex:1; justify-content:center; }
+
+/* More-sheet rows. Grouped rather than one flat list: nineteen undifferentiated
+   links is a wall, and the groups already exist as concepts in the sidebar. */
+.more-group { display:flex; flex-direction:column; gap:2px; }
+.more-group + .more-group { margin-top:6px; padding-top:10px; border-top:1px solid var(--border); }
+.more-label {
+  margin:0 0 4px; padding:0 12px;
+  font-size:var(--t-caption); font-weight:600; letter-spacing:.04em;
+  text-transform:uppercase; color:var(--ink-3);
+}
+.more-row {
+  display:flex; align-items:center; gap:12px;
+  min-height:48px; padding:0 12px; border-radius:12px;
+  border:none; background:none; width:100%; text-align:left;
+  font-size:var(--t-body); font-weight:500; color:var(--ink); text-decoration:none;
+  -webkit-tap-highlight-color:transparent;
+}
+.more-row svg { width:20px; height:20px; stroke-width:1.9; color:var(--ink-2); flex-shrink:0; }
+.more-row.on { background:var(--accent-wash); color:var(--accent); }
+.more-row.on svg { color:var(--accent); }
+.more-row:active { background:var(--sunken); }
+/* Rows without a glyph keep their labels on the same left edge as those with
+   one, so the list does not read as two ragged columns. */
+.more-dot { width:20px; flex-shrink:0; }
+
+/* Phone tab bar. Hidden by default and switched on in the ≤640px block, so the
+   boundary lives in exactly one place and the desktop first paint is correct
+   without any JS. */
+.tabbar { display:none; }
+
 /* ---- ≤880px: the sidebar rail becomes an off-canvas drawer. ---------- */
 @media (max-width:880px) {
   /* Floating nav button, bottom-LEFT — opposite the quick-add and chat FABs, so
@@ -1554,6 +1648,26 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance:none; margi
 
 /* ---- ≤640px: phone. Single column, bottom-sheet dialogs, 16px inputs. -- */
 @media (max-width:640px) {
+  /* ---- Nav bar ------------------------------------------------------- */
+  /* The page's own <header> becomes the nav bar. No NavBar component is
+     introduced: twenty routes already render a header with an h1, and this way
+     none of them need touching. Sticky works here because html uses
+     `overflow-x:clip` rather than `hidden` — chosen originally for exactly this
+     reason, since `hidden` would make html a scroll container and break every
+     position:sticky descendant.
+     The negative margins cancel .shell's padding so the glass reaches both
+     edges; the right padding reserves the chat launcher's 44px corner. */
+  main > header {
+    position:sticky; top:0; z-index:100;
+    margin:-16px calc(-14px - env(safe-area-inset-right)) 0 calc(-14px - env(safe-area-inset-left));
+    padding:calc(10px + env(safe-area-inset-top)) calc(64px + env(safe-area-inset-right))
+            10px calc(14px + env(safe-area-inset-left));
+    background:var(--glass);
+    -webkit-backdrop-filter:saturate(180%) blur(20px);
+    backdrop-filter:saturate(180%) blur(20px);
+    border-bottom:1px solid var(--glass-border);
+  }
+
   /* Paired and four-up tiles stay side by side on a phone. Each holds one short
      figure, so a full-width row per tile bought nothing but scroll — the home
      view ran past 2000px and the headline numbers fell below the fold. The
@@ -1567,7 +1681,7 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance:none; margi
   .stat-value { font-size:24px; margin:8px 0 6px; }
   .nw-figure { font-size:27px; }
   .tile-num { font-size:22px; }
-  h1 { font-size:19px; }
+  h1 { font-size:var(--t-title); }
   main { gap:18px; }
 
   /* Header actions go full width rather than crowding the title. The 150px
@@ -1582,7 +1696,7 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance:none; margi
   /* The headline figure gets bigger on the phone, not smaller: it is the first
      thing worth reading and it no longer competes with a right-hand column. */
   .header-figure-num { font-size:40px; }
-  .header-figure-sub { font-size:12.5px; }
+  .header-figure-sub { font-size:var(--t-caption); }
   /* Title takes its own line; the stepper and link share the next one, so the
      month never gets clipped between them. */
   .ov-head { flex-direction:column; align-items:flex-start; }
@@ -1594,6 +1708,86 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance:none; margi
      it filters. */
   .seg { display:flex; width:100%; }
   .seg-btn { flex:1; min-height:44px; }
+
+  /* ---- Bottom tab bar ------------------------------------------------ */
+  .tabbar {
+    display:flex; position:fixed; z-index:160;
+    left:0; right:0; bottom:0;
+    /* The inset is padding, not margin, so the glass runs all the way to the
+       bottom of the screen behind the home indicator instead of leaving a
+       stripe of page showing under the bar. */
+    padding-bottom:env(safe-area-inset-bottom);
+    background:var(--glass);
+    -webkit-backdrop-filter:saturate(180%) blur(20px);
+    backdrop-filter:saturate(180%) blur(20px);
+    border-top:1px solid var(--glass-border);
+  }
+  .tabbar-item {
+    flex:1; min-height:56px; min-width:44px;
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px;
+    border:none; background:none; text-decoration:none;
+    color:var(--ink-3); font-size:var(--t-tab); font-weight:530;
+    letter-spacing:0; line-height:1;
+    -webkit-tap-highlight-color:transparent;
+    transition:color .15s, transform .12s;
+  }
+  .tabbar-item svg { width:24px; height:24px; stroke-width:1.9; }
+  .tabbar-item.on { color:var(--accent); }
+  /* No haptics are available to a web page on iOS, so the press has to be
+     legible visually or the tap feels like it did nothing. */
+  .tabbar-item:active { transform:scale(.93); }
+
+  /* The drawer trigger is gone: the tab bar is the navigation now. The drawer
+     itself stays in the DOM for the 641–880px tier and is simply unreachable
+     here, since AppShell forces it closed on entry to this width. */
+  .nav-fab { display:none; }
+
+  /* Room for the bar, so the last row of every list clears it. */
+  .shell { padding-bottom:calc(72px + env(safe-area-inset-bottom)); }
+  main { min-height:calc(100dvh - 172px); }
+
+  /* The chat launcher leaves the bottom corner to the tab bar and becomes a
+     nav-bar glyph. 44px because it is now a small round target in a corner
+     rather than a 54px FAB, and the floor applies either way. */
+  .robot-fab {
+    top:calc(10px + env(safe-area-inset-top)); bottom:auto;
+    right:calc(12px + env(safe-area-inset-right));
+    width:44px; height:44px; z-index:170;
+  }
+  .robot-fab svg { width:24px; height:24px; }
+  /* The idle bob reads as a mascot in the corner; in the nav bar it just looks
+     like the chrome is loose. */
+  .robot-fab .float { animation:none; }
+  .robot-fab .ping { width:10px; height:10px; border-width:2px; }
+
+  /* Quick-add keeps a floating slot but clears the bar — and reclaims the right
+     edge, since the 80px offset existed only to sit clear of the chat launcher
+     that just vacated the corner. */
+  .fab-wrap {
+    right:calc(20px + env(safe-area-inset-right));
+    bottom:calc(68px + env(safe-area-inset-bottom));
+  }
+
+  /* The chat sheet opens above the tab bar rather than under it. */
+  .chat { bottom:calc(68px + env(safe-area-inset-bottom)); }
+
+  /* The toast clears the sticky nav bar instead of sliding beneath it. 66px is
+     the bar at its shortest — a header carrying wrapped actions or the 40px
+     headline figure is taller than that, so the z-index is what actually
+     guarantees the toast stays readable; the offset only keeps it off the
+     title on the pages where the bar is short. Above the bar (100), below the
+     chat launcher (170) so a running job never buries the way to cancel it. */
+  .ocr-toast,
+  .ocr-toast.aside { top:calc(66px + env(safe-area-inset-top)); z-index:165; }
+
+  /* The scan page's overlays predate anything floating above them: its scrim,
+     slide-over and past-receipts sheet were authored at 40/50, which now puts
+     all three underneath the tab bar (160) and the chat launcher (170). Lift
+     the set above both — they are modal, and a tab bar still tappable behind a
+     modal is a way to lose the dialog you just opened — but below <Sheet>
+     (200/300), which is the newer surface and must win over the older one. */
+  .scrim { z-index:172; }
+  .panel, .modal { z-index:174; }
 
   /* Link hit areas are handled in the (hover:none) block below, which is where
      this file already keeps its touch sizing — duplicating them here would set
@@ -1631,8 +1825,24 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance:none; margi
   }
   .bt-modal-foot > * { flex:1 1 130px; justify-content:center; }
 
-  /* The receipt-app modal keeps its centred placement but stops assuming 520px. */
-  .modal { width:calc(100vw - 24px); max-height:86dvh; padding:20px; }
+  /* The scan page's past-receipts dialog. Not routed through <Sheet>: it is
+     always mounted and toggled by an .open class, so it would need converting
+     to conditional rendering first. It gets the sheet's shape and a handle so
+     it does not read as a stray centred box among real sheets. */
+  .modal {
+    top:auto; bottom:0; left:0; transform:translateY(12px); width:100%;
+    /* The base rule caps this at 100vw-32px for a centred box. Left-anchored at
+       full width that cap does not centre anything — it just leaves 32px of
+       page showing down the right-hand side. */
+    max-width:none;
+    max-height:86dvh; padding:20px 20px calc(20px + env(safe-area-inset-bottom));
+    border-radius:22px 22px 0 0;
+  }
+  .modal.open { transform:none; }
+  .modal::before {
+    content:""; display:block; width:38px; height:5px; border-radius:3px;
+    background:var(--border-strong); margin:-6px auto 12px;
+  }
 
   /* 16px is the threshold below which iOS Safari zooms the page on focus, and
      it never zooms back out. Every focusable text field has to clear it. */
@@ -1670,6 +1880,12 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance:none; margi
   /* The card head has to wrap before it clips the cashflow legend. */
   .card-head { flex-wrap:wrap; gap:8px; }
   .cf-legend { gap:12px; font-size:12px; }
+
+  /* Phone-tier body copy on the rem scale, so it answers Safari's per-site Text
+     Size control. Desktop rules keep their px values — this is scoped to the
+     phone tier along with everything else in this block. */
+  .subhead, .stat-label { font-size:var(--t-small); }
+  .nav-item, .more-row, .btn-primary, .chip { font-size:var(--t-body); }
 }
 
 /* ---- ≤400px: small phones (iPhone SE and friends). ------------------- */
@@ -1718,4 +1934,12 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance:none; margi
      while -8px of margin keeps the element's outer height at the 28px it
      occupied before, so no row grows and nothing shifts. */
   .link, .back-link { padding:14px 0; margin:-8px 0; display:inline-block; }
+}
+
+/* ---- Glass fallback. Without backdrop-filter, a 72%-alpha bar over scrolling
+   content is just unreadable, so the chrome goes opaque instead. ---------- */
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))) {
+  @media (max-width:640px) {
+    .tabbar, main > header { background:var(--surface); }
+  }
 }
