@@ -49,9 +49,11 @@ function TabLink({ id, href, label, icon, current }: Tab & { current: TabId }) {
       href={href}
       className={"tabbar-item" + (on ? " on" : "")}
       aria-current={on ? "page" : undefined}
+      // The bar is glyphs only, so the label has to survive as the accessible
+      // name — an icon-only link with no aria-label announces as its href.
+      aria-label={label}
     >
       <Glyph d={icon} />
-      <span>{label}</span>
     </Link>
   );
 }
@@ -103,9 +105,9 @@ export default function TabBar({
         onClick={onMoreToggle}
         aria-expanded={moreOpen}
         aria-haspopup="dialog"
+        aria-label="More"
       >
         <Glyph d={ICON_PATHS.more} />
-        <span>More</span>
       </button>
     </nav>
   );

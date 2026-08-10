@@ -61,7 +61,6 @@
      Safari's per-site Text Size control (aA in the address bar) and the desktop
      browser's default-font-size preference. Desktop rules keep their px values;
      these are applied only to phone-tier rules. */
-  --t-tab:.6875rem;    /* 11px */
   --t-caption:.75rem;  /* 12px */
   --t-small:.8125rem;  /* 13px */
   --t-body:.9375rem;   /* 15px */
@@ -1716,25 +1715,34 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance:none; margi
   .seg-btn { flex:1; min-height:44px; }
 
   /* ---- Bottom tab bar ------------------------------------------------ */
+  /* One token drives both the bar's height and the space reserved beneath it,
+     so the two can never drift apart and leave content stranded under the bar.
+     57 rather than 56: box-sizing is border-box throughout this file, so the
+     height has to carry the 1px border-top as well as the 56px row. */
+  :root { --tabbar-h:calc(57px + env(safe-area-inset-bottom)); }
+
+  /* The bar's dedicated space. It is position:fixed, so the document otherwise
+     just ends underneath it and the last row of every list is unreachable.
+     Reserved on body rather than .shell so it also holds for anything rendered
+     outside the shell, and expressed in the same token as the bar's height. */
+  body { padding-bottom:var(--tabbar-h); }
+
   .tabbar {
-    /* flex-direction and gap are RESET, not defaults. The bare `nav` rule near
-       the top of this file (written for the sidebar's nav) sets
-       `flex-direction:column; gap:2px` on every <nav> in the app, and this bar
-       is a <nav> too. Inheriting that column is not a subtle bug: it stacks the
-       five tabs vertically, and `align-items:flex-end` below — which means
-       "bottom" in a row — becomes "right" in a column, so the whole bar becomes
-       a ragged strip down the right edge of the screen. */
-    display:flex; flex-direction:row; gap:0;
+    /* GRID, not flex, and this is deliberate. The bare `nav` rule near the top
+       of this file (written for the sidebar) sets `display:flex;
+       flex-direction:column; gap:2px` on every <nav> in the app, and this bar
+       is a <nav>. A flex row here has to fight that rule on two properties and
+       lost once already — the bar shipped as a vertical strip down the right
+       edge. A 5-column grid cannot inherit a direction at all, and it sizes
+       every slot to exactly one fifth regardless of what is inside it, so a
+       <button>'s UA padding can no longer make one slot wider than its
+       neighbours and shove the centre bubble off-centre. gap still has to be
+       reset, since grid honours it. */
+    display:grid; grid-template-columns:repeat(5,1fr); gap:0;
+    align-items:end;
     position:fixed; z-index:160;
     left:0; right:0; bottom:0;
-    /* 57, not 56: box-sizing is border-box everywhere in this file, so the
-       height has to carry the 1px border-top as well as the 56px row, or the
-       content box comes out a pixel short and every item overflows it. */
-    height:calc(57px + env(safe-area-inset-bottom));
-    align-items:flex-end;
-    /* nowrap explicitly, not by default: these five are a row at every width
-       this bar exists at, and a wrapped tab bar is a broken one. */
-    flex-wrap:nowrap;
+    height:var(--tabbar-h);
     /* The inset is padding, not margin, so the glass runs all the way to the
        bottom of the screen behind the home indicator instead of leaving a
        stripe of page showing under the bar. */
@@ -1745,32 +1753,18 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance:none; margi
     border-top:1px solid var(--glass-border);
   }
   .tabbar-item {
-    /* `1 1 0` rather than `1`: a plain flex:1 keeps each item's content as its
-       basis, so the widest label steals room from the others and the row sits
-       unevenly. From a zero basis every slot is exactly one fifth. */
-    flex:1 1 0; min-width:0; height:56px;
-    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px;
+    min-width:0; height:56px;
+    display:flex; align-items:center; justify-content:center;
     /* padding:0 is load-bearing. Four of these are <a> and the fifth (More) is a
-       <button>, which the UA stylesheet gives `padding:1px 6px`. Those 12px make
-       the button a wider flex item than its siblings, which un-evens the row and
-       pushes the centre bubble off-centre by half the difference. */
+       <button>, which the UA stylesheet gives `padding:1px 6px`. The grid keeps
+       the slots even regardless, but without this the button's glyph sits a few
+       pixels off its own slot's centre. */
     border:none; background:none; text-decoration:none; padding:0;
-    color:var(--ink-3); font-size:var(--t-tab); font-weight:530;
-    letter-spacing:0; line-height:1;
+    color:var(--ink-3); line-height:1;
     -webkit-tap-highlight-color:transparent;
     transition:color .15s, transform .12s;
   }
-  /* One line, always. A label that wraps makes its slot two rows tall and
-     breaks the row alignment for all five; an ellipsis is the honest failure.
-     line-height has to be restored here: the item sets 1, which makes this
-     box exactly one em tall, and the descender of a "y" or "p" hangs below
-     that — so overflow:hidden, added for the ellipsis, would shave the tails
-     off "History" and "Receipts". The item has 18px of slack for this. */
-  .tabbar-item > span {
-    max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
-    line-height:1.3;
-  }
-  .tabbar-item svg { width:24px; height:24px; stroke-width:1.9; }
+  .tabbar-item svg { width:26px; height:26px; stroke-width:1.9; }
   .tabbar-item.on { color:var(--accent); }
   /* No haptics are available to a web page on iOS, so the press has to be
      legible visually or the tap feels like it did nothing. */
@@ -1784,7 +1778,6 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance:none; margi
      taps meant for whatever row happened to be passing beneath them and open
      the camera instead. Offsetting a positioned descendant moves its hit area
      with its paint, so the raised circle stays tappable and nothing else does. */
-  .tabbar-plus { justify-content:flex-start; }
   .tabbar-bubble {
     position:relative; top:-16px;
     width:52px; height:52px; border-radius:50%;
@@ -1811,9 +1804,10 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance:none; margi
      here, since AppShell forces it closed on entry to this width. */
   .nav-fab { display:none; }
 
-  /* Room for the bar, so the last row of every list clears it — 56px of bar
-     plus the 16px the camera bubble overhangs it by, plus breathing room. */
-  .shell { padding-bottom:calc(88px + env(safe-area-inset-bottom)); }
+  /* The bar's own space is reserved on body (see --tabbar-h above). What is
+     left here is the gap between the last card and the bar, plus clearance for
+     the 16px the camera bubble overhangs it by. */
+  .shell { padding-bottom:28px; }
   main { min-height:calc(100dvh - 172px); }
 
   /* The chat launcher leaves the bottom corner to the tab bar and becomes a
@@ -1982,10 +1976,7 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance:none; margi
   .stat-grid.two .stat-value, .stat-grid.four .stat-value { font-size:18px; }
   .stat-grid.two, .stat-grid.four { gap:10px; }
   .header-figure-num { font-size:34px; }
-  /* A fifth of 320px is 64px, and "Receipts" at 11px is close enough to that
-     to start ellipsing. Step the labels down here rather than shrink them on
-     every phone — the ellipsis is a safety net, not the intended reading. */
-  .tabbar-item { font-size:.625rem; }
+  /* A fifth of 320px is 64px, which a 52px bubble fills almost edge to edge. */
   .tabbar-bubble { width:48px; height:48px; }
 }
 
