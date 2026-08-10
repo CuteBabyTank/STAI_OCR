@@ -1717,7 +1717,15 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance:none; margi
 
   /* ---- Bottom tab bar ------------------------------------------------ */
   .tabbar {
-    display:flex; position:fixed; z-index:160;
+    /* flex-direction and gap are RESET, not defaults. The bare `nav` rule near
+       the top of this file (written for the sidebar's nav) sets
+       `flex-direction:column; gap:2px` on every <nav> in the app, and this bar
+       is a <nav> too. Inheriting that column is not a subtle bug: it stacks the
+       five tabs vertically, and `align-items:flex-end` below — which means
+       "bottom" in a row — becomes "right" in a column, so the whole bar becomes
+       a ragged strip down the right edge of the screen. */
+    display:flex; flex-direction:row; gap:0;
+    position:fixed; z-index:160;
     left:0; right:0; bottom:0;
     /* 57, not 56: box-sizing is border-box everywhere in this file, so the
        height has to carry the 1px border-top as well as the 56px row, or the
