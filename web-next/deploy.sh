@@ -58,16 +58,27 @@ rm -rf .next/standalone/.next/static .next/standalone/public
 cp -r .next/static .next/standalone/.next/
 cp -r public .next/standalone/
 
-echo "==> stopping any running server (by process, not by tmux pane)"
-pkill -f 'standalone/server.js' || true
-for _ in $(seq 1 40); do
-  ss -lnt 2>/dev/null | grep -q ":$PORT " || break
-  sleep 0.5
-done
-if ss -lnt 2>/dev/null | grep -q ":$PORT "; then
-  echo "!! something is still listening on $PORT after 20s:" >&2
-  ss -lntp 2>/dev/null | grep ":$PORT " >&2 || true
-  echo "!! kill it by PID and re-run; starting now would serve the OLD build." >&2
+echo "==> stopping any running server"
+port_busy() { ss -lnt 2>/dev/null | grep -q ":$PORT "; }
+wait_port_free() { for _ in $(seq 1 40); do port_busy || return 0; sleep 0.5; done; port_busy && return 1 || return 0; }
+
+# By name first. This misses anything this user does not own under that name -
+# notably a docker container publishing the port, which pkill cannot see at all.
+pkill -f 'standalone/server.js' 2>/dev/null || true
+wait_port_free || {
+  echo "==> still bound; trying the container that publishes $PORT"
+  docker compose stop web 2>/dev/null || docker stop "$(docker ps -q --filter "publish=$PORT" 2>/dev/null)" 2>/dev/null || true
+  wait_port_free || true
+}
+# Last resort: whatever holds the port, whoever owns it.
+port_busy && { echo "==> still bound; killing the port holder"; fuser -k "$PORT/tcp" 2>/dev/null || sudo fuser -k "$PORT/tcp" 2>/dev/null || true; wait_port_free || true; }
+
+if port_busy; then
+  echo "!! Something still holds $PORT. Starting now would leave it serving the OLD" >&2
+  echo "!! build - which is the failure this whole script exists to prevent." >&2
+  ss -lntp 2>/dev/null | grep ":$PORT " >&2 || sudo ss -lntp 2>/dev/null | grep ":$PORT " >&2 || true
+  docker ps --format '{{.Names}}\t{{.Ports}}' 2>/dev/null | grep ":$PORT" >&2 || true
+  echo "!! Free it by PID (or 'docker compose stop web') and re-run." >&2
   exit 1
 fi
 
@@ -81,10 +92,19 @@ echo "==> starting"
 # "Extraction proxy error" while every other page looks perfectly healthy.
 API_BASE="$API_BASE" PORT="$PORT" HOSTNAME="$HOSTNAME_BIND" \
   nohup node .next/standalone/server.js > "$LOG" 2>&1 &
+START_PID=$!
 for _ in $(seq 1 60); do
   curl -fsS -o /dev/null --max-time 2 "http://127.0.0.1:$PORT/" 2>/dev/null && break
   sleep 0.5
 done
+# A server that exited immediately is the single most misleading outcome: the
+# port stays answered by whatever was already there, so everything downstream
+# looks like it worked while the old build keeps serving.
+if ! kill -0 "$START_PID" 2>/dev/null; then
+  echo "!! The server exited straight after starting. Last lines of $LOG:" >&2
+  tail -15 "$LOG" >&2
+  exit 1
+fi
 
 echo "==> verifying the served HTML and its assets agree"
 HTML="$(curl -fsS "http://127.0.0.1:$PORT/")" || { echo "!! server not responding" >&2; tail -20 "$LOG" >&2; exit 1; }
