@@ -1,119 +1,160 @@
 <!doctype html>
-<html lang="en" data-theme="light">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Tab bar check</title>
 <!--
-  On-device probe for the phone tab bar. Open this on the actual phone.
+  On-device diagnostic. Open on the phone that shows the problem.
 
-  It does not carry its own copy of the stylesheet — it fetches the app's home
-  page, reads whichever hashed CSS file that page is currently linking, and
-  loads THAT. So it measures the stylesheet the server is really serving, which
-  is the only way to tell a layout bug apart from a stale deploy. It then
-  renders the tab bar markup verbatim and reports the measured geometry.
+  It loads the REAL app in a same-origin iframe and measures the actual tab bar
+  inside it, rather than re-creating the markup here — a probe that renders its
+  own copy can pass while the app fails. It also reports the two things that
+  make a correct deploy look broken anyway: a service worker serving a cached
+  shell, and stale Cache Storage entries. Both can be cleared from this page.
 
-  Delete this file once the bar is confirmed good; it is a diagnostic, not a
-  feature.
+  Delete this file once the bar is confirmed good.
 -->
 <style>
-  body { margin:0; font:14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
-  #report { padding:16px 16px 140px; }
-  h1 { font-size:17px; margin:0 0 12px; }
+  body { margin:0; font:14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+  main { padding:16px; }
+  h1 { font-size:17px; margin:0 0 10px; }
   .verdict { padding:12px 14px; border-radius:10px; font-weight:700; margin:0 0 14px; }
   .pass { background:#DCFCE7; color:#14532D; }
   .fail { background:#FEE2E2; color:#7F1D1D; }
+  .warn { background:#FEF3C7; color:#78350F; }
   table { border-collapse:collapse; width:100%; font-size:13px; margin:0 0 14px; }
-  th, td { text-align:left; padding:5px 6px; border-bottom:1px solid #E5E7EB; }
-  th { color:#6B7280; font-weight:600; }
+  th, td { text-align:left; padding:5px 6px; border-bottom:1px solid #E5E7EB; vertical-align:top; }
+  th { color:#6B7280; font-weight:600; white-space:nowrap; }
   code { background:#F3F4F6; padding:1px 5px; border-radius:4px; font-size:12px; word-break:break-all; }
-  .k { color:#6B7280; }
+  button { font:inherit; font-weight:600; padding:11px 16px; border-radius:10px; border:1px solid #D1D5DB;
+           background:#fff; margin:0 8px 8px 0; }
+  button.primary { background:#4F46E5; color:#fff; border-color:#4F46E5; }
+  iframe { position:fixed; left:-9999px; top:0; width:390px; height:844px; border:0; }
 </style>
 </head>
 <body>
-<div id="report">Loading the app's stylesheet…</div>
+<main>
+  <h1>Tab bar check</h1>
+  <div id="out">Loading the app…</div>
+  <div id="actions"></div>
+</main>
 
-<!-- Tab bar markup, copied verbatim from the app's server-rendered output. -->
-<nav class="tabbar" aria-label="Primary">
-  <a class="tabbar-item on" aria-current="page" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5M5 9.5V21h14V9.5" stroke-linecap="round" stroke-linejoin="round"></path></svg><span>Home</span></a>
-  <a class="tabbar-item" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path d="M3 3v6h6M3 9a9 9 0 1 1 2 9M12 7v5l3 2" stroke-linecap="round" stroke-linejoin="round"></path></svg><span>History</span></a>
-  <a class="tabbar-item tabbar-plus" aria-label="Scan a receipt" href="#"><span class="tabbar-bubble"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke-linecap="round" stroke-linejoin="round"></path></svg></span></a>
-  <a class="tabbar-item" href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path d="M6 2h9l5 5v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1zM14 2v6h6M8 13h8M8 17h6" stroke-linecap="round" stroke-linejoin="round"></path></svg><span>Receipts</span></a>
-  <button type="button" class="tabbar-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path d="M5 12h.01M12 12h.01M19 12h.01" stroke-linecap="round" stroke-linejoin="round"></path></svg><span>More</span></button>
-</nav>
+<!-- The real app. Same origin, so its DOM is readable from here. -->
+<iframe id="app" src="/"></iframe>
 
 <script>
-(async function () {
-  const el = document.getElementById("report");
-  const esc = (s) => String(s).replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]));
+(function () {
+  var out = document.getElementById("out");
+  var actions = document.getElementById("actions");
+  var frame = document.getElementById("app");
 
-  let cssHref = "(none found)";
-  try {
-    const html = await (await fetch("/", { cache: "no-store" })).text();
-    const m = html.match(/href="([^"]*\.css[^"]*)"/);
-    if (m) {
-      cssHref = m[1];
-      await new Promise((res, rej) => {
-        const link = document.createElement("link");
-        link.rel = "stylesheet";
-        link.href = cssHref + (cssHref.includes("?") ? "&" : "?") + "probe=1";
-        link.onload = res;
-        link.onerror = rej;
-        document.head.appendChild(link);
-      });
-    }
-  } catch (e) {
-    cssHref = "FETCH FAILED: " + e.message;
+  function esc(s) { return String(s).replace(/[<>&]/g, function (c) {
+    return { "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]; }); }
+
+  function row(k, v) { return "<tr><th>" + k + "</th><td>" + v + "</td></tr>"; }
+
+  async function clientState() {
+    var sw = "unsupported", caches_ = "unsupported";
+    try {
+      if (navigator.serviceWorker) {
+        var regs = await navigator.serviceWorker.getRegistrations();
+        sw = regs.length === 0 ? "none" :
+          regs.map(function (r) { return r.scope; }).join("<br>");
+      }
+    } catch (e) { sw = "error: " + e.message; }
+    try {
+      if (window.caches) {
+        var keys = await caches.keys();
+        caches_ = keys.length === 0 ? "none" : keys.join("<br>");
+      }
+    } catch (e) { caches_ = "error: " + e.message; }
+    return { sw: sw, caches: caches_ };
   }
 
-  // Let the stylesheet settle before measuring.
-  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  frame.addEventListener("load", async function () {
+    var state = await clientState();
+    var d, win;
+    try { d = frame.contentDocument; win = frame.contentWindow; }
+    catch (e) {
+      out.innerHTML = '<p class="fail verdict">Could not read the app frame: ' + esc(e.message) + "</p>";
+      return;
+    }
 
-  const bar = document.querySelector(".tabbar");
-  const cs = getComputedStyle(bar);
-  const items = [...bar.children];
-  const boxes = items.map((c) => c.getBoundingClientRect());
-  const bub = bar.querySelector(".tabbar-bubble");
-  const bb = bub ? bub.getBoundingClientRect() : null;
+    // Give the app a moment to hydrate and apply its stylesheet.
+    await new Promise(function (r) { setTimeout(r, 1500); });
 
-  const ys = boxes.map((b) => Math.round(b.y));
-  const oneRow = new Set(ys).size === 1;
-  const widths = boxes.map((b) => b.width);
-  const even = Math.max(...widths) - Math.min(...widths) < 1.5;
-  const centred = bb ? Math.abs(bb.x + bb.width / 2 - innerWidth / 2) < 1.5 : false;
-  const ok = oneRow && even && centred && cs.display === "flex" && cs.flexDirection === "row";
+    var bar = d.querySelector(".tabbar");
+    if (!bar) {
+      out.innerHTML = '<p class="verdict fail">No .tabbar element in the app at all.</p>' +
+        "<table>" + row("service workers", state.sw) + row("cache storage", state.caches) + "</table>";
+      return;
+    }
 
-  const names = ["Home", "History", "[+ bubble]", "Receipts", "More"];
-  const rows = boxes.map((b, i) =>
-    "<tr><td>" + names[i] + "</td><td>" + Math.round(b.x) + "</td><td>" + Math.round(b.width) +
-    "</td><td>" + Math.round(b.y) + "</td></tr>").join("");
+    var cs = win.getComputedStyle(bar);
+    var kids = [].slice.call(bar.children).filter(function (c) {
+      return c.tagName === "A" || c.tagName === "BUTTON"; });
+    var boxes = kids.map(function (c) { return c.getBoundingClientRect(); });
+    var ys = boxes.map(function (b) { return Math.round(b.y); });
+    var uniqueY = ys.filter(function (v, i, a) { return a.indexOf(v) === i; });
+    var ws = boxes.map(function (b) { return b.width; });
+    var hidden = cs.display === "none";
+    var oneRow = uniqueY.length === 1;
+    var even = ws.length > 0 && Math.max.apply(null, ws) - Math.min.apply(null, ws) < 1.5;
 
-  el.innerHTML =
-    "<h1>Tab bar check</h1>" +
-    '<p class="verdict ' + (ok ? "pass" : "fail") + '">' +
-      (ok ? "PASS - one even row, bubble centred"
-          : "FAIL - " + [
-              cs.flexDirection !== "row" ? "flex-direction is " + cs.flexDirection + " (should be row)" : "",
-              !oneRow ? "items on " + new Set(ys).size + " different rows" : "",
-              !even ? "slot widths uneven" : "",
-              !centred ? "bubble off-centre" : "",
-            ].filter(Boolean).join("; ") ) +
-    "</p>" +
-    "<table><tr><th>slot</th><th>x</th><th>width</th><th>y</th></tr>" + rows + "</table>" +
-    "<table>" +
-    "<tr><th>viewport</th><td>" + innerWidth + " x " + innerHeight + " css px</td></tr>" +
-    "<tr><th>devicePixelRatio</th><td>" + devicePixelRatio + "</td></tr>" +
-    "<tr><th>matches (max-width:640px)</th><td>" + matchMedia("(max-width:640px)").matches + "</td></tr>" +
-    "<tr><th>bar display / direction</th><td>" + cs.display + " / " + cs.flexDirection + "</td></tr>" +
-    "<tr><th>bar height</th><td>" + cs.height + "</td></tr>" +
-    "<tr><th>safe-area bottom</th><td>" +
-      getComputedStyle(document.documentElement).getPropertyValue("--probe-sab") + "</td></tr>" +
-    "<tr><th>bubble centre vs viewport</th><td>" +
-      (bb ? Math.round(bb.x + bb.width / 2) + " vs " + Math.round(innerWidth / 2) : "no bubble") + "</td></tr>" +
-    "<tr><th>stylesheet served</th><td><code>" + esc(cssHref) + "</code></td></tr>" +
-    "</table>";
+    var link = d.querySelector('link[rel="stylesheet"]');
+    var inlineFloor = !!d.querySelector("style") &&
+      /nav\.tabbar/.test(Array.prototype.map.call(d.querySelectorAll("style"),
+        function (s) { return s.textContent; }).join(""));
+
+    var problems = [];
+    if (hidden) problems.push("bar is display:none at this width (" + win.innerWidth + "px)");
+    if (!hidden && !oneRow) problems.push("items on " + uniqueY.length + " rows - THIS IS THE COLUMN BUG");
+    if (!hidden && !even) problems.push("slot widths uneven");
+    if (!inlineFloor) problems.push("inline layout floor MISSING - the app's JS is older than this fix");
+
+    var ok = problems.length === 0;
+    out.innerHTML =
+      '<p class="verdict ' + (ok ? "pass" : "fail") + '">' +
+        (ok ? "PASS - one even row" : "FAIL - " + esc(problems.join("; "))) + "</p>" +
+      "<table><tr><th>slot</th><th>x</th><th>width</th><th>y</th></tr>" +
+        kids.map(function (c, i) {
+          return "<tr><td>" + esc(c.getAttribute("aria-label") || c.tagName) + "</td><td>" +
+            Math.round(boxes[i].x) + "</td><td>" + Math.round(boxes[i].width) + "</td><td>" +
+            Math.round(boxes[i].y) + "</td></tr>"; }).join("") +
+      "</table>" +
+      "<table>" +
+        row("app viewport", win.innerWidth + " x " + win.innerHeight + " css px") +
+        row("devicePixelRatio", devicePixelRatio) +
+        row("matches (max-width:640px)", win.matchMedia("(max-width:640px)").matches) +
+        row("bar display", cs.display) +
+        row("bar flex/grid direction", cs.flexDirection + " / " + cs.gridTemplateColumns) +
+        row("inline layout floor", inlineFloor ? "present" : "<b>MISSING</b>") +
+        row("stylesheet served", "<code>" + esc(link ? link.getAttribute("href") : "none") + "</code>") +
+        row("service workers", state.sw) +
+        row("cache storage", state.caches) +
+        row("user agent", "<code>" + esc(navigator.userAgent) + "</code>") +
+      "</table>";
+
+    actions.innerHTML =
+      '<button class="primary" id="nuke">Clear caches + service workers, then reload</button>' +
+      '<button id="again">Re-run</button>';
+    document.getElementById("again").onclick = function () { location.reload(); };
+    document.getElementById("nuke").onclick = async function () {
+      try {
+        if (navigator.serviceWorker) {
+          var regs = await navigator.serviceWorker.getRegistrations();
+          for (var i = 0; i < regs.length; i++) await regs[i].unregister();
+        }
+        if (window.caches) {
+          var keys = await caches.keys();
+          for (var j = 0; j < keys.length; j++) await caches.delete(keys[j]);
+        }
+      } catch (e) { /* nothing to clear */ }
+      location.reload(true);
+    };
+  });
 })();
 </script>
-<style>:root { --probe-sab: env(safe-area-inset-bottom, 0px); }</style>
 </body>
 </html>
