@@ -29,6 +29,19 @@ LOG="${LOG:-$HOME/web.log}"
 cd "$APP_DIR"
 echo "==> repo: $APP_DIR   port: $PORT   API_BASE: $API_BASE"
 
+# Fail here rather than after a five-minute build. A frontend pointed at an API
+# it cannot reach looks entirely healthy until someone runs OCR.
+if [ "${SKIP_API_CHECK:-0}" != "1" ]; then
+  echo "==> checking the API answers at $API_BASE"
+  if ! curl -fsS --max-time 5 "$API_BASE/health" > /dev/null 2>&1; then
+    echo "!! $API_BASE/health did not answer." >&2
+    echo "!! Point API_BASE at an address THIS HOST can reach - inside compose that" >&2
+    echo "!! is http://api:8000, on the host it is http://127.0.0.1:8000." >&2
+    echo "!! Re-run with SKIP_API_CHECK=1 to deploy anyway." >&2
+    exit 1
+  fi
+fi
+
 echo "==> pulling"
 git -C "$APP_DIR/.." pull --ff-only
 
@@ -59,7 +72,15 @@ if ss -lnt 2>/dev/null | grep -q ":$PORT "; then
 fi
 
 echo "==> starting"
-PORT="$PORT" HOSTNAME="$HOSTNAME_BIND" nohup node .next/standalone/server.js > "$LOG" 2>&1 &
+# API_BASE is needed at RUNTIME as well as at build time, and the two are for
+# different things. The build bakes it into the /api/:path* rewrite. The server
+# reads it again for the route handlers that bypass that rewrite so a slow
+# vision read is not cut off at the rewrite's 30s limit: /api/extract,
+# /api/extract/batch and /api/agent/stream (see app/lib/proxyUpstream.ts).
+# Omit it here and those three fall back to localhost:8001, so OCR fails with
+# "Extraction proxy error" while every other page looks perfectly healthy.
+API_BASE="$API_BASE" PORT="$PORT" HOSTNAME="$HOSTNAME_BIND" \
+  nohup node .next/standalone/server.js > "$LOG" 2>&1 &
 for _ in $(seq 1 60); do
   curl -fsS -o /dev/null --max-time 2 "http://127.0.0.1:$PORT/" 2>/dev/null && break
   sleep 0.5
@@ -107,6 +128,22 @@ else
   echo "!! tab bar layout floor MISSING from the served HTML - serving an old build" >&2
   exit 1
 fi
+
+# The OCR route reads API_BASE from this process's environment, so prove the
+# running server resolved it rather than trusting that we exported it. An empty
+# POST is rejected by the upstream, which is fine - what matters is whether the
+# proxy reached an upstream at all. A connection failure comes back as
+# "Extraction proxy error", which is exactly the symptom being guarded against.
+echo "==> checking the OCR proxy can reach the API"
+EXTRACT_BODY="$(curl -s --max-time 20 -X POST "http://127.0.0.1:$PORT/api/extract" || true)"
+if printf '%s' "$EXTRACT_BODY" | grep -qi 'Extraction proxy error'; then
+  echo "!! The server cannot reach the API on the extract route:" >&2
+  printf '   %s\n' "$EXTRACT_BODY" >&2
+  echo "!! API_BASE was not in the SERVER's environment (it is needed at runtime," >&2
+  echo "!! not only for the build). Check the start line and $LOG." >&2
+  exit 1
+fi
+grep -m1 'upstream configured' "$LOG" 2>/dev/null | sed 's/^/    /' || true
 
 echo "==> OK. $(printf '%s\n' "$ASSETS" | wc -l) assets verified, all 200."
 echo "==> logs: $LOG"
