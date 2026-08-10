@@ -97,7 +97,12 @@ a { color:inherit; }
   flex-shrink:0;
 }
 .brand-name { font-size:18px; font-weight:650; letter-spacing:-.02em; }
-nav { display:flex; flex-direction:column; gap:2px; }
+/* Scoped to the sidebar, NOT a bare `nav`. This rule was written for the rail's
+   nav and used to apply to every <nav> in the app — which meant the phone tab
+   bar, also a <nav>, silently inherited `flex-direction:column` and shipped as a
+   vertical strip down the edge of the screen. An element selector that assumes
+   there is only one of that element is a trap the second one springs. */
+.sidebar nav { display:flex; flex-direction:column; gap:2px; }
 .nav-item {
   display:flex; align-items:center; gap:11px; padding:9px 12px; border-radius:11px;
   font-size:14px; font-weight:500; color:var(--ink-2); text-decoration:none;
@@ -1727,19 +1732,18 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance:none; margi
      outside the shell, and expressed in the same token as the bar's height. */
   body { padding-bottom:var(--tabbar-h); }
 
+  /* Two layouts on purpose, and the order matters. The flex row is the
+     fallback: if a browser drops the grid declarations for any reason, the bar
+     is still a row rather than collapsing into a single column, which is the
+     one failure mode that makes this bar unusable. Grid wins wherever it is
+     supported because it sizes every slot to exactly one fifth whatever the
+     slot contains — so a <button>'s UA padding can never widen one slot and
+     shove the centre bubble off-centre.
+     gap:0 is a reset either way; both layout modes honour gap. */
   .tabbar {
-    /* GRID, not flex, and this is deliberate. The bare `nav` rule near the top
-       of this file (written for the sidebar) sets `display:flex;
-       flex-direction:column; gap:2px` on every <nav> in the app, and this bar
-       is a <nav>. A flex row here has to fight that rule on two properties and
-       lost once already — the bar shipped as a vertical strip down the right
-       edge. A 5-column grid cannot inherit a direction at all, and it sizes
-       every slot to exactly one fifth regardless of what is inside it, so a
-       <button>'s UA padding can no longer make one slot wider than its
-       neighbours and shove the centre bubble off-centre. gap still has to be
-       reset, since grid honours it. */
-    display:grid; grid-template-columns:repeat(5,1fr); gap:0;
-    align-items:end;
+    display:flex; flex-direction:row; flex-wrap:nowrap;
+    display:grid; grid-template-columns:repeat(5,1fr);
+    gap:0; align-items:end;
     position:fixed; z-index:160;
     left:0; right:0; bottom:0;
     height:var(--tabbar-h);
@@ -1753,7 +1757,10 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance:none; margi
     border-top:1px solid var(--glass-border);
   }
   .tabbar-item {
-    min-width:0; height:56px;
+    /* flex:1 1 0 is ignored by a grid item and only matters in the flex
+       fallback above — without it the fallback packs five icon-width items
+       against the left edge instead of spreading them across the bar. */
+    flex:1 1 0; min-width:0; height:56px;
     display:flex; align-items:center; justify-content:center;
     /* padding:0 is load-bearing. Four of these are <a> and the fifth (More) is a
        <button>, which the UA stylesheet gives `padding:1px 6px`. The grid keeps
