@@ -1750,7 +1750,11 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance:none; margi
        unevenly. From a zero basis every slot is exactly one fifth. */
     flex:1 1 0; min-width:0; height:56px;
     display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px;
-    border:none; background:none; text-decoration:none;
+    /* padding:0 is load-bearing. Four of these are <a> and the fifth (More) is a
+       <button>, which the UA stylesheet gives `padding:1px 6px`. Those 12px make
+       the button a wider flex item than its siblings, which un-evens the row and
+       pushes the centre bubble off-centre by half the difference. */
+    border:none; background:none; text-decoration:none; padding:0;
     color:var(--ink-3); font-size:var(--t-tab); font-weight:530;
     letter-spacing:0; line-height:1;
     -webkit-tap-highlight-color:transparent;
