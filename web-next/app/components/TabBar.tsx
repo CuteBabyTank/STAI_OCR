@@ -12,6 +12,29 @@ import { usePathname } from "next/navigation";
 import { ICON_PATHS, tabForPath } from "../lib/navRoutes";
 import type { TabId } from "../lib/navRoutes";
 
+// The bar's layout floor, shipped with the markup instead of only in
+// globals.css. Everything cosmetic — glass, colour, sizing, the bubble — stays
+// in the stylesheet; what lives here is only the handful of declarations that
+// decide whether this is a usable bar or a broken one.
+//
+// The reason is a real failure this bar hit repeatedly: a deploy can serve a
+// JS bundle newer than its stylesheet. When that happens the markup arrives
+// with no .tabbar rules at all, so the <nav> falls back to whatever the old
+// stylesheet said about bare navs — a column — and the five tabs stack on top
+// of each other. A <style> element rendered by the component cannot be out of
+// sync with the component, so this floor holds no matter which stylesheet the
+// browser got.
+//
+// `nav.tabbar` rather than `.tabbar` so it outranks any bare `nav` rule, and
+// the block sits after the stylesheet link in document order so it also wins
+// specificity ties.
+const LAYOUT_FLOOR = `
+nav.tabbar{display:none}
+@media (max-width:640px){
+nav.tabbar{display:flex;flex-direction:row;flex-wrap:nowrap;display:grid;grid-template-columns:repeat(5,1fr);gap:0;align-items:end;position:fixed;left:0;right:0;bottom:0;z-index:160}
+nav.tabbar>a,nav.tabbar>button{flex:1 1 0;min-width:0;height:56px;display:flex;align-items:center;justify-content:center;padding:0;border:none;background:none}
+}`;
+
 type Tab = { id: TabId; href: string; label: string; icon: string };
 
 // Split either side of the centre bubble rather than one list with the plus
@@ -69,7 +92,12 @@ export default function TabBar({
   const current = tabForPath(path);
 
   return (
-    <nav className="tabbar" aria-label="Primary">
+    <>
+      {/* Outside the <nav>, not inside it: a grid container treats every child
+          as a cell, and a stray non-item in the track list is a trap waiting
+          for the first rule that gives it a box. */}
+      <style dangerouslySetInnerHTML={{ __html: LAYOUT_FLOOR }} />
+      <nav className="tabbar" aria-label="Primary">
       {LEFT.map((t) => (
         <TabLink key={t.id} {...t} current={current} />
       ))}
@@ -109,6 +137,7 @@ export default function TabBar({
       >
         <Glyph d={ICON_PATHS.more} />
       </button>
-    </nav>
+      </nav>
+    </>
   );
 }
