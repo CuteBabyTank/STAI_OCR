@@ -102,18 +102,19 @@ export default function TabBar({
         <TabLink key={t.id} {...t} current={current} />
       ))}
 
-      {/* The camera, raised out of the bar as its own affordance. A plain tab
-          would read as one more place to go; the whole point is that it is the
-          thing you came to do. It carries no visible label — the bubble is the
-          label — so the accessible name has to be spelled out here.
-          The anchor, not the circle, is what overhangs the bar: the raised part
-          of a bubble whose parent stops at the bar's edge looks tappable and
-          is not, which is worse than not raising it at all. */}
+      {/* Adding a receipt, raised out of the bar as its own affordance. A plain
+          tab would read as one more place to go; the whole point is that it is
+          the thing you came to do. It carries no visible label — the bubble is
+          the label — so the accessible name has to be spelled out here.
+          It opens /add, which offers upload or camera, rather than jumping
+          straight into the viewfinder: about half the time the photo already
+          exists in the camera roll, and a flow that assumes otherwise makes
+          that the longer path. */}
       <Link
-        href="/scan"
-        className={"tabbar-item tabbar-plus" + (current === "scan" ? " on" : "")}
-        aria-label="Scan a receipt"
-        aria-current={current === "scan" ? "page" : undefined}
+        href="/add"
+        className={"tabbar-item tabbar-plus" + (current === "add" ? " on" : "")}
+        aria-label="Add a receipt"
+        aria-current={current === "add" ? "page" : undefined}
       >
         <span className="tabbar-bubble">
           <Glyph d={ICON_PATHS.plus} />

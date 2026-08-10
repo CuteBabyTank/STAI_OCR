@@ -20,6 +20,11 @@ describe("activeHref", () => {
     expect(activeHref("/wallet/payments")).toBe("/wallet/payments");
   });
 
+  it("resolves the routes the tab bar owns but the sidebar does not list", () => {
+    expect(activeHref("/add")).toBe("/add");
+    expect(activeHref("/scan")).toBe("/scan");
+  });
+
   it("resolves nested group routes", () => {
     expect(activeHref("/plan/budgets")).toBe("/plan/budgets");
     expect(activeHref("/lending/receivable-activity")).toBe("/lending/receivable-activity");
@@ -43,10 +48,15 @@ describe("tabForPath", () => {
     expect(tabForPath("/settings")).toBe("more");
   });
 
-  it("gives the camera the centre slot rather than folding it into More", () => {
-    // The whole point of the centre bubble: /scan owns a slot of its own, so
-    // More does not light up while the camera is on screen.
-    expect(tabForPath("/scan")).toBe("scan");
+  it("gives adding a receipt the centre slot rather than folding it into More", () => {
+    // The whole point of the centre bubble: it owns a slot, so More does not
+    // light up while you are adding a receipt.
+    expect(tabForPath("/add")).toBe("add");
+  });
+
+  it("shares the centre slot between /add and the standalone camera flow", () => {
+    // Two entrances to the same job; lighting a different tab for each is noise.
+    expect(tabForPath("/scan")).toBe("add");
   });
 
   it("sends Wallet to More, since the centre slot took its place", () => {

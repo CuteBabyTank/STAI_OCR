@@ -31,11 +31,11 @@ export const LENDING: NavItem[] = [
   { href: "/lending/receivable-activity", label: "Receivable activity" },
 ];
 
-// `/scan` is included even though no sidebar entry links to it: the phone More
-// sheet does, and without it here the camera route would resolve to no active
-// entry at all.
+// `/add` and `/scan` are included even though no sidebar entry links to either:
+// the phone tab bar's centre button goes to /add, and without them here those
+// routes would resolve to no active entry at all.
 export const ALL_HREFS: string[] = [
-  "/", "/history", "/statistics", "/receipts", "/settings", "/scan",
+  "/", "/history", "/statistics", "/receipts", "/settings", "/scan", "/add",
   ...WALLET.map((i) => i.href),
   ...PLAN.map((i) => i.href),
   ...LENDING.map((i) => i.href),
@@ -74,16 +74,20 @@ export function activeHref(path: string): string | null {
   return hits.reduce((best, h) => (h.length > best.length ? h : best));
 }
 
-export type TabId = "home" | "history" | "scan" | "receipts" | "more";
+export type TabId = "home" | "history" | "add" | "receipts" | "more";
 
 /**
  * Which of the phone tab bar's five slots owns `path`.
  *
- * The centre slot is the camera, not a destination in the usual sense — it is
- * the one thing this app exists to do, and burying it two taps deep in More
- * made the common case the expensive one. It costs Wallet its slot: five is
- * what fits a thumb's reach across a phone, and Wallet is the tab whose work
+ * The centre slot is adding a receipt, not a destination in the usual sense —
+ * it is the one thing this app exists to do, and burying it two taps deep in
+ * More made the common case the expensive one. It costs Wallet its slot: five
+ * is what fits a thumb's reach across a phone, and Wallet is the tab whose work
  * (reading balances) is least often the reason someone opens the app.
+ *
+ * /scan shares that slot with /add. They are two entrances to the same job —
+ * /add offers the choice, /scan is the standalone camera flow — so lighting a
+ * different tab depending on which one you came through would be noise.
  *
  * Everything with no slot of its own — Wallet, Plan, Lending, Statistics,
  * Settings — belongs to More, as does an unrecognised route: leaving the bar
@@ -94,7 +98,7 @@ export function tabForPath(path: string): TabId {
   const href = activeHref(path);
   if (href === "/") return "home";
   if (href === "/history") return "history";
-  if (href === "/scan") return "scan";
+  if (href === "/add" || href === "/scan") return "add";
   if (href === "/receipts") return "receipts";
   return "more";
 }

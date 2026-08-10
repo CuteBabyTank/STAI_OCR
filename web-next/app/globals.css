@@ -1489,6 +1489,12 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance:none; margi
    one, so the list does not read as two ragged columns. */
 .more-dot { width:20px; flex-shrink:0; }
 
+/* The /add page's primary action. Full width on a phone, where it is the only
+   thing to press once files are staged, and shrink-to-fit above that. */
+.add-run { display:flex; }
+.add-run > * { flex:1; justify-content:center; }
+@media (min-width:641px) { .add-run > * { flex:0 0 auto; } }
+
 /* Phone tab bar. Hidden by default and switched on in the ≤640px block, so the
    boundary lives in exactly one place and the desktop first paint is correct
    without any JS. */
