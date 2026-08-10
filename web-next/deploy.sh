@@ -68,6 +68,21 @@ done
 echo "==> verifying the served HTML and its assets agree"
 HTML="$(curl -fsS "http://127.0.0.1:$PORT/")" || { echo "!! server not responding" >&2; tail -20 "$LOG" >&2; exit 1; }
 
+# Match the asset path by its own alphabet and require a real file extension.
+# Not `[^"]*`: every one of these URLs also appears inside React's flight
+# payload as JSON, escaped to ...css\" — and a "anything but a quote" match
+# happily swallows that backslash, then asks the server for a filename ending
+# in \. Next answers 308 (normalising the path) and the check reports a healthy
+# deploy as broken.
+ASSETS="$(printf '%s' "$HTML" \
+  | grep -oE '/_next/static/[A-Za-z0-9._/-]+\.(js|css|woff2?|png|svg|ico)' \
+  | sort -u)"
+
+if [ -z "$ASSETS" ]; then
+  echo "!! No /_next/static assets referenced at all - that HTML is not the app." >&2
+  exit 1
+fi
+
 fail=0
 while read -r asset; do
   [ -z "$asset" ] && continue
@@ -76,7 +91,7 @@ while read -r asset; do
     echo "!! $code  $asset" >&2
     fail=1
   fi
-done <<< "$(printf '%s' "$HTML" | grep -o '/_next/static/[^"]*' | sort -u)"
+done <<< "$ASSETS"
 
 if [ "$fail" -ne 0 ]; then
   echo "!! The HTML references assets that do not exist. That is the stale-server" >&2
@@ -93,5 +108,5 @@ else
   exit 1
 fi
 
-echo "==> OK. $(printf '%s' "$HTML" | grep -o '/_next/static/[^\"]*' | sort -u | wc -l) assets verified, all 200."
+echo "==> OK. $(printf '%s\n' "$ASSETS" | wc -l) assets verified, all 200."
 echo "==> logs: $LOG"
