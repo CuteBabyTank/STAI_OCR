@@ -1,8 +1,8 @@
 # Final Capstone deck — Snag
 
-`Snag_Final_Capstone.pptx` — 19 slides, 16:9, editable in PowerPoint. Nineteen slides
-for a fifteen-minute talk is about forty-five seconds each; that budget is the reason
-the deck is short.
+`Snag_Final_Capstone.pptx` — 24 slides, 16:9, editable in PowerPoint. At roughly
+forty seconds a slide that is a full fifteen-minute talk, so the deck has no room for
+a slide that is not carrying an argument.
 
 Two rules hold it together:
 
@@ -11,6 +11,25 @@ Two rules hold it together:
 2. **Structure comes from whitespace, a hairline and type weight — never from a box.**
    A shape is drawn only when it carries meaning: an architecture lane, a database
    cylinder, the one quadrant that survived.
+
+Explanation is set as bullets (`bullets()`), because the architecture feedback asked for
+explanations and a bullet with a bold lead — *the claim, then why* — is the shape an
+explanation wants. Diagrams still carry the flow; bullets carry the reasoning under it.
+
+## What the architecture feedback asked for, and where it now lives
+
+| Deduction | Answer in the deck |
+|---|---|
+| No comprehensive dataflow diagram; no explanation of the chosen representations (JSON, models/objects, SQL) | **Slide 8 — Dataflow.** The five shapes as a chain, each hand-off annotated with the function that guards it, and a bullet per shape saying why that representation and not another |
+| Most of the dataflow happens in a single `core.py` | **Slide 9 — Modules.** Every module with its line count and responsibility, `core.py`'s own eight numbered sections in order, and a statement that agrees with the criticism and names the seams |
+| No explanation of how LLMOps and Dockerization were performed | **Slide 16 — LLMOps** (backend, run naming, the three helpers, what lands on a run, the two env knobs) and **Slide 17 — Docker** (the three services, the volume decision, models-as-environment, start order) |
+| No decision-flow / ReAct loop definition | **Slide 13 — The ReAct loop.** ReAct is defined in a sentence, the loop is *drawn as a loop* (return arc, "at most 4 steps, one tool each"), the branches are drawn (ambiguous → ask once, budget spent → forced final), and all five exits plus the post-loop grounding veto are listed. The load-bearing detail: generation stops at the token `Observation:`, so the model can never write its own observation |
+| Tools, guardrail integrations and agentic flow not illustrated | **Slide 14** lists all eleven tools, 4 read / 7 write, with `KNOWN_TOOLS` as the single source of truth and the two answer paths; **slide 12** prints the function behind each of the seven gates (`validate_input`, `_validate_sql`, `_build_scoped_db`, `_sanitize_observation`, `_ungrounded_numbers`, `_guard_amount`) |
+
+Every figure on those slides was read out of the source, not remembered: 80 routes and
+21 request models from `api.py`, 17 tables from `ledger.db`, the line counts from `wc -l`,
+the metric names from the `_mlog_*` call sites, the services and volumes from
+`docker-compose.yml`.
 
 ## The rules the deck holds itself to
 
@@ -28,8 +47,9 @@ Two rules hold it together:
 
 `note()` renders nothing unless you pass `keep=True`. A footnote earns it only if it
 states something a grader could challenge: measured-vs-assumed inputs, the peso/dollar
-rate, the vision trade-off, containerisation, why #11 is greyed out, the grounding count,
-what scope actually is, the two benchmark caveats on slide 13, and the disclosure that a
+rate, the vision trade-off, the compose services, why #11 is greyed out, the grounding
+count, the MLflow sampling knobs, the API being a deliverable rather than the UI's back
+door, the shared write spine, the two benchmark caveats on slide 18, and the disclosure that a
 limitation you find yourself is not a defect. Calls without `keep=True` stay in the source
 so the point is not lost — they just do not compete with the slide.
 
@@ -44,25 +64,31 @@ so the point is not lost — they just do not compete with the slide.
 | 5 | Use case | What it costs — ₱1,562 by hand vs ₱1,160 DIY subscription vs ₱99 Snag |
 | 6 | RRL | Option space, the model we chose, the trade-off we recorded |
 | 7 | Architecture | System diagram — three lanes, where the CV model plugs in |
-| 8 | Architecture | Component 14 — ten stages and the re-read loop |
-| 9 | Components | 13 of 14 components, with owner initials |
-| 10 | Components | Guardrails — seven gates and the prompt rules behind them |
-| 11 | Components | The agent — one ReAct turn, two ways to answer |
-| 12 | Components | The API and the traces |
-| 13 | Findings | **Three models, measured** — accuracy, precision, recall, speed, cost |
-| 14 | Findings | One full reasoning trace (case RCT-006) |
-| 15 | Findings | It works, and where it doesn't |
-| 16 | Findings | What we cannot claim |
-| 17 | Wrap-up | Who built what + retrospective |
-| 18 | Wrap-up | Live demo (at the end, per the brief) |
-| 19 | Wrap-up | Take away four things |
+| 8 | Architecture | **Dataflow** — five shapes, and why each one |
+| 9 | Architecture | **Modules** — what each file owns, and core.py's eight sections |
+| 10 | Architecture | Component 14 — ten stages and the re-read loop |
+| 11 | Components | 13 of 14 components, with owner initials |
+| 12 | Components | Guardrails — seven gates, the function behind each, the prompt rules |
+| 13 | Components | **The ReAct loop** — defined, drawn as a loop, with every exit |
+| 14 | Components | Eleven tools, one dispatcher — and the two answer paths |
+| 15 | Components | The API — one surface, three clients |
+| 16 | Components | **LLMOps** — how the tracing is wired |
+| 17 | Components | **Docker** — one command, three services |
+| 18 | Findings | **Three models, measured** — accuracy, precision, recall, speed, cost |
+| 19 | Findings | One full reasoning trace (case RCT-006) |
+| 20 | Findings | It works, and where it doesn't |
+| 21 | Findings | What we cannot claim |
+| 22 | Wrap-up | Who built what + retrospective |
+| 23 | Wrap-up | Live demo (at the end, per the brief) |
+| 24 | Wrap-up | Take away four things |
 
 Everything the brief asks to see is on exactly one slide: LLM and parameter size (1),
-UoM and value (4, 5), RRL (6), architecture (7), CV/DS integration (8), component
-ownership (9 and 17), quantitative metrics (13), a full reasoning trace (14),
-limitations and lessons (16, 17), team contributions (17), live demo last (18).
+UoM and value (4, 5), RRL (6), architecture (7–9), CV/DS integration (10), component
+ownership (11 and 22), the agentic decision flow (13), quantitative metrics (18), a full
+reasoning trace (19), limitations and lessons (21, 22), team contributions (22), live
+demo last (23).
 
-### The model comparison (slide 13)
+### The model comparison (slide 18)
 
 | Model | Accuracy | Precision | Recall | Time / receipt | Cost |
 |---|---|---|---|---|---|
@@ -102,12 +128,12 @@ with a picture on it. `charts.py` still builds all seven figures and still write
 
 | What | Where | Why |
 |---|---|---|
-| Team names and component ownership | `TEAM` in `build_deck.py` (slides 1, 9, 17) | Taken from the root `README.md` ownership table — confirm it is current |
+| Team names and component ownership | `TEAM` in `build_deck.py` (slides 1, 11, 22) | Taken from the root `README.md` ownership table — confirm it is current |
 | Tech-stack logos | slide 1, the `STACK` list | Brand-coloured monogram tiles, 0.22″ square, already positioned. Drop a real logo PNG on top of a tile and it lines up |
 | The ₱99 price | slide 5 | A proposal, not a decision — and the whole value slide hangs off it |
 | The $/₱ rate | slide 5 | $20/month is converted at **₱58 = $1 → ₱1,160**. The slide says so out loud; check the rate on the day and change both the number and the "12×" chip |
-| Benchmark figures | `MODELS` in `build_deck.py` (slide 13) | Typed in, not read from `facts.json`. Re-run the benchmark, update them here |
-| Demo URLs | slide 18, "WHERE TO LOOK" | Deliberately left as descriptions; add the actual ports you will present on |
+| Benchmark figures | `MODELS` in `build_deck.py` (slide 18) | Typed in, not read from `facts.json`. Re-run the benchmark, update them here |
+| Demo URLs | slide 23, "WHERE TO LOOK" | Deliberately left as descriptions; add the actual ports you will present on |
 
 ## The UoM model
 
@@ -136,6 +162,7 @@ the XML boundary. Skip it and PowerPoint reports the file as corrupt: a float in
 `off`/`ext` attribute is invalid OOXML, and that is exactly how this deck broke once.
 
 ```python
+bullets(sl, x, y, w, [("Lead", "why it matters"), …])  # the explanation primitive
 rule(sl, x, y, w)                              # the hairline — the only divider
 vrule(sl, x, y, h)                             # its vertical twin
 eyebrow(sl, x, y, w, "request")                # tracked small caps, labels a region
