@@ -15,11 +15,8 @@ Usage:
                                                             [--out PATH]
                                                             [--no-figures]
 
-`--source` defaults to the Markdown sitting next to this file. Revision 2 is
-authored on the `tr-revisions` worktree, so until that branch lands, build with:
-
-    python docs/presentation/technicalwriteup/build_docx.py --source \
-      .claude/worktrees/tr-revisions/docs/presentation/technicalwriteup/TECHNICAL_WRITEUP.md
+`--source` defaults to the Markdown sitting next to this file, which is the one
+to edit. The .docx is output: hand-edits to it are lost on the next build.
 """
 from __future__ import annotations
 
