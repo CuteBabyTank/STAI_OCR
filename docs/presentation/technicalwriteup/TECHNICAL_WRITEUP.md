@@ -1,12 +1,9 @@
 # STAI_OCR: Technical Write-Up
 
-**Revision 2** — supersedes the first write-up (commit `b8e4598`). Everything
-added in this revision is listed in [§2](#2-what-changed-in-this-revision).
-
 ## Table of contents
 
 1. [Overview](#1-overview)
-2. [What changed in this revision](#2-what-changed-in-this-revision)
+2. [Business case](#2-business-case)
 3. [System architecture](#3-system-architecture)
 4. [Technology stack](#4-technology-stack)
 5. [The extraction pipeline](#5-the-extraction-pipeline)
@@ -58,64 +55,98 @@ Every load-bearing figure in this document is recomputed from its source by
 anything in this repository, it is labelled **unsourced** rather than quietly
 presented as measured — see [§7.6](#76-reproducible-figures-verify_factspy).
 
-## 2. What changed in this revision
+### Where to find each thing
 
-The first write-up was accurate but incomplete: it described the pipeline and
-argued the model choice qualitatively, at a point when the project had no
-labelled dataset and therefore no accuracy number of any kind. Since then the
-dataset exists, the benchmark has been run, and the figures have been put under
-a check that fails when they drift. This revision folds all of that in.
+The brief asks a technical write-up to cover six things. They are not spread
+evenly — the evaluation is the longest part of this document because it is the
+part with the most evidence behind it.
 
-| Added | Where it lives now |
+| The brief asks for | Where it is |
 |---|---|
-| **A quantitative three-model comparison table** (accuracy, precision, recall, time, cost), which the first write-up did not have in any form | [§6.2](#62-the-three-model-comparison) |
-| **The qwen2.5-VL 7B OCR benchmark** — 10 hand-labelled Philippine receipts, 191 scored field slots, a full error taxonomy and per-receipt timings | [§7.2](#72-experiment-1-ocr-accuracy-on-10-labelled-receipts)–[§7.4](#74-line-items-the-strong-result) |
-| **The Claude Cowork comparison protocol** — the frozen prompt verbatim, the five run rules, and the fairness limits stated up front | [§7.5](#75-experiment-2-the-cowork-comparison-protocol) |
-| **A fact-verification harness** (`verify_facts.py`): 20 figures recomputed from the source tree, `ledger.db`, `mlflow.db` and the benchmark JSON; 2 claims reported as unsourced rather than passed | [§7.6](#76-reproducible-figures-verify_factspy) |
-| **The trajectory-evaluation pilot and the RCT-006 case report** — 6/7 cases pass, and the one failure is a scorer defect, documented rather than papered over | [§7.7](#77-experiment-3-agent-trajectory-evaluation) |
-| **Performance engineering results** — round-trip cuts, a 227× index win, a 24× scoped-retrieval win, and the five changes deliberately *not* made | [§8](#8-performance-engineering) |
-| **The ReAct loop specified properly** — the stop-token mechanism, the four-step budget, all five exits, and the post-loop grounding veto | [§9.1](#91-the-react-loop) |
-| **The seven guardrail gates as a table**, each with the function behind it and what it drops | [§10](#10-guardrails) |
-| **Component inventory and ownership** — fourteen components mapped onto the architecture, thirteen claimed and one declined | [§18](#18-component-inventory-and-ownership) |
-| **The cost model with its units** — eight declared inputs, two of them measured from our own traces | [§19](#19-cost-model-and-unit-of-measurement) |
-| **The build-or-buy verdict** against a $20 hosted seat, conceding three columns and claiming five | [§20](#20-build-or-buy-snag-against-a-hosted-seat) |
-| **Known limitations expanded** from five to eleven, each with the fix it implies | [§21](#21-known-limitations) |
+| Business case | [§2](#2-business-case) |
+| RRL / model selection | [§6](#6-model-selection-and-the-three-model-comparison), and [§6.1](#61-review-of-related-literature-the-option-space) in particular |
+| Methodology | [§5](#5-the-extraction-pipeline) (the pipeline) · [§10](#10-guardrails) (the guardrails) |
+| Architecture | [§3](#3-system-architecture) |
+| Experiments | [§7](#7-evaluation-experiments-datasets-and-findings) · [§8](#8-performance-engineering) |
+| Retrospective | [§18](#18-component-inventory-and-ownership) |
 
-### Corrections to the first write-up
+## 2. Business case
 
-Four figures that appeared in the first write-up or the slide deck were wrong
-and are corrected here. All four were caught by the verification harness rather
-than by review:
+### 2.1 The problem, in pesos
 
-| Was | Is | How it was caught |
-|---|---|---|
-| `ReceiptData` has 25 fields | **23 fields** | counted from the AST of `core.py` |
-| Sixteen prompt rules | **19 major rules** (28 counting sub-rules) | parsed out of the `STRICT RULES` literal in `extraction.py` |
-| qwen2.5-VL at 85 / 87 / 94 | **86.3 / 89.6 / 94.5** | rebuilt from the 191 per-field verdicts |
-| Line items "50 of 51 labelled" | **50 of 50 labelled**, 1 invented | the denominator was the model's tally, not the label file |
+A small Philippine retailer, or a household that files its own taxes,
+accumulates on the order of **300 paper receipts a month**. Keying one into a
+spreadsheet takes about **2 minutes** — find the total, find the date, read the
+vendor off faded thermal print, pick a category. That is **10 hours every
+month**, and at a bookkeeper's ₱25,000/month over 160 hours it is **₱1,562 of
+labour a month**. Every input in that chain carries its unit, and the full
+arithmetic is [§19](#19-cost-model-and-unit-of-measurement).
 
-One statement in the first write-up has **not** changed and is worth restating
-because the benchmark might suggest otherwise: the production vision model is
-still `gemma4:e4b`. `qwen2.5vl:7b` was benchmarked on the `qwen-vl-ocr-eval`
-branch and is documented in `docker-compose.yml` as a trial, not promoted to
-the default — the shared endpoint does not carry it.
+The hours are the visible cost. The expensive part is that **nobody checks the
+math**:
 
-### The deck revisions this write-up absorbs
-
-Three rounds of review feedback on the capstone deck produced most of the new
-material above. The full mapping lives in `docs/presentation/README.md`; the
-short version is the reason each new section exists:
-
-| Feedback | What it produced |
+| What goes wrong | Why it survives |
 |---|---|
-| "The proof point must be answered: how does this compare with a $20 Claude Cowork?" | [§20](#20-build-or-buy-snag-against-a-hosted-seat) |
-| "It does not have to be better outright, but the experiment design must be sound" | [§7.5](#75-experiment-2-the-cowork-comparison-protocol), the frozen protocol and its stated fairness limits |
-| "Are there specific cases where yours is better? Highlight those" | [§7.4](#74-line-items-the-strong-result), line items on thermal paper: 50 of 50 |
-| "Make sure the metrics are reliable, and prove it" | [§7.6](#76-reproducible-figures-verify_factspy), and the four corrections above |
-| "Abstract the architecture; only display the modules being discussed" | [§3](#3-system-architecture), five blocks; the file-level detail moved to [§22](#22-appendix-module-map-and-reproduction-commands) |
-| "No decision-flow / ReAct loop definition" | [§9.1](#91-the-react-loop) |
-| "Tools and guardrail integrations not illustrated" | [§9.2](#92-tools) and [§10](#10-guardrails) |
-| "No explanation of how LLMOps and Dockerization were performed" | [§7.8](#78-llmops-what-is-traced-and-how) and [§17](#17-deployment) |
+| A line is misread | the total still looks right, so nothing contradicts it |
+| VAT is added twice | on a VAT-inclusive receipt a breakdown is not an addition |
+| One purchase is entered twice | two plausible rows, months apart in the file |
+
+All three are found at filing time, months later, if at all. They are not slow
+errors, they are silent ones — and a silent error in a ledger is worth more than
+the ten hours it took to make. That is the sentence every figure in this
+document exists to answer.
+
+### 2.2 Scope: what is in, and what is deliberately out
+
+The brief asks for a proof of concept that does one thing well rather than five
+things adequately. The boundary was fixed before the code was written, and
+nothing since has been allowed to creep across it:
+
+| In | Out |
+|---|---|
+| A photographed Philippine retail receipt | Invoices, payslips, contracts |
+| Its own printed arithmetic, checked ten ways | Auto-correcting what the model read |
+| Hold the bad, file the good | Multi-user accounts and cloud sync |
+| A ledger you can ask, month after month | PDF statements, refunds |
+| A bank or card statement CSV, reconciled | Handwriting |
+
+The right-hand column is the more useful one. *Auto-correcting what the model
+read* is the tempting feature and the one that would destroy the product: a
+system that quietly nudges a figure until the receipt balances is a system whose
+ledger cannot be trusted anywhere. The rule that governs the whole pipeline —
+**transcribe, then repair, never compute** ([§5](#5-the-extraction-pipeline)) —
+is that scope decision expressed as code.
+
+### 2.3 Why an agent, and not a chat window
+
+The sanity check the brief asks for is whether ChatGPT, Claude or a search
+engine would suffice. For the reading step alone, honestly: yes, and better than
+our free model — [§20](#20-build-or-buy-snag-against-a-hosted-seat) concedes
+that in a table rather than arguing with it. The reading is not the job. Four
+things the job needs are things a chat window structurally cannot do:
+
+- **Re-photograph the paper.** When an arithmetic check fails, the pipeline
+  crops the region behind the failing sum, enlarges it, sharpens it and reads
+  that band again — at most twice, and only keeping a correction that improves
+  the receipt's own arithmetic ([§5](#5-the-extraction-pipeline)). That is a
+  loop with a stopping rule, not a longer prompt.
+- **Keep a ledger.** 17 tables, not a session. June's receipts still answer a
+  question asked in November, and answer it in SQL rather than from a context
+  window.
+- **Refuse.** **15.4%** of receipts are held for human review because the
+  numbers on the paper disagree with each other. A chat window will always
+  produce an answer; the value here is in the receipts it declines to file.
+- **Stay on the machine.** TINs, amounts and vendor names never leave the
+  host — inference is an HTTP call to `OLLAMA_HOST`, which can be localhost.
+
+And the question layer needs the same thing for the same reason: "how much did I
+spend on food this month" is a SQL query, "find the receipt with the birthday
+cake" is a retrieval, and the system has to choose, run the tool, and answer
+only from what came back. The grounding veto in
+[§10](#10-guardrails) — a figure with no tool call behind it is replaced, not
+shown — only means anything if there is a real tool observation to check the
+answer against. That is the definition of the loop, and it is why this is an
+agent.
 
 ## 3. System architecture
 
@@ -213,6 +244,43 @@ Thought → Action → Observation loop (streamed)
        ▼
 Observation fed back into the loop, grounded final answer
 ```
+
+### Where the CV model plugs in, and why it is not a tool call
+
+The vision model is **stage 3 of the extraction pipeline**, not one of the
+agent's eleven tools. That is a deliberate placement, and it is the one
+architectural decision most worth defending, so it is stated here rather than
+left to be inferred from a diagram.
+
+**The model is the product, not a feature of it.** Everything to the right of
+Extract in Figure 1 reads only what the vision model produced. `sql_ledger`
+queries rows it wrote. `search_receipts` embeds a summary composed from those
+rows. Every write tool posts a transaction against a receipt it read. The ten
+arithmetic checks, the hold decision, the confidence score and the RAG document
+are all derived from that one read. Remove the CV model and there is no ledger
+to query, no document to retrieve and nothing for the agent to be grounded in —
+which is the test of whether a component is core or decorative.
+
+**A receipt is read once, on purpose.** Reading is expensive (6 s to 5m 40s
+depending on the model and the card), lossy, and audited. The audit verdict, the
+`items_status` grade, the per-field confidence and the SHA-256 of the exact
+bytes are all recorded against that single read. If the planner could re-read a
+filed receipt whenever a question seemed to want it, the ledger would hold two
+readings of the same piece of paper with no rule about which one is true — and
+the guarantee this system sells is that a disputed figure walks back to one
+pixel, not to whichever read happened last.
+
+**The seam is the API, not the tool list.** `POST /extract` is a route like any
+other, and the pipeline behind it is what the UI, the batch path and the
+evaluation harness all call. Anything that legitimately needs a fresh read —
+including a future agent tool — calls the same function through the same
+guardrails, so the placement is a routing decision rather than a wall.
+
+The read-once rule is why the second-look machinery in
+[§5](#5-the-extraction-pipeline) lives inside the pipeline: recovery, the
+region-targeted crop and the check-driven zoom are all *the agent re-reading the
+paper*, but bounded — at most two extra calls, and a correction kept only if the
+receipt's own arithmetic improves.
 
 ### Representations, and why each one
 
@@ -391,21 +459,36 @@ The production pair (`gemma4:e4b` / `gemma4:12b`) replaced an earlier
 default of `qwen2.5vl:7b` / `qwen2.5:latest`; both pairs remain viable, and
 the `qwen2.5` pair is what a fully offline, locally-pulled setup uses.
 
-### 6.1 Why an open vision-language model at all
+### 6.1 Review of related literature: the option space
 
-The option space was four-way, and one constraint — *no labelled data, and the
-paper must not leave the machine* — decided it before accuracy was ever
-discussed:
+This subsection is the **review of related literature** the brief asks to see:
+the state-of-the-art options for reading a receipt, what each one takes in and
+gives back, when you would reach for it, and why we did not.
 
-| Option | Examples | Verdict |
+Two axes decided it, and both were settled before accuracy was ever measured —
+**does the paper leave the machine**, and **does the approach need labelled
+training data we do not have**:
+
+| Option | Examples | Input → output | When it wins | Why not here |
+|---|---|---|---|---|
+| Cloud document AI | Textract · Google Document AI · Azure Form Recognizer | image → typed key/value pairs and tables, pre-trained on receipts | You have volume, a budget, and no privacy constraint | **Leaves the machine.** A TIN and a card total go to a third party |
+| Layout transformers | LayoutLMv3 · Donut | image + token positions → labelled tokens, after fine-tuning | You have thousands of labelled documents in one layout | **Needs labelled training data.** We had none at the start, and 10 receipts now |
+| Classical OCR | Tesseract · PaddleOCR | image → plain text and bounding boxes | You need raw text, fast, offline, and will parse it yourself | Gives text, not fields. Turning boxes into `vatable_sales` is the whole problem, and it needs labels too |
+| **Open vision-language models** | **Qwen2.5-VL · Llama 3.2-V · Gemma 4** | **image + prompt → JSON conforming to a schema** | **Zero labelled data, many layouts, output shape you choose** | **This is what we run** |
+
+Only the last quadrant is both zero-shot and local, so the choice was made in
+that quadrant rather than across it. Within it the trade-off was measured rather
+than assumed — three systems, the same receipts, the same scoring rule
+([§6.2](#62-the-three-model-comparison)) — and the within-family question of
+`e4b` against `12b` is [§6.3](#63-the-within-family-trade-off-e4b-vs-12b).
+
+What the system ended up running, and at what size:
+
+| Role | Model | Parameters |
 |---|---|---|
-| Cloud document AI | Textract · Google Document AI · Azure | Leaves the machine |
-| Layout transformers | LayoutLMv3 · Donut | Needs labelled training data |
-| Classical OCR | Tesseract · PaddleOCR | Needs labelled data to reach field-level structure; leaves layout unsolved |
-| **Open vision-language models** | **Qwen2.5-VL · Llama 3.2-V · Gemma 4** | **Zero-shot, stays local** |
-
-Only the last quadrant is both zero-shot and local, which is why it is what the
-system runs.
+| Vision / OCR | `gemma4:e4b` | ~4B |
+| Planner — SQL, RAG, ReAct | `gemma4:12b` | 12B |
+| Embeddings | `nomic-embed-text` | 137M, 768-dim |
 
 ### 6.2 The three-model comparison
 
@@ -429,6 +512,13 @@ financial fields, **37.1%** line-item fields.
 
 <sup>‡</sup> Gemma's precision/recall pair is line **detection**, not field
 values, so it is not directly comparable with the qwen row.
+
+A fourth configuration was run and is on the deck: the same hosted seat driven
+with deliberate prompt engineering rather than the plain instruction, at
+**99 / 100 / 99** in 16 s. It is not given a row above because it is the same
+system as the first row under better handling, and because it moves the ceiling
+further away rather than changing what we conclude. It is subject to the same
+provenance caveat as the row it improves on.
 
 **Provenance, stated plainly.** Only the qwen row is reproducible from this
 repository — it rebuilds from `evaluation/results/raw/ocr-qwen2.5vl-7b.json`
@@ -504,6 +594,8 @@ the benchmark harness would all carry over unchanged.
 
 | Artefact | What it measures | Where |
 |---|---|---|
+| `tests/` | **771 unit and behavioural tests across 30 files** — coercion, the arithmetic audit, recovery, zoom, agent paths, expense adversarials, scope isolation, persistence, reconciliation | `evaluation/` |
+| `test_extraction.py` | 66 further tests on the extraction primitives themselves | repo root |
 | `receipts_gt_10.json` | 10 hand-labelled Philippine receipts, field by field | `evaluation/datasets/` |
 | `run_ocr_benchmark.py` | OCR accuracy / precision / recall / F1 against those labels | `evaluation/` |
 | `OCR_QWEN25VL_BENCHMARK.md` | The written result, with error taxonomy and timings | `evaluation/results/` |
@@ -859,6 +951,44 @@ The VAT check is implemented as a *warning*, not an error, so nothing stopped
 it. A tax figure equal to the whole subtotal is not a warning condition; it is
 arithmetically impossible. That is a fix, not an excuse, and it is listed in
 [§21](#21-known-limitations).
+
+### 7.10 Unit, trajectory, end-to-end — and the judge we did not build
+
+The brief names four kinds of evaluation. Three of them are here, and the fourth
+is absent on purpose:
+
+| Kind | What we run | Result |
+|---|---|---|
+| **Unit** | 837 tests — 771 in `evaluation/tests/` across 30 files, 66 in `test_extraction.py`. Coercion, the ten audit checks, recovery, zoom banding, date normalisation, agent paths, adversarial expense inputs, scope isolation, persistence, reconciliation | the suite is the regression net under every change in [§8](#8-performance-engineering) |
+| **Trajectory** | `evaluation/trajectory.py` against declared rules — required events, prohibited events, a tool-call ceiling, no repeats, a terminal state | **6 of 7 pass**; the failure is a scorer defect, root-caused in [§7.7](#77-experiment-3-agent-trajectory-evaluation) |
+| **End-to-end** | 10 labelled receipts through the whole pipeline, scored field by field ([§7.2](#72-experiment-1-ocr-accuracy-on-10-labelled-receipts)); and the frozen-protocol comparison against a hosted seat ([§7.5](#75-experiment-2-the-cowork-comparison-protocol)) | **86.3 / 89.6 / 94.5**, 0 crashes in 10 |
+| **LLM-as-judge** | none | declined — below |
+
+**Why there is no judge.** A judge model is the right instrument when there is
+no ground truth to compare against: you cannot score an essay with a regular
+expression. That is not the situation here. Every claim this system makes about
+a receipt is a claim about a number printed on a piece of paper, and we labelled
+those numbers by hand — 191 scored slots across 10 receipts, each one TP, FP, FN
+or TN under a fixed rule written down in `evaluation/SCORING_SPEC.md`.
+Substituting a model's opinion for that would be a **weaker** measurement
+wearing a more fashionable name, and it would introduce a second model whose own
+errors we would then have to characterise.
+
+Where a judge would genuinely earn its place is the one output that has no
+ground truth: the prose the agent writes back. We chose a harder guarantee
+there instead of a softer score. Rather than asking a model whether an answer
+looks well-supported, `_ungrounded_numbers` **removes** any figure that no tool
+observation produced, and the outcome is traced on every run:
+**0 ungrounded numbers across 64 traced agent runs**. A judge would have told us
+how often the agent seemed grounded; the veto tells us it could not have been
+otherwise.
+
+The decision is recorded in `evaluation/IMPLEMENTATION_BACKLOG.md` (P3-4) rather
+than made silently, and it is reversible: the trajectory harness already scores
+runs against declared rules, so a judge would slot in as one more rule type. If
+this system grew a feature whose output could not be checked against a printed
+number — a written monthly summary, say — that is the point at which it would
+need one.
 
 ## 8. Performance engineering
 
@@ -1523,6 +1653,39 @@ the system does not have.
 | **Most surprising** | Two receipts came back identical — a prompt cache on the inference server, not a misread |
 | **Hardest** | Getting a free model accurate enough that the ten checks are a safety net rather than the product |
 | **Next time** | Benchmark the models in week one, not week twelve |
+
+**What worked.** Treating the model as a reader and not a calculator was the
+decision everything else hangs off: once *transcribe, then repair, never
+compute* was a rule rather than a preference, the arithmetic audit, the hold
+gate and the deterministic cleanup all followed from it, and each one is
+testable in a way a prompt is not. Structured output as a contract turned a
+whole class of model failure into a caught guardrail error instead of a corrupt
+ledger row. And putting every load-bearing figure under `verify_facts.py` paid
+for itself immediately — it caught four numbers that were wrong on the slides,
+including one where the denominator was the model's own tally of what it thought
+it had read rather than the label file.
+
+**What was hard, beyond the model.** Three problems cost more than they should
+have, and none of them was about accuracy. The prompt cache took the longest to
+find because two identical extractions look like a model being consistent, not
+like a bug. SQLite over a Docker Desktop bind mount fails with an error message
+that names the wrong cause ("unable to open database file" for what is really a
+missing POSIX lock), and the fix — a named volume — is invisible until you know
+it. And the shared endpoint's 1600 px ceiling returns *empty content* rather
+than an error, so resolution looked like a tuning knob for far longer than it
+was one.
+
+**What we would do differently.** Benchmark in week one: the model comparison
+that decided the architecture was run in week twelve, and every "we could not
+assess this without labelled receipts" in [§8.6](#86-deliberately-not-changed)
+is a consequence of that ordering. Second, `core.py` at 5,477 lines is a fair
+criticism — the eight sections inside it are real seams and each lifts out
+behind the same function names, but that is a migration we described rather than
+performed. Third, the eval suite grew around the extraction pipeline first and
+the agent second; if the trajectory cases had existed as early as the unit
+tests, the scorer defect in [§7.7](#77-experiment-3-agent-trajectory-evaluation)
+would have surfaced while there was still time to decide the rubric question it
+raises.
 
 ## 19. Cost model and unit of measurement
 
