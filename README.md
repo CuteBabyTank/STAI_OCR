@@ -84,7 +84,7 @@ To run fully offline against a local Ollama, export all three:
                     └──────────┬──────────┘
                                │ passes
                     ┌──────────▼──────────┐
-                    │  ollama qwen2.5vl:7b  │  local vision model
+                    │  ollama gemma4:e4b   │  local vision model
                     │  (OCR extraction)   │  temperature=0, format="json"
                     └──────────┬──────────┘
                                │ raw JSON
@@ -125,7 +125,7 @@ To run fully offline against a local Ollama, export all three:
 
   Natural-language question
            │
-  ┌────────▼─────────┐   qwen2.5 reasons in a Thought → Action →
+  ┌────────▼─────────┐   gemma4:12b reasons in a Thought → Action →
   │  ReAct planner    │   Observation loop and picks a tool. Reasoning
   │  (streamed)       │   is streamed token-by-token to the UI.
   └─┬────────┬─────┬─┬┘
@@ -267,7 +267,7 @@ the technical write-up; the deck is the source of truth if they ever disagree.
 ## Features
 
 - Drag-and-drop one or many receipt images (PNG / JPG / WEBP / BMP)
-- Local OCR via the `qwen2.5vl:7b` vision model (no API key, no per-receipt cost)
+- Local OCR via the `gemma4:e4b` vision model (no API key, no per-receipt cost)
 - Faithful extraction — values are transcribed, never calculated or assumed;
   missing fields are left blank rather than guessed
 - Automatic clean-up: removes `2 @ price` notation from item names, de-duplicates
@@ -360,8 +360,7 @@ ollama pull nomic-embed-text
 > falls back to keyword matching — but retrieval quality is much better with it.
 
 > **Note:** the text model cannot read images, and `llama3.2-vision` needs a newer
-> Ollama engine than some builds ship. This app uses `qwen2.5vl:7b` for OCR, which is
-> tuned for document/invoice extraction with structured JSON output, and the text
+> Ollama engine than some builds ship. This app uses `gemma4:e4b` for OCR and the text
 > model only for the SQL agent / RAG / ReAct planner.
 >
 > `qwen2.5:latest` routes tools and summarizes numbers far more reliably than a 3B
@@ -425,17 +424,18 @@ frozen, disposable fixture the evaluation suite asserts against.
 docker compose up --build
 ```
 
-This brings up four containers:
+This brings up three containers. There is no `ollama` service: inference is
+an HTTP call out to `OLLAMA_HOST`, which is why the stack needs no GPU inside
+it.
 
-- `ollama` — pulls `qwen2.5vl:7b`, `qwen2.5:latest`, and `nomic-embed-text` automatically on first start
-- `web` — the **Aperture** UI (Next.js) at <http://localhost:8502> — a clean white
+- `web` — the **Aperture** UI (Next.js) at <http://localhost:7860> — a clean white
   dashboard with KPI stat tiles, a cashflow chart, a top-vendors breakdown, a
   budgets card with per-category monthly limits, an income panel, a slide-over
   "Scan receipts" panel (drag-and-drop multi-upload → OCR), a monthly
   past-receipts view, and a floating robot chat assistant. It calls the `api`
   service; the browser hits same-origin `/api/*`, which Next rewrites to the API
   (no CORS)
-- `api` — the REST API at <http://localhost:8001> (docs at `/docs`)
+- `api` — the REST API at <http://localhost:8000> (docs at `/docs`)
 - `mlflow` — the MLflow tracking UI at <http://localhost:5001>
   The frontend source lives in `web-next/`. The original Streamlit app
   (`receipt_processor.py`) is kept in the repo but no longer wired into the stack;
@@ -627,7 +627,7 @@ Then run `streamlit run receipt_processor.py` from a terminal as above.
 
 ## Tips for best accuracy
 
-`qwen2.5vl:7b` is an 8B local vision model — accurate, but not flawless on hard photos. For
+`gemma4:e4b` is a small local vision model — fast, but not flawless on hard photos. For
 the best results:
 
 - Use a **flat, well-lit, straight-on** photo with no shadow over the figures
@@ -645,7 +645,7 @@ the best results:
 
 1. The image passes **input guardrails** (file type/size) before anything is sent
    to the model.
-2. The image is sent to the local `qwen2.5vl:7b` model with a strict
+2. The image is sent to the local `gemma4:e4b` model with a strict
    transcription prompt (`format="json"`, `temperature=0`).
 3. The JSON response is **post-processed deterministically**: item descriptions are
    cleaned, duplicate items merged, mis-filed summary/tax lines moved to their
