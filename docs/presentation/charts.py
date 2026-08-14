@@ -103,7 +103,7 @@ def mlflow_runs() -> dict:
     for key in by_op:
         by_op[key].sort()
 
-    # Read every metric series up front — the connection closes before the
+    # Read every metric series up front, because the connection closes before the
     # caller gets a chance to ask for one.
     series: dict[str, list[float]] = defaultdict(list)
     for key, value in con.execute("select key, value from metrics").fetchall():
@@ -154,7 +154,7 @@ def latency_chart(data: dict) -> Path:
     ax.set_yticklabels(labels, fontsize=10)
     ax.set_xlabel("Wall-clock latency per call  (seconds, lower is better)")
     ax.set_ylabel("Traced operation")
-    ax.set_title("End-to-end latency by operation — 202 traced runs, shared Ollama endpoint",
+    ax.set_title("End-to-end latency by operation: 202 traced runs, shared Ollama endpoint",
                  fontsize=12, loc="left", pad=14)
     ax.legend(frameon=False, loc="upper right", fontsize=10)
     ax.set_xlim(-60, max(p90s) * 1.22)
@@ -162,7 +162,7 @@ def latency_chart(data: dict) -> Path:
 
 
 def latency_spread_chart(data: dict) -> Path:
-    """The bimodal OCR distribution — why a single median would be a lie."""
+    """The bimodal OCR distribution, and why a single median would be a lie."""
     vals = [v for _, v in data["by_op"].get("extract", [])] + \
            [v for _, v in data["by_op"].get("extract_batch", [])]
     vals = sorted(v for v in vals if v > 1.0)
@@ -182,7 +182,7 @@ def latency_spread_chart(data: dict) -> Path:
             fontsize=10, color=RED)
     ax.set_xlabel("OCR latency per page  (seconds)")
     ax.set_ylabel("Number of traced runs  (count)")
-    ax.set_title("OCR latency is bimodal, not noisy — the shared endpoint's load dominates",
+    ax.set_title("OCR latency is bimodal, not noisy: the shared endpoint's load dominates",
                  fontsize=12, loc="left", pad=12)
     return _save(fig, "chart_latency_spread.png")
 
@@ -201,7 +201,7 @@ def tool_routing_chart(data: dict) -> Path:
         ax.text(c + 0.4, i, str(c), va="center", fontsize=10, color=INK)
     ax.set_xlabel("Times selected by the ReAct planner  (tool calls)")
     ax.set_ylabel("Tool")
-    ax.set_title("Tool routing across 113 traced agent turns — grey = read, amber = write",
+    ax.set_title("Tool routing across 113 traced agent turns: grey = read, amber = write",
                  fontsize=12, loc="left", pad=12)
     ax.set_xlim(0, max(counts) * 1.16)
     return _save(fig, "chart_tools.png")
@@ -239,7 +239,7 @@ def trajectory_chart() -> tuple[Path, dict]:
     ax.set_xlabel("Cases passing the check  (% of applicable cases)")
     ax.set_ylabel("Trajectory check")
     ax.set_title(
-        f"Layer-2 trajectory evaluation — {summary['passed']}/{summary['cases']} cases pass "
+        f"Layer-2 trajectory evaluation: {summary['passed']}/{summary['cases']} cases pass "
         f"({100 * summary['pass_rate']:.0f}%)", fontsize=12, loc="left", pad=12)
     return _save(fig, "chart_trajectory.png"), summary
 
@@ -300,14 +300,14 @@ UOM = {
     "hours_per_month": 160,             # hours / month (40 h/wk x 4 wk)
     "snag_sec_per_receipt": 14.9,       # seconds / page, median of the 4 most
                                         # recent traced batch runs
-    "hold_rate": 0.154,                 # share held for review — MLflow
+    "hold_rate": 0.154,                 # share held for review, from MLflow
                                         # needs_disambiguation mean over n=39
     "review_min_per_held": 0.5,         # minutes / held receipt, human check
     "appliance_php": 60_000,            # PHP, one mini-PC with a GPU
     "amortise_months": 36,              # months
     "kwh_php": 12.50,                   # PHP / kWh, Meralco residential band
     "draw_watts": 250,                  # W under inference load
-    "saas_php_per_receipt": 5.00,       # PHP / receipt — indicative only,
+    "saas_php_per_receipt": 5.00,       # PHP / receipt, indicative only,
                                         # replace with a real quote before use
 }
 
@@ -364,15 +364,15 @@ def uom_chart() -> Path:
             va="center", fontsize=11, color=INK)
     ax.set_xlabel("Effort to process 300 receipts  (minutes per month)")
     ax.set_ylabel("Workflow")
-    ax.set_title(f"{n['hours_saved']:.1f} paid hours removed per month "
-                 f"— {n['time_factor']:.0f}× less human time", fontsize=12, loc="left", pad=12)
+    ax.set_title(f"{n['hours_saved']:.1f} paid hours removed per month, "
+                 f"{n['time_factor']:.0f}× less human time", fontsize=12, loc="left", pad=12)
     ax.legend(frameon=False, fontsize=9, loc="lower right")
     ax.set_xlim(0, 720)
     return _save(fig, "chart_uom.png")
 
 
 def breakeven_chart() -> Path:
-    """Where buying the box pays for itself — and where it honestly does not."""
+    """Where buying the box pays for itself, and where it honestly does not."""
     n = uom_numbers()
     xs = list(range(0, 1001, 10))
     manual = [x * n["per_receipt_manual"] for x in xs]
@@ -399,7 +399,7 @@ def breakeven_chart() -> Path:
     ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f"₱{v:,.0f}"))
     ax.set_xlabel("Volume processed  (receipts per month)")
     ax.set_ylabel("Total cost of the workflow  (₱ per month)")
-    ax.set_title("Cost of processing receipts, by volume — including the case against us",
+    ax.set_title("Cost of processing receipts, by volume, including the case against us",
                  fontsize=12, loc="left", pad=12)
     ax.legend(frameon=False, fontsize=9, loc="upper left")
     ax.set_ylim(0, 5200)

@@ -1,17 +1,21 @@
-"""Build the Snag Final Capstone slide deck (STAI100) — minimal edition.
+"""Build the Snag Final Capstone slide deck (STAI100), minimal edition.
 
 Run:  python docs/presentation/build_deck.py
 Out:  docs/presentation/Snag_Final_Capstone.pptx
 
-Twenty slides for a fifteen-minute talk. Two rules hold the deck together:
+Twenty-four slides for a fifteen-minute talk. Three rules hold the deck together:
 
 1. One idea per slide, three blocks at most. If a slide needs a fourth block it
    is two slides, and if the fourth block is not worth a slide it is not worth
    saying.
-2. Structure comes from whitespace, a hairline and type weight — never from a
-   box. A shape is drawn only when it carries meaning (a lane, a cylinder, a
-   bar, the one highlighted quadrant). Colour is one accent plus two semantic
-   marks, and both appear as ink, not as fill.
+2. Structure comes from whitespace, a hairline and type weight, never from a
+   box. A shape is drawn only when it carries meaning (an architecture block, a
+   cylinder, a bar, the one highlighted quadrant). Colour is one accent plus two
+   semantic marks, and both appear as ink, not as fill.
+3. The architecture is drawn once, abstractly, and referred to everywhere after:
+   five blocks on a fixed x grid (STAGES, stage_x, gap_x) and a header minimap
+   that lights the one block a slide is about. File names and line counts are
+   code spec, and code spec is the appendix.
 
 All geometry is written in inches as plain floats; E() converts to whole EMUs
 at the XML boundary.
@@ -34,7 +38,7 @@ OUT = HERE / "Snag_Final_Capstone.pptx"
 
 AGENT = "Snag"
 TAGLINE = "every peso traced back to the paper it came from"
-LLM_LINE = ("Gemma 4 — e4b vision (OCR) + 12B text (planner)  ·  nomic-embed-text 137M  ·  "
+LLM_LINE = ("Gemma 4: e4b vision (OCR) + 12B text (planner)  ·  nomic-embed-text 137M  ·  "
             "served through Ollama")
 
 TEAM = [
@@ -43,7 +47,22 @@ TEAM = [
     ("Fraser Sim", "RAG · Memory · Tools"),
     ("Aaron Go", "SQL · ReAct · LLMOps"),
 ]
-SECTIONS = ["Use case", "RRL", "Architecture", "Components", "Findings", "Wrap-up"]
+SECTIONS = ["Use case", "RRL", "Architecture", "Components", "Findings", "Wrap-up",
+            "Appendix"]
+
+# The system, abstracted to five blocks. This is the deck's spine: slide 7 draws
+# them full size, slide 8 hangs the dataflow off the same x positions, slide 9
+# hangs all fourteen components off them, and minimap() shrinks them into the
+# header so a component slide can light one block and ignore the rest. Anything
+# finer-grained than these five (file names, line counts, core.py's sections)
+# is code spec and lives in the appendix.
+STAGES = [("Capture", "upload · camera · chat"),
+          ("Extract", "read, repair, decide"),
+          ("Ledger", "one SQLite file"),
+          ("Agent", "plan, then act"),
+          ("Answer", "typed, cited, traced")]
+BANDS = ["API", "Models", "Traces"]     # what runs under or across all five
+STAGE_W, STAGE_GAP = 2.05, 0.3458       # five blocks + four gaps == FULL
 
 # One ink ramp, one accent, two semantic marks. Green and red are never fills
 # and never decoration: they only ever say "this passed" / "this failed".
@@ -72,7 +91,7 @@ TOP = 2.00                  # first line of content
 FOOT = 6.98
 
 # Live repository data. Since the deck moved to the model-comparison table, the
-# only figure still pulled from here is the traced-run count on the API slide —
+# only figure still pulled from here is the traced-run count on the API slide,
 # but charts.py keeps writing the rest, so a slide can reach for them again.
 facts = json.loads((ASSETS / "facts.json").read_text(encoding="utf-8"))
 
@@ -86,7 +105,7 @@ BLANK = prs.slide_layouts[6]
 def E(v):
     """Inches in, whole EMUs out.
 
-    Geometry must reach the XML as integers — a float in an `off`/`ext`
+    Geometry must reach the XML as integers: a float in an `off`/`ext`
     attribute produces a file PowerPoint refuses to open. Every primitive
     rounds through here, so callers can do arithmetic freely.
     """
@@ -187,7 +206,7 @@ def chev(sl, x, y, *, color=FAINT, size=13):
 
 
 def mark(sl, x, y, kind, *, size=12):
-    """A tick or a cross. Ink only — no disc, no fill."""
+    """A tick or a cross. Ink only: no disc, no fill."""
     color, glyph = (GOOD, "✓") if kind == "ok" else (BAD, "✗")
     return text(sl, x, y, 0.30, 0.26, glyph, size=size, bold=True, color=color)
 
@@ -241,7 +260,7 @@ def picture(sl, name, x, y, max_w, max_h, *, center=True):
 
 def stat(sl, x, y, w, value, cap, *, color=INK, vs=30, cs=10.5,
          align=PP_ALIGN.LEFT, sub=None):
-    """A number and what it counts. No box — the size is the emphasis."""
+    """A number and what it counts. No box: the size is the emphasis."""
     text(sl, x, y, w, 0.52, value, size=vs, bold=True, color=color, align=align,
          font=FONT, line=1.0)
     text(sl, x, y + vs * 0.0145 + 0.06, w, 0.26, cap, size=cs, color=BODY, align=align)
@@ -274,7 +293,7 @@ def bullets(sl, x, y, w, items, *, size=11.5, gap=0.16, color=BODY, mc=ACCENT,
     """A bullet list.
 
     An item is either a string or a (lead, rest) pair, which sets the lead in ink
-    and the rest in body — the shape an explanation wants: the claim, then why.
+    and the rest in body, the shape an explanation wants: the claim, then why.
 
     A wrapped bullet has to push the next one down, and python-pptx cannot measure
     text, so the line count is estimated from the character count: Segoe UI runs
@@ -330,7 +349,7 @@ def note(sl, y, lead, body, *, keep=False, **_ignored):
 
     A footnote earns `keep=True` only if it states something a grader could
     challenge you on. The calls that do not render stay in the source so the
-    point is not lost — they just do not compete with the slide.
+    point is not lost; they just do not compete with the slide.
     """
     if not keep:
         return
@@ -371,12 +390,53 @@ def slide(section=None, title=None, kicker=None):
     return sl
 
 
+# ------------------------------------------------------------------ the map
+
+def stage_x(i):
+    """Left edge of block i of the architecture. Fixed for the whole deck."""
+    return M + i * (STAGE_W + STAGE_GAP)
+
+
+def gap_x(i):
+    """Centre of the hand-off between block i and block i+1."""
+    return stage_x(i) + STAGE_W + STAGE_GAP / 2
+
+
+def minimap(sl, on):
+    """The architecture from slide 7, shrunk into the header.
+
+    The section nav says where we are in the talk; this says where we are in the
+    system. Exactly one block is lit, because the slide it heads is about that
+    block and nothing else on the diagram, which is the whole point of drawing
+    the architecture abstractly in the first place.
+    """
+    lit = {on} if isinstance(on, str) else set(on)
+    items = [n for n, _ in STAGES] + BANDS
+    w = [0.055 * len(n) + 0.10 for n in items]
+    total = sum(w) + 0.20 * (len(items) - 2) + 0.22
+    x = W - M - total
+    vrule(sl, x - 0.34, 0.40, 0.21, color=HAIR)     # this nav is not that nav
+    for i, name in enumerate(items):
+        active = name.lower() in lit
+        text(sl, x, 0.39, w[i] + 0.5, 0.20, name, size=8,
+             bold=active, color=INK if active else FAINT, track=20)
+        if active:
+            rule(sl, x, 0.625, w[i] - 0.08, color=ACCENT, t=0.015)
+        x += w[i]
+        if i == len(STAGES) - 1:            # the divider: stages | substrate
+            vrule(sl, x + 0.10, 0.42, 0.17, color=HAIR)
+            x += 0.22
+        elif i < len(items) - 1:
+            chev(sl, x + 0.10, 0.40, size=9)
+            x += 0.20
+
+
 # ============================================================ 1 · TITLE
 s = slide()
 text(s, M, 1.35, 8.0, 1.1, "Snag", size=64, bold=True, color=INK, line=1.0)
 rect(s, M, 2.62, 1.10, 0.030, fill=ACCENT, edge=None, shape=MSO_SHAPE.RECTANGLE)
 text(s, M, 2.92, 11.0, 0.4,
-     [[("A receipt-ledger agent — ", {"color": INK}),
+     [[("A receipt-ledger agent: ", {"color": INK}),
        (TAGLINE, {"color": ACCENT})]], size=17)
 text(s, M, 3.36, 11.8, 0.4, LLM_LINE, size=10.5, color=MUTED)
 
@@ -386,7 +446,7 @@ chain(s, 4.20, [("Photo", "any receipt"), ("Read", "local vision model"),
       ts=13.5, ss=9.5, accent=(1,))
 
 # Tech-stack marks: small brand-coloured monogram tiles, sized as real logo
-# slots — drop a PNG on top of a tile in PowerPoint and it lines up.
+# slots. Drop a PNG on top of a tile in PowerPoint and it lines up.
 STACK = [("N", "Next.js", RGBColor(0x11, 0x11, 0x11)),
          ("F", "FastAPI", RGBColor(0x05, 0x99, 0x8B)),
          ("O", "Ollama", RGBColor(0x2B, 0x2B, 0x2B)),
@@ -464,7 +524,7 @@ for x, glyph, head_txt, colr, items in [
 
 statement(s, 5.75,
           "A chat window cannot re-photograph the paper, keep a ledger, or stay on your machine.",
-          "That is the sanity check the brief asks for — and the reason this is an agent.",
+          "That is the sanity check the brief asks for, and the reason this is an agent.",
           size=15)
 
 
@@ -512,7 +572,7 @@ s = slide("Use case", "What it costs", "Per month, for the same 300 receipts")
 
 for i, (v, cap, sub, col) in enumerate([
         ("₱1,562", "one pair of hands", "10 hours of typing, every month", INK),
-        ("₱1,160", "a Claude subscription", "$20 a month — and you wire it up yourself", INK),
+        ("₱1,160", "a Claude subscription", "$20 a month, and you wire it up yourself", INK),
         ("₱99", "Snag", "set up, running, nothing to configure", ACCENT)]):
     x = M + C3 * i
     rule(s, x, TOP - 0.06, C3 - 0.40, color=ACCENT if col is ACCENT else HAIR,
@@ -524,14 +584,14 @@ for t in ["16× cheaper than typing them", "12× cheaper than a subscription",
           "0 minutes of setup"]:
     x = chip(s, x, 3.60, t, size=9.5, h=0.30)
 
-statement(s, 4.40, "Cheaper — and already running.",
+statement(s, 4.40, "Cheaper, and already running.",
           "The convenient option is the one people keep using. A subscription you have to "
           "configure is a subscription that sits unused by week two; a box that already "
           "works is one the bookkeeper opens on Monday.")
 
 note(s, 5.90, "Unit of measurement:",
      "all three are pesos per month for 300 receipts. The subscription line converts "
-     "$20 at ₱58 = $1 — confirm the rate before you quote it.", keep=True)
+     "$20 at ₱58 = $1. Confirm the rate before you quote it.", keep=True)
 
 
 # ============================================================ 6 · RRL
@@ -574,145 +634,174 @@ note(s, 6.24, "The trade-off we recorded rather than resolved:",
 
 
 # ============================================================ 7 · ARCHITECTURE
-s = slide("Architecture", "System architecture")
+s = slide("Architecture", "System architecture",
+          "Five blocks, one door, one local model server. Every slide after this "
+          "lights one block and leaves the rest alone.")
 
-for lab, top, h in [("Browser", 1.90, 0.86), ("Services", 2.94, 1.62),
-                    ("Models & storage", 4.74, 1.62)]:
-    rect(s, M, top, FULL, h, fill=WASH, edge=None, radius=0.02)
-    eyebrow(s, M + 0.14, top + 0.09, 3.0, lab, size=8)
+# --- the client, and the door in front of everything else --------------------
+eyebrow(s, M, 2.12, 2.2, "the client")
+rule(s, stage_x(1), 2.02, W - M - stage_x(1), color=INK, t=0.012)
+text(s, stage_x(1), 2.12, W - M - stage_x(1), 0.30,
+     [[("API", {"bold": True, "color": INK}),
+       ("   80 typed routes. Browser, demo and eval harness all enter here. "
+        "Nothing has a privileged path in.", {"color": MUTED})]], size=11)
 
-for i, (t, sub) in enumerate([("Scanner", "drag · camera · PDF"),
-                              ("Dashboard", "cashflow · budgets"),
-                              ("Chat panel", "streams its thinking"),
-                              ("Review table", "confidence badges")]):
-    card(s, 1.12 + i * 2.52, 2.15, 2.34, 0.50, t, sub, ts=11.5, ss=8.5)
-chip(s, 11.55, 2.26, "Next.js", fill=PAPER, size=8.5, h=0.26)
+# --- the five blocks. The ledger is a cylinder because it is the one that keeps
+for i, (name, sub) in enumerate(STAGES):
+    card(s, stage_x(i), 2.62, STAGE_W, 1.04, name, sub, ts=14, ss=9,
+         shape=MSO_SHAPE.FLOWCHART_MAGNETIC_DISK if i == 2
+         else MSO_SHAPE.ROUNDED_RECTANGLE)
+    if i < len(STAGES) - 1:
+        chev(s, gap_x(i), 3.02, size=15)
 
-for i, (t, sub, on) in enumerate([("Web server", "same-origin proxy", False),
-                                  ("API server", "80 routes", False),
-                                  ("Extraction", "guardrails · audit", True),
-                                  ("Agent runtime", "ReAct · 11 tools", True),
-                                  ("Finance", "balances", False)]):
-    card(s, 0.94 + i * 2.32, 3.18, 2.18, 0.56, t, sub, ts=11.5, ss=8.5,
-         edge=ACCENT if on else HAIR, tc=ACCENT if on else INK)
-for i, (t, sub) in enumerate([("Reconciler", "no model"), ("Index builder", "embeds"),
-                              ("Query planner", "text-to-SQL"),
-                              ("Tracer", "one run per call")]):
-    card(s, 0.94 + i * 2.90, 3.88, 2.66, 0.50, t, sub, ts=11, ss=8.5, fill=PAPER)
+# --- what they all call ------------------------------------------------------
+for i in (1, 3):
+    cx = stage_x(i) + STAGE_W / 2
+    arrow(s, cx, 3.72, cx, 4.02, color=ACCENT)
+    text(s, cx + 0.10, 3.74, 0.9, 0.2, "infer", size=8, color=ACCENT)
 
-store(s, 1.00, 4.98, 2.10, 1.12, "Ledger", "17 tables · persists")
-store(s, 3.36, 4.98, 1.80, 1.12, "Vectors", "embeddings")
-rect(s, 5.50, 4.98, 5.15, 1.12, fill=ACCENT_SOFT, edge=None, radius=0.03)
-eyebrow(s, 5.68, 5.06, 4.7, "local inference server", color=ACCENT, size=8)
+bx = stage_x(1)
+bw = stage_x(3) + STAGE_W - bx
+rect(s, bx, 4.06, bw, 0.92, fill=ACCENT_SOFT, edge=None, radius=0.03)
+eyebrow(s, bx + 0.20, 4.14, 5.0, "local inference · nothing leaves the machine",
+        color=ACCENT, size=8)
 for i, (n, tag) in enumerate([("Vision", "gemma4:e4b"), ("Planner", "gemma4:12b"),
                               ("Embed", "nomic-embed-text")]):
-    card(s, 5.66 + i * 1.62, 5.34, 1.52, 0.62, n, tag, ts=10, ss=7.5, edge=None,
-         fill=PAPER, sc=ACCENT)
-store(s, 10.88, 4.98, 1.60, 1.12, "Traces", "every call")
+    card(s, bx + 0.20 + i * 2.14, 4.40, 2.02, 0.48, n, tag, ts=10.5, ss=8,
+         edge=None, fill=PAPER, sc=ACCENT)
 
-for x in (2.20, 4.52, 6.84, 9.16):
-    arrow(s, x, 2.70, x, 3.14)
-for x, lab, col in [(2.05, "persist", FAINT), (4.30, "index", FAINT),
-                    (8.05, "infer", ACCENT), (11.68, "trace", FAINT)]:
-    arrow(s, x, 4.42, x, 4.92, color=col)
-    text(s, x + 0.10, 4.50, 0.9, 0.2, lab, size=8, color=MUTED if col is FAINT else col)
+# --- what watches all of it --------------------------------------------------
+rule(s, M, 5.24, FULL)
+text(s, M, 5.34, FULL, 0.30,
+     [[("Traces", {"bold": True, "color": INK}),
+       ("   every model call opens one MLflow run: latency, tokens, audit codes, "
+        "grounding. A failed call is still a run.", {"color": MUTED})]], size=11)
 
-note(s, 6.32, "One command brings up three services —",
-     "web · API · traces. Inference is an HTTP call out to OLLAMA_HOST, so no GPU is "
-     "needed inside the stack. Slide 16 has the compose file.", keep=True)
+note(s, 5.94, "Five blocks, not fourteen boxes:",
+     "the files behind them are in the appendix. One command brings the stack up "
+     "(web · API · traces), and inference is an HTTP call out to OLLAMA_HOST, so no "
+     "GPU is needed inside it. Slide 16 has the compose file.", keep=True)
 
 
 # ============================================================ 8 · DATAFLOW
-s = slide("Architecture", "Dataflow — one receipt, five shapes",
-          "Every hand-off changes representation on purpose. Here is each one, and why.")
+s = slide("Architecture", "Dataflow: the same five blocks, four hand-offs",
+          "Each arrow changes representation on purpose. The shape is named on the "
+          "arrow it rides; the reason sits under it.")
 
-FLOW = [("Bytes", "the upload"), ("JSON", "what the model emits"),
-        ("Objects", "Pydantic ReceiptData"), ("Rows", "SQLite receipts + line_items"),
-        ("JSON", "the API response")]
-fw = chain(s, TOP, FLOW, ts=14, ss=9.5, accent=(1, 2))
-for i, fn in [(1, "validate_input()"), (2, "validate_output()")]:
-    text(s, M + fw * i - 0.85, TOP + 0.62, 1.70, 0.24, fn, size=8.5, font=MONO,
-         color=ACCENT, align=PP_ALIGN.CENTER)
-text(s, M, TOP + 0.94, FULL, 0.24,
-     "_traced_run()  wraps the whole path — one MLflow run per call", size=8.5,
-     font=MONO, color=MUTED, align=PP_ALIGN.CENTER)
+for i, (name, _sub) in enumerate(STAGES):
+    card(s, stage_x(i), 2.06, STAGE_W, 0.68, name, ts=13,
+         shape=MSO_SHAPE.FLOWCHART_MAGNETIC_DISK if i == 2
+         else MSO_SHAPE.ROUNDED_RECTANGLE)
+    if i < len(STAGES) - 1:
+        arrow(s, stage_x(i) + STAGE_W + 0.03, 2.40, stage_x(i + 1) - 0.03, 2.40,
+              color=ACCENT)
 
-rule(s, M, 3.30, FULL)
-eyebrow(s, M, 3.50, 6.0, "why each shape")
-bullets(s, CL, 3.86, HALF, [
-    ("Bytes", "EXIF-rotated, long edge capped at 1,600 px, a PDF split into pages — "
-     "normalised once, so single and batch see identical pixels"),
-    ("JSON", "the call sets format=\"json\", temperature 0 and asks for logprobs — a "
-     "fixed shape we can parse, diff and score"),
-    ("Objects", "ReceiptData / LineItem, 25 optional typed fields. A value that was "
-     "not printed is None, never \"\" and never 0"),
-], gap=0.22)
-bullets(s, CR, 3.86, HALF, [
-    ("Rows", "receipts + line_items, 17 tables in all — the ledger answers questions "
-     "months later, and that is what SQL is for"),
-    ("JSON out", "FastAPI response models: browser, demo and eval harness all read "
-     "the same shape"),
-    ("Vectors", "one sentence per receipt in receipt_docs, 768-dim — the side branch "
-     "retrieval reads, written after the save"),
-], gap=0.22)
+HANDOFFS = [
+    ("Bytes", "validate_input()",
+     "EXIF-rotated, long edge capped at 1,600 px, so single and batch see the same "
+     "pixels"),
+    ("Objects", "ReceiptData · 23 fields",
+     "Typed and optional. A value that was not printed is None, never \"\" and "
+     "never 0"),
+    ("Rows", "receipts + line_items",
+     "17 tables. SQL is what still answers the question three months later"),
+    ("JSON", "FastAPI response_model",
+     "Browser, demo and eval harness all read the one shape"),
+]
+for i, (shape_name, fn, why) in enumerate(HANDOFFS):
+    cx = gap_x(i)
+    vrule(s, cx, 2.78, 0.18, color=FAINT)
+    x = cx - 1.10
+    rule(s, x, 3.00, 2.20, color=ACCENT, t=0.020)
+    text(s, x, 3.10, 2.20, 0.28, shape_name, size=13.5, bold=True, color=ACCENT)
+    text(s, x, 3.38, 2.30, 0.24, fn, size=8.5, font=MONO, color=MUTED)
+    text(s, x, 3.62, 2.20, 0.58, why, size=9.5, color=BODY, line=1.28)
 
-note(s, 6.06, "Nothing computes a figure on the way through:",
-     "each shape is a re-representation of what the paper said, which is why a "
-     "disputed number can be walked back to the pixel it came from.", keep=True)
+rule(s, M, 4.42, FULL)
+eyebrow(s, M, 4.58, 7.0, "two shapes that never travel the main line")
+for i, (nm, meta, why) in enumerate([
+        ("JSON", "format=\"json\" · temperature 0",
+         "what the vision model emits: a fixed shape we can parse, diff and score"),
+        ("Vectors", "receipt_docs · 768-dim",
+         "one sentence per receipt, written after the save; it is what retrieval reads")]):
+    y = 4.88 + i * 0.42
+    text(s, M, y, 1.05, 0.28, nm, size=12, bold=True, color=ACCENT)
+    text(s, M + 1.05, y + 0.04, 3.25, 0.24, meta, size=9, font=MONO, color=MUTED)
+    text(s, M + 4.38, y + 0.02, 7.25, 0.26, why, size=10.5, color=BODY)
+
+statement(s, 5.78, "Nothing computes a figure on the way through.",
+          "Each shape is a re-representation of what the paper said, which is why a "
+          "disputed number walks back to the pixel it came from.")
 
 
-# ============================================================ 9 · MODULES
-s = slide("Architecture", "Modules, and what lives in core.py",
-          "One file carries the pipeline. These are its eight sections — and the "
-          "honest cost of that.")
+# ============================================================ 9 · COMPONENTS MAP
+s = slide("Components", "Fourteen components, on the map",
+          "The brief asks for eight. Every one of ours, the block it lives in, who "
+          "owns it, and the slide it gets.")
 
-vrule(s, MID, TOP, 3.60)
-eyebrow(s, CL, TOP, 5.0, "the modules")
-bullets(s, CL, TOP + 0.36, HALF, [
-    ("api.py  ·  1,029", "80 HTTP routes and their typed request models. No business "
-     "logic — every route calls into core, finance or reconciliation"),
-    ("core.py  ·  5,477", "the extraction pipeline, the ledger and the agent"),
-    ("extraction.py  ·  2,041", "deterministic repair: numbers, dates, placeholders, "
-     "item coverage, the arithmetic audit. No model calls"),
-    ("finance.py  ·  1,891", "accounts, transactions, plans, budgets"),
-    ("reconciliation.py  ·  839", "statement matching — no model anywhere in it"),
-    ("web-next/", "the Next.js UI, plus four route handlers that proxy to the API"),
-], gap=0.16, size=11)
+# Same five columns, same x positions as the architecture. A component is not a
+# new topic arriving from nowhere: it is a part of a block already on screen.
+COMPONENTS = {
+    "Capture": [("6", "Chat UI", "NA", "22")],
+    "Extract": [("14", "CV / DS ★", "ALL", "10"),
+                ("1", "Prompt engineering", "CA", "11"),
+                ("5", "Guardrails", "CA", "11"),
+                ("2", "Disambiguation", "FS", "10")],
+    "Ledger":  [("4", "Memory", "FS", "13"),
+                ("3", "RAG", "FS", "13"),
+                ("12", "Advanced RAG", "FS", "13")],
+    "Agent":   [("9", "ReAct / tools", "AG", "12"),
+                ("10", "SQL + critique", "AG", "13"),
+                ("11", "Multi-agent", "", None)],
+    "Answer":  [("7", "API endpoint", "NA", "14")],
+}
+for i, (block, _sub) in enumerate(STAGES):
+    x = stage_x(i)
+    text(s, x, 2.02, STAGE_W, 0.28, block, size=12.5, bold=True, color=INK)
+    rule(s, x, 2.32, STAGE_W - 0.18, color=INK, t=0.012)
+    cy = 2.44
+    for num, name, who, ref in COMPONENTS[block]:
+        dim, star = who == "", name.endswith("★")
+        text(s, x, cy, 0.36, 0.26, num, size=11, bold=True,
+             color=FAINT if dim else (ACCENT if star else INK))
+        text(s, x + 0.38, cy, STAGE_W - 0.34, 0.26, name, size=10.5, bold=star,
+             color=FAINT if dim else BODY)
+        text(s, x + 0.38, cy + 0.23, STAGE_W - 0.34, 0.22,
+             [[(who, {"bold": True, "color": BAD if dim else FAINT}),
+               ("   slide " + ref if ref else "   not claimed",
+                {"color": ACCENT if ref else BAD})]], size=8.5, track=30)
+        cy += 0.52
 
-eyebrow(s, CR, TOP, 5.0, "inside core.py, in this order", color=ACCENT)
-cy = TOP + 0.36
-rule(s, CR, cy, HALF)
-for num, name, what in [
-        ("1", "Structured outputs", "the Pydantic schema"),
-        ("2", "Guardrails", "input and output validation"),
-        ("3", "Disambiguation", "audit, then hold or file"),
-        ("4", "LLMOps", "MLflow-wrapped extraction"),
-        ("5", "Memory", "the SQLite ledger"),
-        ("6", "SQL agent", "text-to-SQL + scope isolation"),
-        ("7", "RAG", "embeddings and retrieval"),
-        ("8", "ReAct agent", "tools, loop, agent guardrails")]:
-    text(s, CR, cy + 0.10, 0.3, 0.26, num, size=10, bold=True, color=FAINT)
-    text(s, CR + 0.34, cy + 0.08, 2.1, 0.26, name, size=11.5, bold=True, color=INK)
-    text(s, CR + 2.50, cy + 0.10, 2.8, 0.26, what, size=10.5, color=MUTED)
-    cy += 0.42
-    rule(s, CR, cy, HALF)
+rule(s, M, 4.74, FULL, color=INK, t=0.012)
+eyebrow(s, M, 4.86, 3.0, "under all five")
+text(s, W - M - 4.4, 4.86, 4.4, 0.22,
+     "CA CLARENCE · FS FRASER · NA NATHANIEL · AG AARON", size=8.5, bold=True,
+     color=MUTED, align=PP_ALIGN.RIGHT, track=40)
+for i, (num, name, who, ref) in enumerate([("8", "LLMOps", "AG", "15"),
+                                           ("13", "Evals", "AG", "17")]):
+    x = 3.30 + i * 2.40
+    text(s, x, 4.82, 0.36, 0.26, num, size=11, bold=True, color=INK)
+    text(s, x + 0.34, 4.82, 1.3, 0.26, name, size=11, color=BODY)
+    text(s, x + 1.42, 4.84, 1.2, 0.24,
+         [[(who, {"bold": True, "color": FAINT}),
+           ("  slide " + ref, {"color": ACCENT})]], size=8.5, track=30)
 
-statement(s, 5.86, "5,477 lines in one file is a fair criticism.",
-          "The eight sections are why it still navigates, and they are the seams: "
-          "each one lifts into its own module behind the same function names, and "
-          "nothing above it changes.", size=15)
+statement(s, 5.56, "Thirteen claimed, one declined, and five of them get a slide.",
+          "★ 14 CV/DS first, then 5 guardrails, 9 ReAct, 10 SQL, 7 API. #11 is grey "
+          "because one planner over eleven tools is not several collaborating agents.")
 
 
 # ============================================================ 10 · COMPONENT 14
-s = slide("Architecture", "Component 14 — one receipt, ten stages",
+s = slide("Components", "Component 14: one receipt, ten stages",
           "The vision model is stage 3. Stages 5 and 6 exist because it is not perfect.")
+minimap(s, "extract")
 
-STAGES = [("1", "Guardrail", 0), ("2", "Normalise", 0), ("3", "Read", 1),
-          ("4", "Clean up", 0), ("5", "Recover", 1), ("6", "Re-read", 1),
-          ("7", "Validate", 0), ("8", "Audit", 0), ("9", "Hold?", 0),
-          ("10", "Save", 0)]
+PIPELINE = [("1", "Guardrail", 0), ("2", "Normalise", 0), ("3", "Read", 1),
+            ("4", "Clean up", 0), ("5", "Recover", 1), ("6", "Re-read", 1),
+            ("7", "Validate", 0), ("8", "Audit", 0), ("9", "Hold?", 0),
+            ("10", "Save", 0)]
 sw = FULL / 5
-for i, (num, t, on) in enumerate(STAGES):
+for i, (num, t, on) in enumerate(PIPELINE):
     col, row = i % 5, i // 5
     x, y = M + col * sw, TOP + row * 0.92
     rule(s, x, y, sw - 0.30, color=ACCENT if on else HAIR, t=0.020 if on else 0.009)
@@ -721,55 +810,20 @@ for i, (num, t, on) in enumerate(STAGES):
     text(s, x, y + 0.38, sw - 0.30, 0.3, t, size=14, bold=True, color=INK)
 
 rule(s, M, 4.00, FULL)
-eyebrow(s, M, 4.20, 9.0, "the re-read loop — what stages 5 and 6 do", color=ACCENT)
+eyebrow(s, M, 4.20, 9.0, "the re-read loop: what stages 5 and 6 do", color=ACCENT)
 chain(s, 4.56, [("Audit fails",), ("Pick the band",), ("Crop + enlarge",),
                 ("Ask again",), ("Keep only if better",)], ts=12.5, tc=BODY)
 
-statement(s, 5.40, "Transcribe, then repair — never compute.",
+statement(s, 5.40, "Transcribe, then repair. Never compute.",
           "Only stage 6 may overwrite a figure, and only if the receipt's own "
           "arithmetic improves. The audit, the review gate, the ledger and every "
           "answer come from what it read.")
 
 
-# ============================================================ 11 · COMPONENTS
-s = slide("Components", "13 of 14 components",
-          "The brief asks for 8. Owner initials under each.")
-
-initials = {"C": "CA", "F": "FS", "N": "NA", "A": "AG", "-": "not claimed", "*": "ALL"}
-tiles = [("1", "Prompt engineering", "C"), ("2", "Disambiguation", "F"),
-         ("3", "RAG", "F"), ("4", "Memory", "F"), ("5", "Guardrails", "C"),
-         ("6", "Chat UI", "N"), ("7", "API endpoint", "N"), ("8", "LLMOps", "A"),
-         ("9", "ReAct / tools", "A"), ("10", "SQL + critique", "A"),
-         ("11", "Multi-agent", "-"), ("12", "Advanced RAG", "F"),
-         ("13", "Evals", "A"), ("14", "CV / DS ★", "*")]
-tw = FULL / 7
-for i, (num, name, who) in enumerate(tiles):
-    col, row = i % 7, i // 7
-    x, y = M + col * tw, TOP + 0.10 + row * 1.48
-    dim, star = who == "-", who == "*"
-    rule(s, x, y, tw - 0.24, color=ACCENT if star else HAIR, t=0.020 if star else 0.009)
-    text(s, x, y + 0.16, 1.0, 0.32, num, size=16, bold=True,
-         color=FAINT if dim else (ACCENT if star else INK))
-    text(s, x, y + 0.55, tw - 0.24, 0.44, name, size=10.5, bold=star, line=1.15,
-         color=FAINT if dim else BODY)
-    text(s, x, y + 1.00, tw - 0.24, 0.22, initials[who], size=8.5, bold=True,
-         color=BAD if dim else FAINT, track=40)
-
-rule(s, M, 5.00, FULL)
-x = M
-for who, name in [("C", "CA — Clarence"), ("F", "FS — Fraser"), ("N", "NA — Nathaniel"),
-                  ("A", "AG — Aaron"), ("*", "ALL — CV/DS ★")]:
-    x = chip(s, x, 5.22, name, fill=ACCENT_SOFT if who == "*" else WASH,
-             color=ACCENT if who == "*" else BODY, size=9.5, h=0.30)
-
-note(s, 6.06, "Why #11 is grey:",
-     "one planner over ten tools is not several collaborating agents. We do not claim it.",
-     keep=True)
-
-
-# ============================================================ 12 · GUARDRAILS
+# ============================================================ 11 · GUARDRAILS
 s = slide("Components", "Guardrails",
-          "Seven gates on the way in — and the sixteen prompt rules behind them.")
+          "Seven gates on the way in, and the nineteen prompt rules behind them.")
+minimap(s, "extract")
 
 gates = [("File check", "validate_input", "wrong type\n> 25 MB"),
          ("Schema check", "validate_output", "malformed\nreply"),
@@ -804,13 +858,14 @@ for i, (tag, before, after) in enumerate([
     text(s, x, 5.24, 0.3, 0.3, "→", size=12, color=FAINT)
     text(s, x + 0.36, 5.24, C3 - 0.7, 0.3, after, size=13.5, bold=True, color=INK)
 
-note(s, 6.10, "0 ungrounded numbers across 64 traced agent runs —",
+note(s, 6.10, "0 ungrounded numbers across 64 traced agent runs:",
      "every figure the agent stated appeared in a tool observation first.", keep=True)
 
 
-# ============================================================ 13 · REACT LOOP
+# ============================================================ 12 · REACT LOOP
 s = slide("Components", "The ReAct loop",
-          "Reason and act, interleaved — and every way out of it.")
+          "Reason and act, interleaved, and every way out of it.")
+minimap(s, "agent")
 
 # --- the definition the whole slide exists to make explicit ------------------
 text(s, M, TOP - 0.06, FULL, 0.62,
@@ -827,7 +882,7 @@ text(s, M, TOP - 0.06, FULL, 0.62,
 text(s, M, TOP + 0.56, FULL, 0.3,
      [[("Generation is stopped at the token ", {"color": MUTED}),
        ("Observation:", {"font": MONO, "color": INK}),
-       (" — the model can never write its own observation. That is what makes this a "
+       (", so the model can never write its own observation. That is what makes this a "
         "loop over tools and not a monologue about them.", {"color": MUTED})]],
      size=11)
 
@@ -870,7 +925,7 @@ text(s, 10.25, 4.48, 2.3, 0.3, "Forced final", size=12, bold=True, color=ACCENT)
 rule(s, M, 4.94, FULL)
 eyebrow(s, M, 5.14, 8.0, "five ways out of the loop, and one veto after it")
 bullets(s, CL, 5.48, HALF, [
-    ("Final Answer", "the model emits one — the ordinary exit"),
+    ("Final Answer", "the model emits one, the ordinary exit"),
     ("Clarification", "it asks the user instead of guessing; no tool has run"),
     ("No action, no answer", "the reply is taken as the answer rather than looping"),
 ], gap=0.10, size=11)
@@ -883,9 +938,10 @@ bullets(s, CR, 5.48, HALF, [
 ], gap=0.10, size=11)
 
 
-# ============================================================ 14 · TOOLS
+# ============================================================ 13 · TOOLS
 s = slide("Components", "Eleven tools, one dispatcher",
           "Four that read, seven that write. KNOWN_TOOLS is the single source of truth.")
+minimap(s, "agent")
 
 vrule(s, MID, TOP - 0.06, 1.90)
 eyebrow(s, CL, TOP - 0.06, 5.0, "4 read  ·  nothing changes")
@@ -899,7 +955,7 @@ bullets(s, CL, TOP + 0.30, HALF, [
 eyebrow(s, CR, TOP - 0.06, 5.0, "7 write  ·  money moves", color=ACCENT)
 bullets(s, CR, TOP + 0.30, HALF, [
     ("add_expense · log_spend", "the second is the path for \"I spent 200\" with no "
-     "account named — Cash by product decision, never a guess"),
+     "account named: Cash by product decision, never a guess"),
     ("add_income · transfer_money", "one balance up, or two balances at once"),
     ("record_activity", "progress against a goal, debt or receivable"),
     ("create_plan · update_plan", "a plan is created or edited; no money moves"),
@@ -920,13 +976,14 @@ for q, tool_name, path in [
 
 note(s, 6.24, "One shared spine for every write:",
      "amount · account · category · date · duplicate. No tool carries its own guards, "
-     "and scope is a different database rather than a WHERE clause — a model that "
+     "and scope is a different database rather than a WHERE clause, so a model that "
      "forgets the filter cannot leak.", keep=True)
 
 
-# ============================================================ 15 · API
-s = slide("Components", "The API — one surface, three clients",
+# ============================================================ 14 · API
+s = slide("Components", "The API: one surface, three clients",
           "Typed in, typed out. The UI has no privileged path into the system.")
+minimap(s, "api")
 
 vrule(s, 7.90, TOP - 0.06, 3.90)
 
@@ -947,7 +1004,7 @@ for path, io in [
 eyebrow(s, 8.25, TOP - 0.06, 4.2, "who calls it", color=ACCENT)
 bullets(s, 8.25, TOP + 0.26, 4.23, [
     ("The web UI", "the browser calls same-origin /api/*, which Next rewrites to the "
-     "api service — no CORS to configure, and four route handlers forward the "
+     "api service, so there is no CORS to configure, and four route handlers forward the "
      "multipart upload and the SSE stream"),
     ("The eval harness", "hits the same routes with no privileged path, so what it "
      "measures is what a user gets"),
@@ -966,9 +1023,10 @@ note(s, 6.28, "The UI is a client, not the system:",
      "deliverable and not an afterthought.", keep=True)
 
 
-# ============================================================ 16 · LLMOPS
-s = slide("Components", "LLMOps — how the tracing is wired",
+# ============================================================ 15 · LLMOPS
+s = slide("Components", "LLMOps: how the tracing is wired",
           "MLflow 3.14, one run per model call, and the same code path when it is off.")
+minimap(s, "traces")
 
 vrule(s, MID, TOP, 3.70)
 eyebrow(s, CL, TOP, 5.0, "the wiring")
@@ -976,11 +1034,11 @@ bullets(s, CL, TOP + 0.36, HALF, [
     ("Backend", "sqlite:////app/mlflow.db, experiment stai_ocr_receipts, UI served by "
      "the mlflow container on :5001"),
     ("One run per call", "named extract_*, extract_batch_*, sql_agent_*, rag_*, "
-     "agent_* — the timestamp in the name makes any single call findable"),
+     "agent_*. The timestamp in the name makes any single call findable"),
     ("Three helpers", "_traced_run() opens the run; _mlog_metric() and _mlog_param() "
      "no-op when tracing is off, so the pipeline reads identically either way"),
     ("Self-healing", "a run left dangling by an abandoned request is cleared before "
-     "the next one opens — batch workers open runs from threads"),
+     "the next one opens; batch workers open runs from threads"),
 ], gap=0.22, size=11)
 
 eyebrow(s, CR, TOP, 5.0, "what lands on a run", color=ACCENT)
@@ -991,7 +1049,7 @@ bullets(s, CR, TOP + 0.36, HALF, [
      "clarified · expenses_written"),
     ("SQL and RAG", "final_sql · retried · rows_returned · sources_retrieved · "
      "used_embeddings"),
-    ("Every path", "error 0/1 and error_message — a failed call is still a run, which "
+    ("Every path", "error 0/1 and error_message. A failed call is still a run, which "
      "is the only way a failure rate means anything"),
 ], gap=0.22, size=11)
 
@@ -1001,8 +1059,8 @@ note(s, 6.10, "Two knobs, both environment:",
      keep=True)
 
 
-# ============================================================ 17 · DOCKER
-s = slide("Components", "Docker — one command, three services",
+# ============================================================ 16 · DOCKER
+s = slide("Components", "Docker: one command, three services",
           "docker compose up. No Python, no Node, no model to install first.")
 
 chain(s, TOP, [("web", "Next.js  ·  :7860"), ("api", "FastAPI  ·  :8000"),
@@ -1019,9 +1077,9 @@ eyebrow(s, CL, 3.24, 5.0, "what each one is")
 bullets(s, CL, 3.60, HALF, [
     ("web", "Next.js on :3000, published on 7860. API_BASE is passed as a build arg "
      "and a runtime env, because the /api/* rewrite is baked at build time while the "
-     "route handlers read it at run time — they have to agree"),
+     "route handlers read it at run time, and they have to agree"),
     ("api", "python:3.11-slim, uvicorn api:app, healthcheck on /health"),
-    ("mlflow", "ghcr.io/mlflow/mlflow:v3.14.0 on :5001 — 5000 is taken by AirPlay on "
+    ("mlflow", "ghcr.io/mlflow/mlflow:v3.14.0 on :5001, because 5000 is taken by AirPlay on "
      "macOS"),
 ], gap=0.22, size=11)
 
@@ -1031,7 +1089,7 @@ bullets(s, CR, 3.60, HALF, [
      "Windows or Mac bind mount; ledger_data is a real Linux filesystem, seeded once "
      "from the repo's ledger.db"),
     ("Models are environment, not code", "OLLAMA_HOST, VISION_MODEL, AGENT_MODEL, "
-     "EMBED_MODEL — trialling qwen2.5vl:7b changed no source"),
+     "EMBED_MODEL. Trialling qwen2.5vl:7b changed no source"),
     ("Start order is declared", "web waits on api, api waits on mlflow, so the first "
      "trace has somewhere to land"),
 ], gap=0.22, size=11)
@@ -1041,7 +1099,7 @@ note(s, 6.24, "No GPU inside the container:",
      "on a laptop and the demo does not need the lab machine.", keep=True)
 
 
-# ============================================================ 18 · MODELS MEASURED
+# ============================================================ 17 · MODELS MEASURED
 s = slide("Findings", "Three models, measured",
           "The same receipts through each one. Accuracy, speed, and what it costs.")
 
@@ -1054,10 +1112,10 @@ rule(s, M, TOP + 0.22, FULL, color=INK, t=0.012)
 MODELS = [
     ("Claude Cowork", "hosted  ·  the ceiling we measured against",
      "97%", "94%", "98%", "15 s", "$20 / month", INK),
-    ("qwen2.5-VL 7B", "local  ·  self-hosted on our own machine",
-     "85%", "87%", "94%", "5–6 min *", "free", INK),
+    ("qwen2.5-VL 7B", "local  ·  10 labelled receipts, field by field",
+     "86.3%", "89.6%", "94.5%", "5m 40s *", "free", INK),
     ("Gemma", "free API  ·  what the system runs today",
-     "51.7% †", "92.5% ‡", "69.8% ‡", "21.7 s", "free", ACCENT),
+     "51.7%", "92.5%", "69.8%", "21.7 s", "free", ACCENT),
 ]
 y = TOP + 0.38
 for i, (name, sub, acc, prec, rec, t_each, cost, col) in enumerate(MODELS):
@@ -1069,15 +1127,102 @@ for i, (name, sub, acc, prec, rec, t_each, cost, col) in enumerate(MODELS):
     if i < len(MODELS) - 1:      # the last rule is the footnote's own
         rule(s, M, y, FULL)
 
-note(s, 5.52, "†‡ Gemma is measured field by field —",
-     "51.7% on headers, 47% on financial fields, 37.1% on line-item fields. The 92.5% / "
-     "69.8% pair is line detection, not field values.", keep=True)
-note(s, 6.20, "* qwen ran on a card with less VRAM than the model needs,",
-     "so part of every page fell back to the CPU. That is where the five to six minutes "
-     "goes — not the model.", keep=True)
+note(s, 5.70, "* qwen ran on a card with less VRAM than the model needs,",
+     "so four fifths of every page fell back to the CPU. That is where the minutes go, "
+     "not the model. Mean of 10 receipts; the spread is 2m 29s to 11m 26s.", keep=True)
 
 
-# ============================================================ 19 · TRACE
+# ============================================================ 18 · THE NUMBERS CHECK OUT
+# Four rows, not twenty-five. The script prints every check; a slide that
+# reprinted them would be a log, and nobody reads a log from six metres. What
+# earns the space is the shape of the evidence: one command, the count, four
+# figures with the thing each was rebuilt from, and the two we cannot check.
+s = slide("Findings", "Every number here is recomputed",
+          "Not typed from memory. One command rebuilds each figure from the source "
+          "and fails if a slide disagrees.")
+
+eyebrow(s, M, TOP - 0.04, 4.0, "run it yourself")
+text(s, M, TOP + 0.24, 7.2, 0.36, "python docs/presentation/verify_facts.py",
+     size=14.5, font=MONO, color=INK)
+stat(s, 8.50, TOP - 0.10, 3.98, "20 / 20", "checks pass, none fail",
+     align=PP_ALIGN.RIGHT, vs=32, cs=11.5, sub="3 more report, 2 cannot be checked")
+
+eyebrow(s, M, 3.24, 8.0, "what it rebuilds, and out of what")
+y = 3.58
+for val, what in [
+        ("86.3 / 89.6 / 94.5",
+         "accuracy, precision and recall, summed back up from 191 individual field "
+         "verdicts on 10 labelled receipts, then checked against the run's own total"),
+        ("50 of 50",
+         "line items found, counted against the label file rather than against the "
+         "model's own tally of what it thinks it read"),
+        ("0 in 64",
+         "ungrounded numbers, over every traced agent run in mlflow.db. A figure no "
+         "tool returned never reached a user"),
+        ("80 · 11 · 17 · 768",
+         "routes, tools, ledger tables and embedding width, read out of the source "
+         "tree and the database itself, never typed onto the slide")]:
+    rule(s, M, y - 0.14, FULL)
+    text(s, M, y, 3.00, 0.36, val, size=15, bold=True, color=ACCENT)
+    text(s, M + 3.20, y + 0.02, 8.45, 0.46, what, size=11.5, color=BODY, line=1.25)
+    y += 0.62
+
+note(s, 5.98, "The two it will not pass:",
+     "the Claude Cowork and Gemma rows are our own runs, held outside the repository. "
+     "The script reports those as unsourced rather than as passing. Cowork's protocol "
+     "is the next slide.", keep=True)
+
+
+# ============================================================ 19 · HOW WE RAN COWORK
+# The prompt is here verbatim because a comparison is only worth the instructions
+# both sides were given. It is the experimental control, not implementation
+# detail, which is why it sits in the talk and not in the appendix with the
+# module map. The rules beside it are the ones that stop a comparison from
+# quietly becoming a demo of the system you built.
+s = slide("Findings", "How we ran Cowork",
+          "The same case package, the same output schema, and a prompt frozen before "
+          "the first run.")
+
+vrule(s, MID, TOP - 0.06, 3.86)
+
+eyebrow(s, CL, TOP - 0.06, 5.0, "the fixed prompt, word for word")
+rect(s, CL, TOP + 0.26, HALF, 1.86, fill=WASH, edge=None, radius=0.02)
+text(s, CL + 0.20, TOP + 0.40, HALF - 0.40, 1.60,
+     "You are reconciling receipt-derived expenses against the provided bank or "
+     "credit-card statement transactions. Use only the supplied case files and "
+     "metadata. For each statement transaction and relevant receipt, return one JSON "
+     "object that conforms exactly to the attached reconciliation output schema. "
+     "Preserve unknown or unreadable values as null, identify ambiguity with "
+     "requires_review, and do not invent unsupported totals, merchants, dates, or "
+     "matches. Do not use information from outside the case package. Return JSON only.",
+     size=8.5, font=MONO, color=INK, line=1.40)
+eyebrow(s, CL, 4.30, 5.0, "attached with it")
+text(s, CL, 4.58, HALF, 0.5,
+     "the frozen output schema, the case metadata, the receipt images, and the same "
+     "validated CSV statement Snag was given. No labels, no other system's answer.",
+     size=11, color=BODY, line=1.30)
+
+eyebrow(s, CR, TOP - 0.06, 5.0, "the rules that keep it a test", color=ACCENT)
+bullets(s, CR, TOP + 0.30, HALF, [
+    ("A fresh session per case", "so no earlier case can colour a later one"),
+    ("No coaching", "a clarification question is preserved as the answer and scored, "
+     "never answered mid-run"),
+    ("One retry, technical only", "an upload failure or an outage. Never because the "
+     "answer came back weak or unfavourable"),
+    ("Raw output is what scores", "any human correction is a separate, separately "
+     "timed record"),
+    ("The clock starts at submission", "and stops at the first schema-valid response, "
+     "the terminal error, or the timeout"),
+], gap=0.18, size=11)
+
+note(s, 6.02, "We wrote the fairness limits down too:",
+     "different upload flows, different OCR, and a hosted build that can change under "
+     "us. That bounds what a single benchmark can claim about either system, and it is "
+     "in evaluation/COWORK_PROTOCOL.md rather than left for a grader to raise.",
+     keep=True)
+
+
+# ============================================================ 20 · TRACE
 s = slide("Findings", "One full reasoning trace", "Case RCT-006")
 
 vrule(s, 8.20, TOP, 3.40)
@@ -1086,7 +1231,7 @@ rule(s, M, y, 7.00)
 for lab, body_txt, col in [
         ("User", "What is the capital of France?", INK),
         ("Thought", "Not this user's money. My scope says no.", ACCENT),
-        ("Action", "none — no tool was called", MUTED),
+        ("Action", "none, no tool was called", MUTED),
         ("Final", "\"I'm not sure how to answer that.\"", GOOD)]:
     eyebrow(s, M, y + 0.22, 1.3, lab, color=col)
     text(s, M + 1.45, y + 0.16, 5.4, 0.36, body_txt, size=13, color=INK)
@@ -1094,7 +1239,7 @@ for lab, body_txt, col in [
     rule(s, M, y, 7.00)
 
 statement(s, y + 0.34, "Refusing is a decision, not a failure to answer.",
-          "The planner reached a final answer without calling a single tool — which is "
+          "The planner reached a final answer without calling a single tool, which is "
           "exactly what the scope lock is for.", size=15)
 
 eyebrow(s, 8.60, TOP, 3.9, "what the guardrail did", color=ACCENT)
@@ -1113,8 +1258,8 @@ text(s, 8.60, cy + 0.40, 3.9, 1.2,
      bold=True, color=ACCENT, line=1.35)
 
 
-# ============================================================ 20 · OUTPUTS
-s = slide("Findings", "It works — and where it doesn't",
+# ============================================================ 21 · OUTPUTS
+s = slide("Findings", "It works, and where it doesn't",
           "Ten checks on every receipt. Three failures caught, one filed.")
 
 good = [("Pepper Lunch", "₱545.00", "VAT-inclusive: a breakdown is not an addition"),
@@ -1140,12 +1285,12 @@ for i, (name, what, verdict, col, kind) in enumerate(bad):
     text(s, x, 4.88, C3 - 0.40, 0.3, verdict, size=10.5, bold=True, color=col, track=80)
 
 statement(s, 5.60, "The one we missed",
-          "The VAT check is a warning, not an error — so nothing stopped it. A tax figure "
+          "The VAT check is a warning, not an error, so nothing stopped it. A tax figure "
           "equal to the whole subtotal should be an error. That is a fix, not an excuse.",
           size=15, tone=BAD)
 
 
-# ============================================================ 21 · LIMITATIONS
+# ============================================================ 22 · LIMITATIONS
 s = slide("Findings", "What we cannot claim", "Six of them, each with its fix")
 
 for i, (name, effect, fix) in enumerate([
@@ -1169,7 +1314,53 @@ note(s, 6.10, "A limitation you disclose is a limitation.",
      "One a grader finds is a defect.", keep=True)
 
 
-# ============================================================ 22 · TEAM & RETRO
+# ============================================================ 23 · BUILD OR BUY
+# The proof point the whole talk exists to answer: against a $20 seat, where does
+# this land? Conceding first is deliberate. A verdict slide that only lists wins
+# reads as a sales sheet; one that gives the other side its three best columns
+# and still lands five is an argument. Every claim on the right carries the
+# figure behind it, because "more private" without a number is an adjective.
+s = slide("Findings", "Snag against a $20 seat",
+          "The same receipts, two systems. What we concede, what we win, and what "
+          "we would actually recommend.")
+
+vrule(s, MID, TOP - 0.06, 3.30)
+
+eyebrow(s, CL, TOP - 0.06, 5.0, "what the seat does better", color=MUTED)
+bullets(s, CL, TOP + 0.30, HALF, [
+    ("A format nobody has seen", "a hosted frontier model wins here; our own header "
+     "fields sit at 82.2%"),
+    ("Speed", "15 s a receipt against our 5m 40s, and ours is a 4 GB laptop card "
+     "running four fifths of the work on the CPU"),
+    ("Nothing to install", "a seat is a login. Snag is a compose file, a model pull "
+     "and a machine that stays on"),
+], gap=0.42, size=11, marker="✗", mc=BAD)
+
+eyebrow(s, CR, TOP - 0.06, 5.0, "what a seat cannot do at any price", color=ACCENT)
+bullets(s, CR, TOP + 0.30, HALF, [
+    ("The paper never leaves the machine", "TINs and amounts stay on your disk; "
+     "inference is a call to OLLAMA_HOST"),
+    ("Every figure traces to a tool call", "0 ungrounded numbers in 64 traced runs; "
+     "a figure no tool returned is replaced"),
+    ("It holds what it cannot verify", "15.4% held for review, because the receipt's "
+     "own arithmetic disagreed"),
+    ("It keeps the ledger", "17 tables, not a session. June's receipts still answer "
+     "the question in November"),
+    ("Line items on thermal paper", "50 of 50 labelled lines found, including nine "
+     "near-identical rows and a sideways photo"),
+], gap=0.16, size=11, marker="✓", mc=GOOD)
+
+statement(s, 5.30, "The seat reads better. It does not keep your books.",
+          "So the recommendation is the hybrid, not the win: let a hosted model read a "
+          "format nobody has seen, and keep the audit, the hold, the ledger and the "
+          "trace on a machine you own.")
+
+note(s, 6.36, "The Cowork column is our own hands-on test:",
+     "not a frozen-protocol run. The contract for a full head to head is in "
+     "evaluation/BENCHMARK_CONTRACT.md.", keep=True)
+
+
+# ============================================================ 24 · TEAM & RETRO
 s = slide("Wrap-up", "Who built what",
           "Two components each, at minimum. Component 14 is owned by all four.")
 
@@ -1192,7 +1383,7 @@ y = 4.16
 rule(s, M, y, FULL)
 for lab, body_txt, on in [
         ("Most surprising",
-         "Two receipts came back identical — a prompt cache, not a misread", True),
+         "Two receipts came back identical: a prompt cache, not a misread", True),
         ("Hardest", "Getting a free model accurate enough that the checks are a safety "
          "net, not the product", True),
         ("Next time", "Benchmark the models in week one, not week twelve", False)]:
@@ -1202,7 +1393,7 @@ for lab, body_txt, on in [
     rule(s, M, y, FULL)
 
 
-# ============================================================ 23 · DEMO
+# ============================================================ 25 · DEMO
 s = slide("Wrap-up", "Live demo", "Five steps, in this order")
 
 steps = ["Scan a receipt", "Show a held one", "Ask for a number",
@@ -1217,7 +1408,7 @@ for i, t in enumerate(steps):
 rule(s, M, 4.05, FULL)
 eyebrow(s, M, 4.26, 5.4, "disclosed up front", color=ACCENT)
 text(s, M, 4.56, 5.3, 0.7,
-     "Shared endpoint. If it is down we switch to a recording — and say so as we switch.",
+     "Shared endpoint. If it is down we switch to a recording, and say so as we switch.",
      size=12.5, color=BODY, line=1.35)
 
 eyebrow(s, CR, 4.26, 5.0, "where to look")
@@ -1231,8 +1422,8 @@ note(s, 5.90, "The demo is the argument.", "Everything before this slide was set
      keep=True)
 
 
-# ============================================================ 24 · CLOSE
-s = slide("Wrap-up", "Take away four things")
+# ============================================================ 26 · CLOSE
+s = slide("Wrap-up", "Take away five things")
 
 for i, (t, sub) in enumerate([
         ("The CV model is the product",
@@ -1240,17 +1431,72 @@ for i, (t, sub) in enumerate([
         ("₱99 a month, already set up",
          "16× cheaper than typing them · 12× cheaper than a subscription you configure"),
         ("Three models, measured the same way",
-         "97 / 94 / 98 hosted · 85 / 87 / 94 local · every figure on one slide"),
+         "97 / 94 / 98 hosted · 86.3 / 89.6 / 94.5 local, on 10 labelled receipts"),
         ("We found our own failures",
          "and wrote each one down with its fix")]):
     x = M + (i % 2) * 6.05
-    y = TOP + (i // 2) * 1.40
+    y = TOP + (i // 2) * 1.30
     rule(s, x, y, 5.30, color=ACCENT if i == 0 else HAIR, t=0.020 if i == 0 else 0.009)
     text(s, x, y + 0.22, 5.3, 0.4, t, size=16.5, bold=True, color=INK)
     text(s, x, y + 0.62, 5.3, 0.45, sub, size=11.5, color=MUTED, line=1.25)
 
-rect(s, M, 5.40, 0.80, 0.022, fill=ACCENT, edge=None, shape=MSO_SHAPE.RECTANGLE)
-text(s, M, 5.66, FULL, 0.5, "Questions?", size=24, bold=True, color=INK)
+# The fifth runs full width because it is the answer to the question the whole
+# talk was set: measured against the thing you would otherwise buy, what is this?
+rule(s, M, 4.60, FULL, color=ACCENT, t=0.020)
+text(s, M, 4.82, FULL, 0.4, "Buy the reading. Own the ledger.", size=16.5, bold=True,
+     color=INK)
+text(s, M, 5.22, FULL, 0.45,
+     "A $20 seat reads an unfamiliar receipt better. Everything after the read, the "
+     "audit, the hold, the ledger and the trace, belongs on a machine you own.",
+     size=11.5, color=MUTED, line=1.25)
+
+rect(s, M, 5.95, 0.80, 0.022, fill=ACCENT, edge=None, shape=MSO_SHAPE.RECTANGLE)
+text(s, M, 6.21, FULL, 0.5, "Questions?", size=24, bold=True, color=INK)
+
+
+# ============================================================ 27 · APPENDIX · MODULES
+# The code spec. It answers "where does this actually live", which is a question
+# worth answering when asked and a distraction when volunteered, so it sits
+# after "Questions?" rather than between the architecture and the components.
+s = slide("Appendix", "Modules, and what lives in core.py",
+          "Which file holds each block of the architecture, and the honest cost of "
+          "one file holding three of them.")
+
+vrule(s, MID, TOP, 3.60)
+eyebrow(s, CL, TOP, 5.0, "the modules")
+bullets(s, CL, TOP + 0.36, HALF, [
+    ("api.py  ·  1,029", "80 HTTP routes and their typed request models. No business "
+     "logic; every route calls into core, finance or reconciliation"),
+    ("core.py  ·  5,477", "the extraction pipeline, the ledger and the agent"),
+    ("extraction.py  ·  2,041", "deterministic repair: numbers, dates, placeholders, "
+     "item coverage, the arithmetic audit. No model calls"),
+    ("finance.py  ·  1,891", "accounts, transactions, plans, budgets"),
+    ("reconciliation.py  ·  839", "statement matching, no model anywhere in it"),
+    ("web-next/", "the Next.js UI, plus four route handlers that proxy to the API"),
+], gap=0.16, size=11)
+
+eyebrow(s, CR, TOP, 5.0, "inside core.py, in this order", color=ACCENT)
+cy = TOP + 0.36
+rule(s, CR, cy, HALF)
+for num, name, what in [
+        ("1", "Structured outputs", "the Pydantic schema"),
+        ("2", "Guardrails", "input and output validation"),
+        ("3", "Disambiguation", "audit, then hold or file"),
+        ("4", "LLMOps", "MLflow-wrapped extraction"),
+        ("5", "Memory", "the SQLite ledger"),
+        ("6", "SQL agent", "text-to-SQL + scope isolation"),
+        ("7", "RAG", "embeddings and retrieval"),
+        ("8", "ReAct agent", "tools, loop, agent guardrails")]:
+    text(s, CR, cy + 0.10, 0.3, 0.26, num, size=10, bold=True, color=FAINT)
+    text(s, CR + 0.34, cy + 0.08, 2.1, 0.26, name, size=11.5, bold=True, color=INK)
+    text(s, CR + 2.50, cy + 0.10, 2.8, 0.26, what, size=10.5, color=MUTED)
+    cy += 0.42
+    rule(s, CR, cy, HALF)
+
+statement(s, 5.86, "5,477 lines in one file is a fair criticism.",
+          "The eight sections are why it still navigates, and they are the seams: "
+          "each one lifts into its own module behind the same function names, and "
+          "nothing above it changes.", size=15)
 
 
 prs.save(OUT)
